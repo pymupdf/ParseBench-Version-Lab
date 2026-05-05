@@ -36,8 +36,7 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     ),
     "teds_struct": MetricInfo(
         "TEDS-Struct (All)",
-        "TEDS structure-only variant. Compares table HTML tree structure while ignoring "
-        "cell text content entirely.",
+        "TEDS structure-only variant. Compares table HTML tree structure while ignoring cell text content entirely.",
     ),
     "teds_struct_predicted": MetricInfo(
         "TEDS-Struct (Predicted)",
@@ -128,8 +127,7 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     ),
     "header_cell_count": MetricInfo(
         "Header Cell Count",
-        "Ratio of predicted header cells to expected. Penalizes both missing and extra "
-        "header cells symmetrically.",
+        "Ratio of predicted header cells to expected. Penalizes both missing and extra header cells symmetrically.",
     ),
     "header_grits": MetricInfo(
         "Header GriTS",
@@ -137,13 +135,11 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     ),
     "header_content_bag": MetricInfo(
         "Header Content Bag",
-        "Bag-of-cells exact content overlap: measures how many header cell texts match "
-        "regardless of position.",
+        "Bag-of-cells exact content overlap: measures how many header cell texts match regardless of position.",
     ),
     "header_perfect": MetricInfo(
         "Header Perfect",
-        "Binary metric: 1.0 if the header structure matches the ground truth exactly, "
-        "0.0 otherwise.",
+        "Binary metric: 1.0 if the header structure matches the ground truth exactly, 0.0 otherwise.",
     ),
     "header_structure": MetricInfo(
         "Header Structure",
@@ -167,8 +163,7 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     ),
     "header_block_relative_position": MetricInfo(
         "Header Block Relative Position",
-        "Product of proximity (nearest-edge distance) and direction (cosine similarity) "
-        "between matched header blocks.",
+        "Product of proximity (nearest-edge distance) and direction (cosine similarity) between matched header blocks.",
     ),
     # ── Parse: structural consistency ──
     "structural_consistency": MetricInfo(
@@ -252,8 +247,7 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     # ── Parse: rule-based ──
     "rule_pass_rate": MetricInfo(
         "Rule Pass Rate",
-        "Fraction of test rules that pass for each example: passed / total across all "
-        "rule types.",
+        "Fraction of test rules that pass for each example: passed / total across all rule types.",
     ),
     # ── Parse: rule subtypes ──
     "chart_data_point": MetricInfo(
@@ -262,8 +256,7 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     ),
     "order": MetricInfo(
         "Order",
-        "Pass rate for reading order rules, checking that elements appear in the "
-        "expected sequence.",
+        "Pass rate for reading order rules, checking that elements appear in the expected sequence.",
     ),
     "is_bold": MetricInfo(
         "Is Bold",
@@ -287,8 +280,7 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     ),
     "missing_sentence": MetricInfo(
         "Missing Sentence",
-        "Pass rate for missing sentence rules. Checks that expected sentences "
-        "appear in the output.",
+        "Pass rate for missing sentence rules. Checks that expected sentences appear in the output.",
     ),
     "missing_specific_sentence": MetricInfo(
         "Missing Specific Sentence",
@@ -300,28 +292,23 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     ),
     "missing_word": MetricInfo(
         "Missing Word",
-        "Pass rate for missing word rules. Checks that expected words appear "
-        "in the output.",
+        "Pass rate for missing word rules. Checks that expected words appear in the output.",
     ),
     "too_many_sentence_occurence": MetricInfo(
         "Too Many Sentence Occurence",
-        "Pass rate for sentence frequency rules. Penalizes when sentences appear "
-        "more times than expected.",
+        "Pass rate for sentence frequency rules. Penalizes when sentences appear more times than expected.",
     ),
     "too_many_word_occurence": MetricInfo(
         "Too Many Word Occurence",
-        "Pass rate for word frequency rules. Penalizes when words appear more "
-        "times than expected.",
+        "Pass rate for word frequency rules. Penalizes when words appear more times than expected.",
     ),
     "unexpected_sentence": MetricInfo(
         "Unexpected Sentence",
-        "Pass rate for unexpected sentence rules. Penalizes extra sentences not "
-        "in the ground truth.",
+        "Pass rate for unexpected sentence rules. Penalizes extra sentences not in the ground truth.",
     ),
     "unexpected_word": MetricInfo(
         "Unexpected Word",
-        "Pass rate for unexpected word rules. Penalizes extra words not in the "
-        "ground truth.",
+        "Pass rate for unexpected word rules. Penalizes extra words not in the ground truth.",
     ),
     "table_adjacent_down": MetricInfo(
         "Table Adjacent Down",
@@ -484,8 +471,7 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     # ── Layout detection: attribution ──
     "af1": MetricInfo(
         "Attribution F1",
-        "Harmonic mean of LAP and LAR. Measures overall content attribution "
-        "accuracy in spatial regions.",
+        "Harmonic mean of LAP and LAR. Measures overall content attribution accuracy in spatial regions.",
     ),
     "lap": MetricInfo(
         "Local Attribution Precision",
@@ -505,13 +491,11 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     ),
     "AP50": MetricInfo(
         "AP@50",
-        "Average Precision at IoU threshold 0.50. Measures detection accuracy "
-        "with a lenient overlap requirement.",
+        "Average Precision at IoU threshold 0.50. Measures detection accuracy with a lenient overlap requirement.",
     ),
     "AP75": MetricInfo(
         "AP@75",
-        "Average Precision at IoU threshold 0.75. Measures detection accuracy "
-        "with a strict overlap requirement.",
+        "Average Precision at IoU threshold 0.75. Measures detection accuracy with a strict overlap requirement.",
     ),
     "mean_f1": MetricInfo(
         "Mean F1",
@@ -525,23 +509,19 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
     ),
     "layout_localization_rule_pass_rate": MetricInfo(
         "Layout Localization Rule Pass Rate",
-        "Pass rate for bounding box localization rules. Checks spatial accuracy "
-        "of predicted element positions.",
+        "Pass rate for bounding box localization rules. Checks spatial accuracy of predicted element positions.",
     ),
     "layout_classification_rule_pass_rate": MetricInfo(
         "Layout Classification Rule Pass Rate",
-        "Pass rate for class label prediction rules. Checks whether predicted "
-        "element types match ground truth.",
+        "Pass rate for class label prediction rules. Checks whether predicted element types match ground truth.",
     ),
     "layout_attribution_rule_pass_rate": MetricInfo(
         "Layout Attribution Rule Pass Rate",
-        "Pass rate for content attribution rules. Checks whether predicted blocks "
-        "contain the correct text content.",
+        "Pass rate for content attribution rules. Checks whether predicted blocks contain the correct text content.",
     ),
     "layout_reading_order_pass_rate": MetricInfo(
         "Layout Reading Order Pass Rate",
-        "Pass rate for reading order rules. Checks whether layout elements are "
-        "ordered correctly.",
+        "Pass rate for reading order rules. Checks whether layout elements are ordered correctly.",
     ),
     # ── QA ──
     "qa_answer_match": MetricInfo(
@@ -560,6 +540,7 @@ METRIC_DEFINITIONS: dict[str, MetricInfo] = {
 # ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
+
 
 def display_name(metric_key: str) -> str:
     """Return human-friendly display name for a metric.
