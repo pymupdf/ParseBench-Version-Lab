@@ -3,7 +3,7 @@
 This module re-exports all rule classes and helpers from the split submodules
 for backward compatibility. New code should import directly from the
 specific submodule (rules_base, rules_text, rules_bag, rules_formatting,
-rules_table, rules_chart).
+rules_table, rules_chart, rules_form).
 """
 
 # Base class, helpers, and factory
@@ -58,6 +58,11 @@ from parse_bench.evaluation.metrics.parse.rules_chart import (  # noqa: F401
     normalize_number_string,
     numbers_match,
     numeric_similarity,
+)
+
+# Form rules
+from parse_bench.evaluation.metrics.parse.rules_form import (  # noqa: F401
+    FormFieldRule,
 )
 
 # Formatting rules
