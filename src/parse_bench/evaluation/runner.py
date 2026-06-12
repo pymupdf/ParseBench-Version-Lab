@@ -54,6 +54,55 @@ if TYPE_CHECKING:
     from parse_bench.schemas.parse_output import ParseOutput
 
 
+def _is_skipped_result(result: EvaluationResult) -> bool:
+    """Distinguish a legitimately-skipped result from a genuine failure.
+
+    Both carry ``success=False``. A skip is a case the provider was never
+    meant to be scored on (e.g. a cross-eval page for which it produced no
+    layout data); a failure is a case it was meant to handle but errored on.
+    Only failures should count as 0 in the aggregate denominator.
+    """
+    return bool(result.error and "No layout data" in result.error)
+
+
+def _is_infra_failure(result: EvaluationResult) -> bool:
+    """Failure caused by the evaluation harness, not by the provider's output.
+
+    Evaluator crashes and async task errors still count as failures in the
+    summary, but they must not zero-pad the provider's scores in
+    ``_aggregate_metrics`` — an evaluator bug or transient harness error
+    should not move the leaderboard.
+    """
+    if not result.error:
+        return False
+    return result.error.startswith(("Worker error:", "Evaluation error:", "Task execution error:"))
+
+
+# Diagnostic metrics that are counts or lower-is-better rates. Padding a
+# synthetic 0 for a failed example (see _aggregate_metrics) would be
+# meaningless for a count, and for a lower-is-better rate it would make
+# failures *improve* the aggregate. Metrics carrying "count" metadata are
+# excluded from padding automatically; this set covers the diagnostic
+# metrics that don't carry it. New higher-is-better score metrics need no
+# entry here — only new diagnostic metrics do.
+_NON_SCORE_METRICS = frozenset(
+    {
+        "num_predictions",
+        "num_ground_truth",
+        "tables_expected",
+        "tables_actual",
+        "tables_paired",
+        "tables_unmatched_expected",
+        "tables_unmatched_pred",
+        "tables_unparseable_pred",
+        "parse_field_gt_count",
+        "unmatched_gt_elements",
+        "unmatched_pred_elements",
+        "null_hallucination_rate",  # lower is better: a synthetic 0 would reward failure
+    }
+)
+
+
 # Module-level worker function for ProcessPoolExecutor (must be picklable)
 def _evaluate_single_worker(
     inference_result_dict: dict[str, Any],
@@ -732,7 +781,7 @@ class EvaluationRunner:
         # scores relative to tools that produce output for every document.
         if test_cases_dict:
             from parse_bench.schemas.parse_output import ParseOutput
-            
+
             covered_ids = {tc.test_id for _, tc, _, _ in non_qa_evaluations}
             covered_ids.update(tc.test_id.split("#q")[0] for _, tc, _ in qa_evaluation_tasks)
             parse_evaluator = self._evaluators.get(ProductType.PARSE.value)
@@ -740,8 +789,36 @@ class EvaluationRunner:
             for test_id, test_case in test_cases_dict.items():
                 if test_id in covered_ids:
                     continue
-                # Only plain parse test cases; QA / layout / extract cases
-                # have evaluator-specific requirements a blank can't satisfy.
+                # Layout-detection GT with no usable inference output: the
+                # provider produced nothing to localize, so this is a genuine 0,
+                # not a vanished example. A blank parse output can't be routed
+                # through the layout evaluator (and its empty-prediction path
+                # would be classified as a skip), so emit a failed result
+                # directly — it is then counted as 0 by the count-as-zero
+                # aggregation. This also covers result files that exist but
+                # could not be evaluated (e.g. an error result with no output),
+                # hence "usable". GT cases with no layout annotations are
+                # exempt: no provider could score on them, so a 0 would punish
+                # the provider for a ground-truth data issue.
+                if isinstance(test_case, LayoutDetectionTestCase):
+                    if not test_case.get_layout_annotations():
+                        continue
+                    evaluation_results.append(
+                        EvaluationResult(
+                            test_id=test_id,
+                            example_id=test_id,
+                            pipeline_name=pipeline_name or self.output_dir.name,
+                            product_type=ProductType.LAYOUT_DETECTION.value,
+                            success=False,
+                            metrics=[],
+                            error="No usable inference output for this example",
+                        )
+                    )
+                    failed += 1
+                    synthesized += 1
+                    continue
+                # Only plain parse test cases get a blank parse evaluation; QA /
+                # extract cases have evaluator-specific requirements a blank can't satisfy.
                 if not isinstance(test_case, ParseTestCase) or test_case.qa_config is not None:
                     continue
                 if not parse_evaluator:
@@ -858,7 +935,7 @@ class EvaluationRunner:
                 if eval_result.success:
                     successful += 1
                     log_progress(tc.test_id, "OK")
-                elif eval_result.error and "No layout data" in eval_result.error:
+                elif _is_skipped_result(eval_result):
                     skipped += 1
                     log_progress(tc.test_id, "skipped (no layout data)")
                 else:
@@ -941,7 +1018,7 @@ class EvaluationRunner:
                             if eval_result.success:
                                 successful += 1
                                 log_progress(eval_result.test_id, "OK")
-                            elif eval_result.error and "No layout data" in eval_result.error:
+                            elif _is_skipped_result(eval_result):
                                 skipped += 1
                                 log_progress(eval_result.test_id, "skipped (no layout data)")
                             else:
@@ -1051,6 +1128,24 @@ class EvaluationRunner:
         predicted_values: dict[str, list[float]] = {}
         metric_count_sums: dict[str, list[int]] = {}  # count totals
 
+        # Count-as-zero: examples that errored out (genuine failures, not
+        # legitimate skips or harness errors) should drag the score down, not
+        # vanish from the denominator. Without this, a provider that can't
+        # produce the required output for most of a group (e.g. a markdown tool
+        # against bbox layout-detection cases) is scored only over its
+        # surviving examples, badly inflating the headline. Failures are
+        # counted per product type so that e.g. a layout-detection failure
+        # only pads layout metrics, never parse/QA metrics observed in the
+        # same group.
+        failed_by_product: dict[str, int] = {}
+        for r in evaluation_results:
+            if r.success or _is_skipped_result(r) or _is_infra_failure(r):
+                continue
+            failed_by_product[r.product_type] = failed_by_product.get(r.product_type, 0) + 1
+
+        # Which product types produced each metric (drives padding scope).
+        metric_product_types: dict[str, set[str]] = {}
+
         for result in evaluation_results:
             if not result.success:
                 continue
@@ -1058,6 +1153,7 @@ class EvaluationRunner:
                 if metric.metric_name not in metric_values:
                     metric_values[metric.metric_name] = []
                 metric_values[metric.metric_name].append(metric.value)
+                metric_product_types.setdefault(metric.metric_name, set()).add(result.product_type)
 
                 # Track scores where tables were predicted and expected
                 if metric.metadata and metric.metadata.get("tables_predicted", False):
@@ -1115,6 +1211,25 @@ class EvaluationRunner:
                         weighted_metric_values.setdefault(metric.metric_name, []).append(
                             (metric.value * float(string_rule_count), float(string_rule_count))
                         )
+
+        # Pad score metrics with a 0 per genuine failure of the same product
+        # type, so the average is taken over all attempted examples, not just
+        # the survivors. Padding is restricted to metrics that look like
+        # higher-is-better scores: observed values all in [0, 1], not a known
+        # diagnostic count or lower-is-better rate (_NON_SCORE_METRICS), and
+        # not tracked as a count total (metric_count_sums). This is a no-op
+        # for groups with no failures. Note the micro_* aggregates below
+        # remain survivor-only by design: failures carry no rule totals or
+        # tp/fp/fn counts to pool, so only avg_* (macro) reflects failures.
+        if failed_by_product:
+            for metric_name, values in metric_values.items():
+                if metric_name in metric_count_sums or metric_name in _NON_SCORE_METRICS:
+                    continue
+                if not values or not all(0.0 <= v <= 1.0 for v in values):
+                    continue
+                pad = sum(failed_by_product.get(pt, 0) for pt in metric_product_types.get(metric_name, ()))
+                if pad:
+                    values.extend([0.0] * pad)
 
         # Compute averages
         aggregate: dict[str, float] = {}
