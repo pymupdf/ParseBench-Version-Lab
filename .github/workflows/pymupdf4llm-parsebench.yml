@@ -336,18 +336,13 @@ jobs:
             exit 0
           fi
 
-          bucket_uri="gs://${BUCKET}"
-          output_uri="${bucket_uri}/${DESTINATION}/parsebench-output/"
+          output_uri="gs://${BUCKET}/${DESTINATION}/parsebench-output/"
           public_url="https://storage.googleapis.com/${BUCKET}/${DESTINATION}/parsebench-output/"
           leaderboard_url="${public_url}_leaderboard.html"
           public_bucket_url="https://storage.googleapis.com/${BUCKET}"
           public_listing_url="https://storage.googleapis.com/${BUCKET}?prefix=${DESTINATION}/parsebench-output/"
           bucket_console_url="https://console.cloud.google.com/storage/browser/${BUCKET}?project=${GCP_PROJECT_ID}"
           output_console_url="https://console.cloud.google.com/storage/browser/${BUCKET}/${DESTINATION}/parsebench-output?project=${GCP_PROJECT_ID}"
-
-          gcloud storage buckets add-iam-policy-binding "${bucket_uri}" \
-            --member=allUsers \
-            --role=roles/storage.objectViewer
 
           gcloud storage cp --recursive "${OUTPUT_DIR}" "gs://${BUCKET}/${DESTINATION}/"
 
