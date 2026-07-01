@@ -1,0 +1,187 @@
+name: PyMuPDF4LLM ParseBench
+
+on:
+  workflow_dispatch:
+    inputs:
+      benchmark_ref:
+        description: "Git ref to benchmark. Leave empty to use the selected workflow branch."
+        required: false
+        default: ""
+        type: string
+      run_scope:
+        description: "Dataset scope"
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - test
+      group:
+        description: "Benchmark group"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - chart
+          - table
+          - layout
+          - text_content
+          - text_formatting
+      gcs_prefix:
+        description: "GCS object prefix for uploaded outputs"
+        required: true
+        default: parsebench/pymupdf4llm_markdown_150dpi
+        type: string
+      upload_on_failure:
+        description: "Upload partial outputs if the benchmark fails"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  PIPELINE: pymupdf4llm_markdown_150dpi
+  PYTHON_VERSION: "3.12"
+  GCP_PROJECT_ID: pypi-download-analysis-457820
+
+jobs:
+  benchmark:
+    name: Run benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
+
+    steps:
+      - name: Checkout benchmark ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.benchmark_ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: python -m pip install --upgrade uv
+
+      - name: Install dependencies
+        run: uv sync --extra runners
+
+      - name: Prepare run metadata
+        id: metadata
+        env:
+          BENCHMARK_REF: ${{ inputs.benchmark_ref }}
+          GROUP: ${{ inputs.group }}
+          GCS_PREFIX: ${{ inputs.gcs_prefix }}
+          RUN_SCOPE: ${{ inputs.run_scope }}
+        run: |
+          set -euo pipefail
+
+          output_dir="${RUNNER_TEMP}/parsebench-output"
+          mkdir -p "${output_dir}"
+
+          ref_label="${BENCHMARK_REF:-${GITHUB_REF_NAME}}"
+          checked_out_sha="$(git rev-parse HEAD)"
+          safe_ref="$(printf '%s' "${ref_label}" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-')"
+          clean_prefix="${GCS_PREFIX#/}"
+          clean_prefix="${clean_prefix%/}"
+          destination="${clean_prefix}/${safe_ref}/run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+
+          {
+            echo "output_dir=${output_dir}"
+            echo "destination=${destination}"
+          } >> "${GITHUB_OUTPUT}"
+
+          cat > "${output_dir}/_github_run.json" <<JSON
+          {
+            "pipeline": "${PIPELINE}",
+            "benchmark_ref_input": "${BENCHMARK_REF}",
+            "checked_out_ref": "${ref_label}",
+            "checked_out_sha": "${checked_out_sha}",
+            "github_ref": "${GITHUB_REF}",
+            "github_sha": "${GITHUB_SHA}",
+            "github_repository": "${GITHUB_REPOSITORY}",
+            "github_run_id": "${GITHUB_RUN_ID}",
+            "github_run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "github_run_url": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+            "run_scope": "${RUN_SCOPE}",
+            "group": "${GROUP}",
+            "max_concurrent": 1,
+            "gcs_bucket": "${{ vars.PARSEBENCH_GCS_BUCKET }}",
+            "gcs_destination": "${destination}"
+          }
+          JSON
+
+      - name: Run PyMuPDF4LLM 150 DPI benchmark
+        env:
+          GROUP: ${{ inputs.group }}
+          RUN_SCOPE: ${{ inputs.run_scope }}
+          OUTPUT_DIR: ${{ steps.metadata.outputs.output_dir }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            run
+            "${PIPELINE}"
+            --output_dir "${OUTPUT_DIR}"
+            --max_concurrent 1
+          )
+
+          if [[ "${RUN_SCOPE}" == "test" ]]; then
+            args+=(--test)
+          fi
+
+          if [[ "${GROUP}" != "all" ]]; then
+            args+=(--group "${GROUP}")
+          fi
+
+          uv run parse-bench "${args[@]}"
+
+      - name: Authenticate to Google Cloud
+        if: ${{ always() && (success() || inputs.upload_on_failure) }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Set up gcloud
+        if: ${{ always() && (success() || inputs.upload_on_failure) }}
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Upload outputs to GCS
+        if: ${{ always() && (success() || inputs.upload_on_failure) }}
+        env:
+          BUCKET: ${{ vars.PARSEBENCH_GCS_BUCKET }}
+          DESTINATION: ${{ steps.metadata.outputs.destination }}
+          OUTPUT_DIR: ${{ steps.metadata.outputs.output_dir }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${BUCKET}" ]]; then
+            echo "PARSEBENCH_GCS_BUCKET repository variable is not set" >&2
+            exit 1
+          fi
+
+          if ! find "${OUTPUT_DIR}" -type f -print -quit | grep -q .; then
+            echo "No output files found in ${OUTPUT_DIR}; skipping upload."
+            exit 0
+          fi
+
+          gcloud storage cp --recursive "${OUTPUT_DIR}" "gs://${BUCKET}/${DESTINATION}/"
+
+          public_url="https://storage.googleapis.com/${BUCKET}/${DESTINATION}/parsebench-output/"
+          {
+            echo "Uploaded outputs to gs://${BUCKET}/${DESTINATION}/parsebench-output/"
+            echo "Public URL: ${public_url}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload GitHub artifact
+        if: ${{ always() && (success() || inputs.upload_on_failure) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: parsebench-output-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.metadata.outputs.output_dir }}
+          if-no-files-found: ignore
