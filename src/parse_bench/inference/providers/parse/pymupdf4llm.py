@@ -3,6 +3,7 @@
 import importlib
 import logging
 import math
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,16 @@ from parse_bench.schemas.product import ProductType
 logger = logging.getLogger(__name__)
 
 
+# `ocr_backend` is a ParseBench-level config key (not a pymupdf4llm.to_markdown
+# kwarg): it names which bundled OCR engine should back `ocr_function`. The
+# engine callable is resolved from this map internally at call time (see
+# `_resolve_ocr_function`) so it never enters a serialized options/config dict.
+_OCR_BACKEND_MODULES = {
+    "rapidocr": "pymupdf4llm.ocr.rapidocr_api",
+    "tesseract": "pymupdf4llm.ocr.tesseract_api",
+}
+
+
 @register_provider("pymupdf4llm")
 class PyMuPDF4LLMProvider(Provider):
     """Provider for PyMuPDF4LLM (markdown). AGPL — runtime dep only."""
@@ -38,7 +49,11 @@ class PyMuPDF4LLMProvider(Provider):
     def __init__(self, provider_name: str, base_config: dict[str, Any] | None = None):
         super().__init__(provider_name, base_config)
 
-    def _markdown_options(self, pymupdf: Any) -> dict[str, Any]:
+    def _markdown_options(self) -> dict[str, Any]:
+        # `use_ocr`, `force_ocr`, `ocr_dpi`, and `ocr_language` intentionally
+        # mirror pymupdf4llm.to_markdown's kwargs 1:1 and are forwarded verbatim
+        # below; keep these config keys aligned with the library API rather than
+        # renaming them to match other providers.
         options: dict[str, Any] = {
             "page_chunks": True,
             "show_progress": False,
@@ -74,37 +89,58 @@ class PyMuPDF4LLMProvider(Provider):
         raw_backend = self.base_config.get("ocr_backend")
         if raw_backend is None:
             return options
+        # `ocr_backend` selects a bundled pymupdf4llm OCR engine. It is a
+        # ParseBench-level string, not a to_markdown kwarg: validate it here so a
+        # bad value fails fast, but resolve the engine callable lazily at call
+        # time (see `_resolve_ocr_function`) so it never enters this options
+        # dict. `auto` defers to pymupdf4llm's own engine selection.
         if not isinstance(raw_backend, str):
             raise ProviderConfigError("PyMuPDF4LLM 'ocr_backend' must be a string")
-
         backend = raw_backend.strip().lower()
-        if backend == "auto":
-            return options
-
-        backend_modules = {
-            "rapidocr": "pymupdf4llm.ocr.rapidocr_api",
-            "tesseract": "pymupdf4llm.ocr.tesseract_api",
-        }
-        module_name = backend_modules.get(backend)
-        if module_name is None:
-            supported = ", ".join(["auto", *backend_modules])
+        if backend != "auto" and backend not in _OCR_BACKEND_MODULES:
+            supported = ", ".join(["auto", *_OCR_BACKEND_MODULES])
             raise ProviderConfigError(
                 f"Unsupported PyMuPDF4LLM OCR backend '{raw_backend}'. Supported backends: {supported}"
             )
+        return options
 
-        if backend == "tesseract" and pymupdf.get_tessdata() is None:
-            raise ProviderConfigError("PyMuPDF4LLM Tesseract backend requires Tesseract language data")
+    def _resolve_ocr_function(self) -> Callable[..., Any] | None:
+        """Resolve the configured OCR engine callable immediately before OCR.
 
+        `ocr_backend` is validated in `_markdown_options`; here the selected
+        engine module is imported and its ``exec_ocr`` returned so it can be
+        handed to ``to_markdown(ocr_function=...)`` as a direct call-time kwarg
+        -- never stored in the serialized options/config dict. An absent or
+        ``auto`` backend returns ``None`` so pymupdf4llm performs its own engine
+        selection. Engine availability is discovered reactively: an unavailable
+        backend raises ProviderConfigError only when that backend is actually
+        requested, rather than probing eagerly for every request.
+        """
+        raw_backend = self.base_config.get("ocr_backend")
+        if not isinstance(raw_backend, str):
+            return None
+        module_name = _OCR_BACKEND_MODULES.get(raw_backend.strip().lower())
+        if module_name is None:
+            return None
         try:
             ocr_module = importlib.import_module(module_name)
         except (ImportError, RuntimeError) as e:
-            raise ProviderConfigError(f"PyMuPDF4LLM OCR backend '{backend}' is unavailable: {e}") from e
-
+            raise ProviderConfigError(f"PyMuPDF4LLM OCR backend '{raw_backend}' is unavailable: {e}") from e
         ocr_function = getattr(ocr_module, "exec_ocr", None)
         if not callable(ocr_function):
-            raise ProviderConfigError(f"PyMuPDF4LLM OCR backend '{backend}' does not expose exec_ocr")
-        options["ocr_function"] = ocr_function
-        return options
+            raise ProviderConfigError(f"PyMuPDF4LLM OCR backend '{raw_backend}' does not expose exec_ocr")
+        # The tesseract backend module imports cleanly even when Tesseract is
+        # missing: it warns once and its exec_ocr becomes a per-page no-op
+        # (pymupdf4llm/ocr/tesseract_api.py), so the import guard above never
+        # fires for it. A benchmark run must not silently score without the OCR
+        # the user asked for, so read the module's import-time availability
+        # marker (no extra subprocess probe) and fail loudly instead.
+        if getattr(ocr_module, "TESSDATA", True) is None:
+            raise ProviderConfigError(
+                f"PyMuPDF4LLM OCR backend '{raw_backend}' is unavailable: "
+                "Tesseract language data was not found (pymupdf.get_tessdata() returned None)"
+            )
+        return ocr_function
 
     def _extract(self, pdf_path: str) -> dict[str, Any]:
         try:
@@ -114,8 +150,15 @@ class PyMuPDF4LLMProvider(Provider):
             raise ProviderConfigError("pymupdf4llm not installed. Run: pip install pymupdf4llm") from e
 
         try:
-            markdown_options = self._markdown_options(pymupdf)
-            page_chunks = pymupdf4llm.to_markdown(pdf_path, **markdown_options)
+            markdown_options = self._markdown_options()
+            # Resolve the OCR engine callable here, immediately before the call,
+            # and pass it as a direct kwarg so the callable never lives in the
+            # declarative options dict (ocr_backend stays a plain string key).
+            ocr_function = self._resolve_ocr_function()
+            if ocr_function is None:
+                page_chunks = pymupdf4llm.to_markdown(pdf_path, **markdown_options)
+            else:
+                page_chunks = pymupdf4llm.to_markdown(pdf_path, ocr_function=ocr_function, **markdown_options)
             with pymupdf.open(pdf_path) as document:
                 page_dimensions = [(float(page.rect.width), float(page.rect.height)) for page in document]
         except ProviderConfigError:
