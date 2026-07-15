@@ -22,6 +22,11 @@ The fixed source repositories are:
 - PyMuPDF Layout: `ArtifexSoftware/sce`
 - PyMuPDF4LLM: `pymupdf/pymupdf4llm`
 
+Every run starts its GitHub summary with the selected dataset size, document
+category, pipeline, and source configuration. For ParseBench and all three
+components, the summary shows both the branch, tag, or SHA entered by the user
+and the exact 40-character commit checked out for that run.
+
 ## Private repository access
 
 PyMuPDF Layout source is currently read from the private

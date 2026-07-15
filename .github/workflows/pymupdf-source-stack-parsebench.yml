@@ -194,6 +194,65 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
 
+      - name: Add selected configuration to workflow summary
+        env:
+          BENCHMARK_REF: ${{ inputs.benchmark_ref }}
+          GROUP_SELECTION: ${{ inputs.group }}
+          PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
+          PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
+          PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
+          RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          def sha(path: str = ".") -> str:
+              return subprocess.check_output(
+                  ["git", "-C", path, "rev-parse", "HEAD"],
+                  text=True,
+              ).strip()
+
+          def cell(value: str) -> str:
+              return value.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+          rows = [
+              ("ParseBench", os.environ["GITHUB_REPOSITORY"], os.environ["BENCHMARK_REF"], sha()),
+              ("PyMuPDF", "pymupdf/PyMuPDF", os.environ["PYMUPDF_REF"], sha(".source/pymupdf")),
+              (
+                  "PyMuPDF Layout",
+                  "ArtifexSoftware/sce",
+                  os.environ["PYMUPDF_LAYOUT_REF"],
+                  sha(".source/pymupdf-layout"),
+              ),
+              (
+                  "PyMuPDF4LLM",
+                  "pymupdf/pymupdf4llm",
+                  os.environ["PYMUPDF4LLM_REF"],
+                  sha(".source/pymupdf4llm"),
+              ),
+          ]
+          lines = [
+              "## What this run is testing",
+              "",
+              f"- **Dataset:** {cell(os.environ['RUN_SCOPE_SELECTION'])}",
+              f"- **Document category:** {cell(os.environ['GROUP_SELECTION'])}",
+              f"- **Pipeline:** {cell(os.environ['PIPELINE'])}",
+              "- **MuPDF:** selected automatically by the chosen PyMuPDF revision",
+              "",
+              "| Component | Repository | Requested selection | Exact commit used |",
+              "| --- | --- | --- | --- |",
+          ]
+          for component, repository, requested, commit in rows:
+              lines.append(
+                  f"| {cell(component)} | `{cell(repository)}` | `{cell(requested)}` | `{cell(commit)}` |"
+              )
+          lines.append("")
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines))
+          PY
+
       - name: Resolve source packages and commits
         id: sources
         run: |
