@@ -1,78 +1,52 @@
-name: PyMuPDF Source Stack ParseBench
+name: Benchmark PyMuPDF Source Versions
+
+run-name: >-
+  PyMuPDF ${{ inputs.pymupdf_ref }} · Layout ${{ inputs.pymupdf_layout_ref }} ·
+  PyMuPDF4LLM ${{ inputs.pymupdf4llm_ref }} · ${{ inputs.run_scope }}
 
 on:
   workflow_dispatch:
     inputs:
       benchmark_ref:
-        description: "ParseBench branch, tag, or commit. Empty uses the selected workflow branch."
-        required: false
-        default: ""
-        type: string
-      pymupdf_repository:
-        description: "PyMuPDF GitHub repository"
+        description: "ParseBench code to run. Leave as main unless instructed."
         required: true
-        default: pymupdf/PyMuPDF
+        default: main
         type: string
       pymupdf_ref:
-        description: "PyMuPDF branch, tag, or commit"
+        description: "PyMuPDF version, branch, or commit. Standard: 1.28.0"
         required: true
         default: "1.28.0"
         type: string
-      pymupdf_layout_repository:
-        description: "PyMuPDF Layout GitHub repository (may require PYMUPDF_SOURCE_TOKEN)"
-        required: true
-        default: ArtifexSoftware/sce
-        type: string
       pymupdf_layout_ref:
-        description: "PyMuPDF Layout branch, tag, or commit"
+        description: "Layout version, branch, or commit. Leave unchanged for a standard run."
         required: true
         default: bc9127e72de0f4d75935a4ef51d141e928dd7943
         type: string
-      pymupdf4llm_repository:
-        description: "PyMuPDF4LLM GitHub repository"
-        required: true
-        default: pymupdf/pymupdf4llm
-        type: string
       pymupdf4llm_ref:
-        description: "PyMuPDF4LLM branch, tag, or commit"
+        description: "PyMuPDF4LLM version, branch, or commit. Standard: 1.28.0"
         required: true
         default: "1.28.0"
         type: string
       run_scope:
-        description: "Dataset scope"
+        description: "How much data should be tested?"
         required: true
-        default: test
+        default: "Quick test (15 cases)"
         type: choice
         options:
-          - test
-          - full
+          - "Quick test (15 cases)"
+          - "Full benchmark (~2,000 pages)"
       group:
-        description: "Benchmark group"
+        description: "Which document category should be tested?"
         required: true
-        default: all
+        default: "All categories"
         type: choice
         options:
-          - all
-          - chart
-          - table
-          - layout
-          - text_content
-          - text_formatting
-      gcs_prefix:
-        description: "GCS object prefix for uploaded outputs"
-        required: true
-        default: parsebench/pymupdf_source_stack
-        type: string
-      publish_to_gcs:
-        description: "Publish outputs to the configured GCS bucket"
-        required: true
-        default: true
-        type: boolean
-      upload_on_failure:
-        description: "Upload partial outputs if the benchmark fails"
-        required: true
-        default: true
-        type: boolean
+          - "All categories"
+          - Charts
+          - Tables
+          - "Page layout"
+          - "Text content"
+          - "Text formatting"
 
 permissions:
   contents: read
@@ -81,6 +55,7 @@ env:
   PIPELINE: pymupdf4llm_markdown_150dpi
   PYTHON_VERSION: "3.12"
   GCP_PROJECT_ID: pypi-download-analysis-457820
+  GCS_PREFIX: parsebench/pymupdf_source_stack
   DATASET_CACHE_VERSION: v1
   UV_NO_SYNC: "1"
 
@@ -97,24 +72,39 @@ jobs:
       - name: Checkout ParseBench
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.benchmark_ref || github.ref }}
+          ref: ${{ inputs.benchmark_ref }}
 
       - name: Initialize run configuration
         id: config
         env:
           BENCHMARK_REF: ${{ inputs.benchmark_ref }}
-          GCS_PREFIX: ${{ inputs.gcs_prefix }}
-          GROUP: ${{ inputs.group }}
+          GROUP_SELECTION: ${{ inputs.group }}
           PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
           PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
           PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
-          RUN_SCOPE: ${{ inputs.run_scope }}
+          RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
         run: |
           set -euo pipefail
 
+          case "${RUN_SCOPE_SELECTION}" in
+            "Quick test (15 cases)") run_scope="test" ;;
+            "Full benchmark (~2,000 pages)") run_scope="full" ;;
+            *) echo "Unsupported dataset size: ${RUN_SCOPE_SELECTION}" >&2; exit 1 ;;
+          esac
+
+          case "${GROUP_SELECTION}" in
+            "All categories") group="all" ;;
+            Charts) group="chart" ;;
+            Tables) group="table" ;;
+            "Page layout") group="layout" ;;
+            "Text content") group="text_content" ;;
+            "Text formatting") group="text_formatting" ;;
+            *) echo "Unsupported document category: ${GROUP_SELECTION}" >&2; exit 1 ;;
+          esac
+
           output_dir="${RUNNER_TEMP}/parsebench-output"
           data_dir="data"
-          if [[ "${RUN_SCOPE}" == "test" ]]; then
+          if [[ "${run_scope}" == "test" ]]; then
             data_dir="data/test"
           fi
 
@@ -122,7 +112,7 @@ jobs:
             printf '%s' "$1" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-' | cut -c1-48
           }
 
-          benchmark_label="$(safe_ref "${BENCHMARK_REF:-${GITHUB_REF_NAME}}")"
+          benchmark_label="$(safe_ref "${BENCHMARK_REF}")"
           pymupdf_label="$(safe_ref "${PYMUPDF_REF}")"
           layout_label="$(safe_ref "${PYMUPDF_LAYOUT_REF}")"
           llm_label="$(safe_ref "${PYMUPDF4LLM_REF}")"
@@ -139,20 +129,20 @@ jobs:
             echo "benchmark_ref=${BENCHMARK_REF}"
             echo "data_dir=${data_dir}"
             echo "destination=${destination}"
-            echo "group=${GROUP}"
+            echo "group=${group}"
             echo "output_dir=${output_dir}"
-            echo "run_scope=${RUN_SCOPE}"
+            echo "run_scope=${run_scope}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Record requested source stack
         env:
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
           PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
-          PYMUPDF4LLM_REPOSITORY: ${{ inputs.pymupdf4llm_repository }}
+          PYMUPDF4LLM_REPOSITORY: pymupdf/pymupdf4llm
           PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
-          PYMUPDF_LAYOUT_REPOSITORY: ${{ inputs.pymupdf_layout_repository }}
+          PYMUPDF_LAYOUT_REPOSITORY: ArtifexSoftware/sce
           PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
-          PYMUPDF_REPOSITORY: ${{ inputs.pymupdf_repository }}
+          PYMUPDF_REPOSITORY: pymupdf/PyMuPDF
         run: |
           python - <<'PY'
           import json
@@ -177,7 +167,7 @@ jobs:
       - name: Checkout PyMuPDF
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.pymupdf_repository }}
+          repository: pymupdf/PyMuPDF
           ref: ${{ inputs.pymupdf_ref }}
           path: .source/pymupdf
           fetch-depth: 1
@@ -187,7 +177,7 @@ jobs:
       - name: Checkout PyMuPDF Layout
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.pymupdf_layout_repository }}
+          repository: ArtifexSoftware/sce
           ref: ${{ inputs.pymupdf_layout_ref }}
           path: .source/pymupdf-layout
           fetch-depth: 1
@@ -197,7 +187,7 @@ jobs:
       - name: Checkout PyMuPDF4LLM
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.pymupdf4llm_repository }}
+          repository: pymupdf/pymupdf4llm
           ref: ${{ inputs.pymupdf4llm_ref }}
           path: .source/pymupdf4llm
           fetch-depth: 1
@@ -279,13 +269,13 @@ jobs:
         env:
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
           PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
-          PYMUPDF4LLM_REPOSITORY: ${{ inputs.pymupdf4llm_repository }}
+          PYMUPDF4LLM_REPOSITORY: pymupdf/pymupdf4llm
           PYMUPDF4LLM_SHA: ${{ steps.sources.outputs.llm_sha }}
           PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
-          PYMUPDF_LAYOUT_REPOSITORY: ${{ inputs.pymupdf_layout_repository }}
+          PYMUPDF_LAYOUT_REPOSITORY: ArtifexSoftware/sce
           PYMUPDF_LAYOUT_SHA: ${{ steps.sources.outputs.layout_sha }}
           PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
-          PYMUPDF_REPOSITORY: ${{ inputs.pymupdf_repository }}
+          PYMUPDF_REPOSITORY: pymupdf/PyMuPDF
           PYMUPDF_SHA: ${{ steps.sources.outputs.pymupdf_sha }}
         run: |
           .venv/bin/python scripts/check_pymupdf_stack_compatibility.py \
@@ -478,13 +468,7 @@ jobs:
   publish:
     name: Publish source-stack outputs
     needs: benchmark
-    if: >-
-      ${{
-        always() &&
-        inputs.publish_to_gcs &&
-        (needs.benchmark.result == 'success' || inputs.upload_on_failure) &&
-        needs.benchmark.outputs.artifact_name != ''
-      }}
+    if: ${{ always() && needs.benchmark.outputs.artifact_name != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

@@ -1,12 +1,20 @@
 # PyMuPDF source-stack workflow
 
-The `PyMuPDF Source Stack ParseBench` workflow benchmarks a selected Git ref
+The `Benchmark PyMuPDF Source Versions` workflow benchmarks a selected Git ref
 from each component of the PyMuPDF parsing stack without changing the pinned
 `PyMuPDF4LLM ParseBench` workflow.
 
-Each `*_ref` input accepts a branch, tag, or full commit SHA. The repository
-inputs default to the upstream repositories known to ParseBench. Prefer full
-commit SHAs for reproducible benchmark runs.
+The manual form keeps the repositories fixed and asks only for the ParseBench
+ref, three component refs, dataset size, and document category. Each component
+ref accepts a release tag, branch, or full commit SHA. Leave the displayed
+defaults unchanged for a standard quick test; prefer full commit SHAs for
+reproducible benchmark runs.
+
+The fixed source repositories are:
+
+- PyMuPDF: `pymupdf/PyMuPDF`
+- PyMuPDF Layout: `ArtifexSoftware/sce`
+- PyMuPDF4LLM: `pymupdf/pymupdf4llm`
 
 ## Private repository access
 
@@ -24,8 +32,8 @@ commit inspected by ParseBench:
 bc9127e72de0f4d75935a4ef51d141e928dd7943
 ```
 
-Update the Layout repository input when the replacement runtime repository is
-available to the ParseBench workflow token.
+Update the fixed Layout repository in the workflow when the replacement runtime
+repository is available to the ParseBench workflow token.
 
 ## Compatibility gate
 
@@ -49,5 +57,6 @@ versions in `_github_run.json`.
 
 Source code runs only in the benchmark job, which has no GCP credentials. A
 separate publish job downloads the resulting GitHub artifact and uploads it to
-GCS when `publish_to_gcs` is enabled. This prevents a selected source revision
-from executing in the credentialed publishing job.
+the fixed ParseBench GCS location. Partial diagnostic output is also published
+when compatibility or benchmarking fails. This prevents a selected source
+revision from executing in the credentialed publishing job.
