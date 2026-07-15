@@ -65,6 +65,7 @@ These pipelines use hosted APIs. You only need an API key in your `.env` file.
 | `anthropic_opus_4_6_parse_file` | Claude Opus 4.6, PDF file mode | `ANTHROPIC_API_KEY` |
 | **`anthropic_opus_4_6_parse_with_layout_file`** | Claude Opus 4.6, parse + layout, file mode (In paper: *Anthropic Opus 4.6*) | `ANTHROPIC_API_KEY` |
 | **`anthropic_opus_4_8_parse_with_layout_file`** | Claude Opus 4.8, parse + layout, file mode (In paper: *Anthropic Opus 4.8*) | `ANTHROPIC_API_KEY` |
+| `anthropic_sonnet_5_parse_with_layout_file` | Claude Sonnet 5, adaptive thinking + layout, file mode | `ANTHROPIC_API_KEY` |
 | `anthropic_fable_5_parse_with_layout_file` | Claude Fable 5, parse + layout, file mode | `ANTHROPIC_API_KEY` |
 
 ### Google Gemini
@@ -258,6 +259,11 @@ These run entirely locally with no external dependencies.
 | `pypdf_baseline` | PyPDF text extraction | None |
 | `pymupdf_text` | PyMuPDF text extraction | None |
 | `pymupdf_html` | PyMuPDF HTML extraction | None |
+| `pymupdf4llm_markdown` | PyMuPDF4LLM layout Markdown, automatic OCR engine selection | `pymupdf4llm` |
+| `pymupdf4llm_markdown_tesseract` | PyMuPDF4LLM Markdown, Tesseract OCR backend | `pymupdf4llm`, `tesseract` |
+| `pymupdf4llm_markdown_rapidocr` | PyMuPDF4LLM Markdown, RapidOCR backend | `pymupdf4llm`, `rapidocr-onnxruntime` |
+| `pymupdf4llm_markdown_no_ocr` | PyMuPDF4LLM Markdown, OCR disabled | `pymupdf4llm` |
+| `pymupdf4llm_markdown_150dpi` | PyMuPDF4LLM Markdown, OCR at 150 DPI | `pymupdf4llm` |
 | `tesseract_eng` | Tesseract OCR (English) | `tesseract` installed |
 | `tesseract_fast` | Tesseract OCR (fast) | `tesseract` installed |
 | `tesseract_high_quality` | Tesseract OCR (high quality) | `tesseract` installed |

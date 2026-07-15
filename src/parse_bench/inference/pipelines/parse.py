@@ -510,15 +510,6 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
 
     register_fn(
         PipelineSpec(
-            pipeline_name="pymupdf4llm_markdown_rapidocr_150dpi",
-            provider_name="pymupdf4llm",
-            product_type=ProductType.PARSE,
-            config={"ocr_backend": "rapidocr", "ocr_dpi": 150},
-        )
-    )
-
-    register_fn(
-        PipelineSpec(
             pipeline_name="pymupdf4llm_markdown_no_ocr",
             provider_name="pymupdf4llm",
             product_type=ProductType.PARSE,
@@ -532,6 +523,15 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             provider_name="pymupdf4llm",
             product_type=ProductType.PARSE,
             config={"ocr_dpi": 150},
+        )
+    )
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="pymupdf4llm_html_tables",
+            provider_name="pymupdf4llm",
+            product_type=ProductType.PARSE,
+            config={"table_output": "html"},
         )
     )
 
@@ -1871,6 +1871,21 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
                 "model": "claude-opus-4-8",
                 "max_tokens": 32768,
                 "mode": "parse_with_layout_file",
+            },
+        )
+    )
+
+    # Anthropic Sonnet 5 - Parse with Layout File - Adaptive Thinking
+    register_fn(
+        PipelineSpec(
+            pipeline_name="anthropic_sonnet_5_parse_with_layout_file",
+            provider_name="anthropic",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "claude-sonnet-5",
+                "max_tokens": 32768,
+                "mode": "parse_with_layout_file",
+                "thinking": {"type": "adaptive"},
             },
         )
     )
