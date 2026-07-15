@@ -519,3 +519,41 @@ jobs:
               echo "- Public leaderboard HTML: not generated for this run"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  explain_failure:
+    name: Explain workflow failure
+    needs:
+      - benchmark
+      - publish
+    if: >-
+      ${{
+        always() &&
+        (needs.benchmark.result == 'failure' || needs.publish.result == 'failure')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout failure-summary helper
+        uses: actions/checkout@v4
+
+      - name: Download diagnostic artifact
+        if: ${{ needs.benchmark.outputs.artifact_name != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.benchmark.outputs.artifact_name }}
+          path: failure-diagnostics
+
+      - name: Add error details to workflow summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/write_github_failure_summary.py \
+            --diagnostics failure-diagnostics \
+            --output "${GITHUB_STEP_SUMMARY}" \
+            --benchmark-result "${{ needs.benchmark.result }}" \
+            --publish-result "${{ needs.publish.result }}"
