@@ -1,6 +1,6 @@
-# PyMuPDF source-stack workflow
+# ParseBench Version Lab
 
-The `Benchmark PyMuPDF Source Versions` workflow benchmarks a selected Git ref
+The `ParseBench Version Lab` workflow benchmarks a selected Git ref
 from each component of the PyMuPDF parsing stack without changing the pinned
 `PyMuPDF4LLM ParseBench` workflow.
 

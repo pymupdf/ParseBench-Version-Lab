@@ -1,4 +1,4 @@
-name: Benchmark PyMuPDF Source Versions
+name: ParseBench Version Lab
 
 run-name: >-
   PyMuPDF ${{ inputs.pymupdf_ref }} · Layout ${{ inputs.pymupdf_layout_ref }} ·
@@ -61,7 +61,7 @@ env:
 
 jobs:
   benchmark:
-    name: Build, check, and benchmark source stack
+    name: Check compatibility and run benchmark
     runs-on: ubuntu-latest
     timeout-minutes: 720
     outputs:
@@ -466,7 +466,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish source-stack outputs
+    name: Publish benchmark results
     needs: benchmark
     if: ${{ always() && needs.benchmark.outputs.artifact_name != '' }}
     runs-on: ubuntu-latest
