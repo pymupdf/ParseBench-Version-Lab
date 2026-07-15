@@ -100,7 +100,8 @@ the fixed ParseBench GCS location. Partial diagnostic output is also published
 when compatibility or benchmarking fails. This prevents a selected source
 revision from executing in the credentialed publishing job.
 
-The publishing node is named `Publish benchmark results` after a successful
-benchmark. After a failure, the same secured publishing path is instead named
-`Publish failure diagnostics`, and its summary explicitly states that no
-completed benchmark results were published.
+The graph uses the static node name `Publish results or diagnostics` so GitHub
+can display it before the benchmark outcome is known. Once the job runs, its
+step name and summary state whether it published completed benchmark results or
+failure diagnostics. A failure summary explicitly states that no completed
+benchmark results were published.

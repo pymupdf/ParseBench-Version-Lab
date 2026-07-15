@@ -575,12 +575,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: >-
-      ${{
-        needs.benchmark.result == 'success' &&
-        'Publish benchmark results' ||
-        'Publish failure diagnostics'
-      }}
+    name: Publish results or diagnostics
     needs: benchmark
     if: ${{ always() && needs.benchmark.outputs.artifact_name != '' }}
     runs-on: ubuntu-latest
