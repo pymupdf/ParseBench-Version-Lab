@@ -1,6 +1,6 @@
-name: Publish ParseBench source-stack environment
+name: "Maintenance: Rebuild benchmark container"
 
-run-name: Publish source-stack environment · ${{ github.sha }}
+run-name: Maintenance · Rebuild benchmark container · ${{ github.sha }}
 
 on:
   workflow_dispatch:
