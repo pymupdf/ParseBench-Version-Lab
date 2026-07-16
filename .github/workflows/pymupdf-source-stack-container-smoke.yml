@@ -12,18 +12,13 @@ run-name: >-
 on:
   workflow_dispatch:
     inputs:
-      benchmark_ref:
-        description: "ParseBench code to run. Leave as main unless instructed."
-        required: true
-        default: main
-        type: string
       dataset_version:
         description: "Dataset version: current, or a full 40-character Hugging Face commit SHA."
         required: true
         default: current
         type: string
       pymupdf_ref:
-        description: "All 3 fields: version 1.28.0; branch main; or full 40-character commit SHA, e.g. e9cdfc9e7fe3260efcc9d28713903f075ab05bce."
+        description: "PyMuPDF version, branch or full 40-character commit SHA. Standard: 1.28.0; current development: main."
         required: true
         default: "1.28.0"
         type: string
@@ -91,7 +86,7 @@ jobs:
       - name: Checkout ParseBench
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ${{ inputs.benchmark_ref }}
+          ref: main
 
       - name: Checkout workflow helpers
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -104,7 +99,7 @@ jobs:
       - name: Initialize run configuration
         id: config
         env:
-          BENCHMARK_REF: ${{ inputs.benchmark_ref }}
+          BENCHMARK_REF: main
           GROUP_SELECTION: ${{ inputs.group }}
           PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
           PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
@@ -194,7 +189,7 @@ jobs:
 
       - name: Add selected configuration to workflow summary
         env:
-          BENCHMARK_REF: ${{ inputs.benchmark_ref }}
+          BENCHMARK_REF: main
           DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
           DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
           DATASET_REQUESTED_REF: ${{ steps.dataset.outputs.requested_ref }}
