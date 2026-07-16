@@ -215,6 +215,9 @@ jobs:
             --no-install-package pymupdf4llm
           uv pip install --python .venv "pipcl==12"
 
+      - name: Verify RapidOCR native runtime
+        run: .venv/bin/python -c "from rapidocr_onnxruntime import RapidOCR; print(RapidOCR)"
+
       - name: Build and install selected PyMuPDF
         env:
           PACKAGE_DIR: ${{ steps.sources.outputs.pymupdf_dir }}
