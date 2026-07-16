@@ -1,0 +1,403 @@
+name: ParseBench Version Lab (Container Smoke)
+
+run-name: >-
+  Container smoke · ${{
+    inputs.pymupdf_ref == '1.28.0' &&
+    inputs.pymupdf_layout_ref == '1.28.0' &&
+    inputs.pymupdf4llm_ref == '1.28.0' &&
+    'Versions 1.28.0' ||
+    'Custom versions'
+  }} · ${{ inputs.run_scope }} · ${{ inputs.group }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      benchmark_ref:
+        description: "ParseBench code to run. Leave as main unless instructed."
+        required: true
+        default: main
+        type: string
+      dataset_version:
+        description: "Dataset version: current, or a full 40-character Hugging Face commit SHA."
+        required: true
+        default: current
+        type: string
+      pymupdf_ref:
+        description: "All 3 fields: version 1.28.0; branch main; or full 40-character commit SHA, e.g. e9cdfc9e7fe3260efcc9d28713903f075ab05bce."
+        required: true
+        default: "1.28.0"
+        type: string
+      pymupdf_layout_ref:
+        description: "PyMuPDF Layout selection. Standard: 1.28.0"
+        required: true
+        default: "1.28.0"
+        type: string
+      pymupdf4llm_ref:
+        description: "PyMuPDF4LLM selection. Standard: 1.28.0"
+        required: true
+        default: "1.28.0"
+        type: string
+      run_scope:
+        description: "How much data should be tested?"
+        required: true
+        default: "Quick test (15 cases)"
+        type: choice
+        options:
+          - "Quick test (15 cases)"
+          - "Full benchmark (~2,000 pages)"
+      group:
+        description: "Which document category should be tested?"
+        required: true
+        default: "All categories"
+        type: choice
+        options:
+          - "All categories"
+          - Charts
+          - Tables
+          - "Page layout"
+          - "Text content"
+          - "Text formatting"
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  PIPELINE: pymupdf4llm_markdown_150dpi
+  PYTHON_VERSION: "3.12.13"
+  GCP_PROJECT_ID: pypi-download-analysis-457820
+  GCS_PREFIX: parsebench/pymupdf_source_stack_container_smoke
+  UV_NO_SYNC: "1"
+  WORKFLOW_SCRIPTS: .workflow-support/.github/scripts/pymupdf_source_stack
+
+jobs:
+  benchmark:
+    name: Check compatibility and run benchmark in pinned container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 720
+    container:
+      image: ghcr.io/pymupdf/parsebench-source-stack-env@sha256:ffc187e250ab4a1f3f70f1487460eef9e54ca5d2e63f64f8cc4fd2f18a9b5696
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      artifact_name: ${{ steps.config.outputs.artifact_name }}
+      destination: ${{ steps.config.outputs.destination }}
+
+    steps:
+      - name: Checkout ParseBench
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ inputs.benchmark_ref }}
+
+      - name: Checkout workflow helpers
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow-support
+          persist-credentials: false
+          sparse-checkout: .github/scripts/pymupdf_source_stack
+
+      - name: Initialize run configuration
+        id: config
+        env:
+          BENCHMARK_REF: ${{ inputs.benchmark_ref }}
+          GROUP_SELECTION: ${{ inputs.group }}
+          PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
+          PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
+          PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
+          RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
+        run: python3 "$WORKFLOW_SCRIPTS/configure.py"
+
+      - name: Record and verify pinned container environment
+        env:
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+        run: |
+          cp /usr/local/share/parsebench/environment.txt "$OUTPUT_DIR/_container_environment.txt"
+          test "$(python --version)" = "Python 3.12.13"
+          test "$(uv --version | cut -d' ' -f2)" = "0.11.29"
+          test "$(dpkg-query -W -f='${Version}' tesseract-ocr)" = "5.3.4-1build5"
+          test "$(dpkg-query -W -f='${Version}' tesseract-ocr-eng)" = "1:4.1.0-2"
+          tesseract --list-langs | grep -Fx eng
+          {
+            echo "## Container environment"
+            echo
+            echo "- Image: \`ghcr.io/pymupdf/parsebench-source-stack-env\`"
+            echo "- Digest: \`sha256:ffc187e250ab4a1f3f70f1487460eef9e54ca5d2e63f64f8cc4fd2f18a9b5696\`"
+            echo "- Python: \`$(python --version)\`"
+            echo "- Tesseract package: \`$(dpkg-query -W -f='${Version}' tesseract-ocr)\`"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve exact ParseBench dataset commit
+        id: dataset
+        env:
+          DATASET_REF: ${{ inputs.dataset_version }}
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+          RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
+        run: python3 "$WORKFLOW_SCRIPTS/resolve_dataset.py"
+
+      - name: Restore immutable ParseBench dataset cache
+        id: dataset-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ steps.config.outputs.data_dir }}
+          key: parsebench-dataset-${{ steps.dataset.outputs.sha }}
+
+      - name: Checkout PyMuPDF
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: pymupdf/PyMuPDF
+          ref: ${{ inputs.pymupdf_ref }}
+          path: .source/pymupdf
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
+
+      - name: Checkout PyMuPDF Layout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ArtifexSoftware/sce
+          ref: ${{ inputs.pymupdf_layout_ref }}
+          path: .source/pymupdf-layout
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
+
+      - name: Checkout PyMuPDF4LLM
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: pymupdf/pymupdf4llm
+          ref: ${{ inputs.pymupdf4llm_ref }}
+          path: .source/pymupdf4llm
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
+
+      - name: Add selected configuration to workflow summary
+        env:
+          BENCHMARK_REF: ${{ inputs.benchmark_ref }}
+          DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
+          DATASET_REQUESTED_REF: ${{ steps.dataset.outputs.requested_ref }}
+          DATASET_SHA: ${{ steps.dataset.outputs.sha }}
+          GROUP_SELECTION: ${{ inputs.group }}
+          PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
+          PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
+          PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
+          RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
+        run: python3 "$WORKFLOW_SCRIPTS/write_run_summary.py"
+
+      - name: Resolve source packages and commits
+        id: sources
+        env:
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+          PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
+          PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
+          PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
+        run: python3 "$WORKFLOW_SCRIPTS/resolve_sources.py"
+
+      - name: Install ParseBench dependencies without selected PyMuPDF packages
+        run: |
+          uv sync --locked --extra runners \
+            --no-install-package pymupdf \
+            --no-install-package pymupdf-layout \
+            --no-install-package pymupdf4llm
+          uv pip install --python .venv "pipcl==12"
+
+      - name: Build and install selected PyMuPDF
+        env:
+          PACKAGE_DIR: ${{ steps.sources.outputs.pymupdf_dir }}
+        run: uv pip install --python .venv --reinstall --no-deps "$PACKAGE_DIR"
+
+      - name: Build and install selected PyMuPDF Layout
+        env:
+          PACKAGE_DIR: ${{ steps.sources.outputs.layout_dir }}
+          PYMUPDF_LAYOUT_SETUP_BUILD_PYMUPDF: "1"
+        run: uv pip install --python .venv --reinstall --no-build-isolation --no-deps "$PACKAGE_DIR"
+
+      - name: Build and install selected PyMuPDF4LLM
+        env:
+          PACKAGE_DIR: ${{ steps.sources.outputs.llm_dir }}
+          PYMUPDF_SETUP_VERSION: "1"
+        run: uv pip install --python .venv --reinstall --no-deps "$PACKAGE_DIR"
+
+      - name: Check source stack compatibility
+        env:
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+          PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
+          PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
+          PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
+        run: |
+          .venv/bin/python "$WORKFLOW_SCRIPTS/check_compatibility.py" \
+            --output "$OUTPUT_DIR/_compatibility.json" \
+            --pymupdf-repository pymupdf/PyMuPDF \
+            --pymupdf-ref "$PYMUPDF_REF" \
+            --pymupdf-sha "${{ steps.sources.outputs.pymupdf_sha }}" \
+            --pymupdf-layout-repository ArtifexSoftware/sce \
+            --pymupdf-layout-ref "$PYMUPDF_LAYOUT_REF" \
+            --pymupdf-layout-sha "${{ steps.sources.outputs.layout_sha }}" \
+            --pymupdf4llm-repository pymupdf/pymupdf4llm \
+            --pymupdf4llm-ref "$PYMUPDF4LLM_REF" \
+            --pymupdf4llm-sha "${{ steps.sources.outputs.llm_sha }}"
+
+      - name: Prepare versioned ParseBench dataset
+        env:
+          DATA_DIR: ${{ steps.config.outputs.data_dir }}
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
+          DATASET_SHA: ${{ steps.dataset.outputs.sha }}
+        run: .venv/bin/python "$WORKFLOW_SCRIPTS/benchmark.py" download
+
+      - name: Write run metadata
+        env:
+          BENCHMARK_REF: ${{ steps.config.outputs.benchmark_ref }}
+          DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
+          DATASET_COMMIT_URL: ${{ steps.dataset.outputs.commit_url }}
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
+          DATASET_REQUESTED_REF: ${{ steps.dataset.outputs.requested_ref }}
+          DATASET_SHA: ${{ steps.dataset.outputs.sha }}
+          DESTINATION: ${{ steps.config.outputs.destination }}
+          GROUP: ${{ steps.config.outputs.group }}
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+          PARSEBENCH_GCS_BUCKET: ${{ vars.PARSEBENCH_GCS_BUCKET }}
+          RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
+        run: .venv/bin/python "$WORKFLOW_SCRIPTS/write_run_metadata.py"
+
+      - name: Run PyMuPDF4LLM 150 DPI inference
+        env:
+          DATA_DIR: ${{ steps.config.outputs.data_dir }}
+          GROUP: ${{ steps.config.outputs.group }}
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+        run: .venv/bin/python "$WORKFLOW_SCRIPTS/benchmark.py" inference
+
+      - name: Run ParseBench evaluation
+        env:
+          DATA_DIR: ${{ steps.config.outputs.data_dir }}
+          GROUP: ${{ steps.config.outputs.group }}
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+        run: .venv/bin/python "$WORKFLOW_SCRIPTS/benchmark.py" evaluate
+
+      - name: Generate ParseBench reports
+        env:
+          DATA_DIR: ${{ steps.config.outputs.data_dir }}
+          GROUP: ${{ steps.config.outputs.group }}
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+        run: .venv/bin/python "$WORKFLOW_SCRIPTS/benchmark.py" report
+
+      - name: Add aggregate results to workflow summary
+        env:
+          GROUP: ${{ steps.config.outputs.group }}
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+        run: .venv/bin/python "$WORKFLOW_SCRIPTS/write_results_summary.py"
+
+      - name: Upload source-stack GitHub artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.config.outputs.artifact_name }}
+          path: ${{ steps.config.outputs.output_dir }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish results or diagnostics
+    needs: benchmark
+    if: ${{ always() && needs.benchmark.outputs.artifact_name != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout publishing helper
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow-support
+          persist-credentials: false
+          sparse-checkout: .github/scripts/pymupdf_source_stack
+
+      - name: Download benchmark artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.benchmark.outputs.artifact_name }}
+          path: parsebench-output
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Publish results or failure diagnostics
+        env:
+          BENCHMARK_RESULT: ${{ needs.benchmark.result }}
+          BUCKET: ${{ vars.PARSEBENCH_GCS_BUCKET }}
+          DESTINATION: ${{ needs.benchmark.outputs.destination }}
+          OUTPUT_DIR: parsebench-output
+        run: python3 "$WORKFLOW_SCRIPTS/publish.py"
+
+  report_outcome:
+    name: Report final outcome
+    needs:
+      - benchmark
+      - publish
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout summary helpers
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow-support
+          persist-credentials: false
+          sparse-checkout: .github/scripts/pymupdf_source_stack
+
+      - name: Report successful completion
+        if: ${{ needs.benchmark.result == 'success' && needs.publish.result == 'success' }}
+        run: python3 "$WORKFLOW_SCRIPTS/write_outcome.py" success
+
+      - name: Download diagnostic artifact
+        if: >-
+          ${{
+            (needs.benchmark.result == 'failure' || needs.publish.result == 'failure') &&
+            needs.benchmark.outputs.artifact_name != ''
+          }}
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.benchmark.outputs.artifact_name }}
+          path: failure-diagnostics
+
+      - name: Add error details to workflow summary
+        if: ${{ needs.benchmark.result == 'failure' || needs.publish.result == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 "$WORKFLOW_SCRIPTS/write_failure_summary.py" \
+            --diagnostics failure-diagnostics \
+            --output "$GITHUB_STEP_SUMMARY" \
+            --benchmark-result "${{ needs.benchmark.result }}" \
+            --publish-result "${{ needs.publish.result }}"
+
+      - name: Report incomplete workflow
+        if: >-
+          ${{
+            needs.benchmark.result != 'failure' &&
+            needs.publish.result != 'failure' &&
+            (needs.benchmark.result != 'success' || needs.publish.result != 'success')
+          }}
+        run: |
+          python3 "$WORKFLOW_SCRIPTS/write_outcome.py" incomplete \
+            --benchmark-result "${{ needs.benchmark.result }}" \
+            --publish-result "${{ needs.publish.result }}"
