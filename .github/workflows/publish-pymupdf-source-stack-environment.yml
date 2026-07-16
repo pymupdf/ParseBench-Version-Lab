@@ -50,8 +50,9 @@ jobs:
           IMAGE_TAG: ${{ steps.candidate.outputs.tag }}
         run: |
           docker run --rm "$IMAGE_TAG" bash -euo pipefail -c '
+            set -x
             test "$(python --version)" = "Python 3.12.13"
-            test "$(uv --version)" = "uv 0.11.29"
+            test "$(uv --version | cut -d" " -f2)" = "0.11.29"
             test "$(dpkg-query -W -f="\${Version}" swig)" = "4.2.0-2ubuntu1"
             test "$(dpkg-query -W -f="\${Version}" tesseract-ocr)" = "5.3.4-1build5"
             test "$(dpkg-query -W -f="\${Version}" tesseract-ocr-eng)" = "1:4.1.0-2"
