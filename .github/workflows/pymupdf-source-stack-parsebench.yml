@@ -55,10 +55,10 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   PIPELINE: pymupdf4llm_markdown_150dpi
-  PYTHON_VERSION: "3.12"
   GCP_PROJECT_ID: pypi-download-analysis-457820
   GCS_PREFIX: parsebench/pymupdf_source_stack
   UV_NO_SYNC: "1"
@@ -66,9 +66,17 @@ env:
 
 jobs:
   benchmark:
-    name: Check compatibility and run benchmark
-    runs-on: ubuntu-latest
+    name: Check compatibility and run benchmark in pinned container
+    runs-on: ubuntu-24.04
     timeout-minutes: 720
+    container:
+      image: ghcr.io/pymupdf/parsebench-source-stack-env@sha256:be78034c9188ad341b8d02d34d1702e3d8a870c47dc65a261e3d972718d26601
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
     outputs:
       artifact_name: ${{ steps.config.outputs.artifact_name }}
       destination: ${{ steps.config.outputs.destination }}
@@ -105,6 +113,26 @@ jobs:
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
           PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
         run: python3 "$WORKFLOW_SCRIPTS/resolve_layout_source.py"
+
+      - name: Record and verify pinned container environment
+        env:
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+        run: |
+          cp /usr/local/share/parsebench/environment.txt "$OUTPUT_DIR/_container_environment.txt"
+          test "$(python --version)" = "Python 3.12.13"
+          test "$(uv --version | cut -d' ' -f2)" = "0.11.29"
+          test "$(dpkg-query -W -f='${Version}' tesseract-ocr)" = "5.3.4-1build5"
+          test "$(dpkg-query -W -f='${Version}' tesseract-ocr-eng)" = "1:4.1.0-2"
+          tesseract --list-langs | grep -Fx eng
+          {
+            echo "## Container environment"
+            echo
+            echo "- Image: \`ghcr.io/pymupdf/parsebench-source-stack-env\`"
+            echo "- Digest: \`sha256:be78034c9188ad341b8d02d34d1702e3d8a870c47dc65a261e3d972718d26601\`"
+            echo "- Python: \`$(python --version)\`"
+            echo "- Tesseract package: \`$(dpkg-query -W -f='${Version}' tesseract-ocr)\`"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Resolve exact ParseBench dataset commit
         id: dataset
@@ -151,6 +179,13 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
 
+      - name: Trust container-mounted Git checkouts
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf-layout"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf4llm"
+
       - name: Add selected configuration to workflow summary
         env:
           BENCHMARK_REF: main
@@ -175,24 +210,16 @@ jobs:
           PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
         run: python3 "$WORKFLOW_SCRIPTS/resolve_sources.py"
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv and source build tools
+      - name: Install ParseBench dependencies without selected PyMuPDF packages
         run: |
-          python -m pip install --upgrade uv
-          sudo apt-get update
-          sudo apt-get install -y build-essential swig tesseract-ocr tesseract-ocr-eng
-
-      - name: Install ParseBench dependencies without pinned PyMuPDF packages
-        run: |
-          uv sync --extra runners \
+          uv sync --locked --extra runners \
             --no-install-package pymupdf \
             --no-install-package pymupdf-layout \
             --no-install-package pymupdf4llm
-          uv pip install --python .venv pipcl
+          uv pip install --python .venv "pipcl==12"
+
+      - name: Verify RapidOCR native runtime
+        run: .venv/bin/python -c "from rapidocr_onnxruntime import RapidOCR; print(RapidOCR)"
 
       - name: Build and install selected PyMuPDF
         env:

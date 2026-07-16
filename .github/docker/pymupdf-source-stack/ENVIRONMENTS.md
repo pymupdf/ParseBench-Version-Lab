@@ -1,9 +1,8 @@
 # ParseBench container environment inventory
 
-This file preserves the container environments previously built by the
-repository's GitHub workflows. No active workflow currently builds or uses
-these images. Keep this inventory and the adjacent `Dockerfile` as the starting
-point when `ParseBench Version Lab` is containerized.
+This file inventories the container environment used by `ParseBench Version
+Lab` and the earlier workflows that built and validated it. The adjacent
+`Dockerfile` is the reproducible definition for rebuilding the environment.
 
 ## Registry
 
@@ -67,9 +66,9 @@ successfully in these runs:
 The second run used the then-latest PyMuPDF, PyMuPDF Layout from the new
 `ArtifexSoftware/pymupdf_layout` repository, and PyMuPDF4LLM commits.
 
-## Future Version Lab integration
+## Version Lab integration
 
-When container support is added to the production workflow:
+The production workflow uses the following integration:
 
 1. Reference the recommended image by its full `@sha256:...` digest.
 2. Grant `packages: read` and provide `github.actor` / `github.token` as GHCR
@@ -83,4 +82,3 @@ When container support is added to the production workflow:
    SWIG, and the RapidOCR import before compiling the selected source stack.
 7. Keep the existing behavioral Layout/OCR compatibility test as the final
    environment and source-stack gate.
-
