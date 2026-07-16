@@ -177,6 +177,13 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
 
+      - name: Trust container-mounted Git checkouts
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf-layout"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf4llm"
+
       - name: Add selected configuration to workflow summary
         env:
           BENCHMARK_REF: ${{ inputs.benchmark_ref }}
