@@ -28,6 +28,12 @@ def main() -> int:
         "max_concurrent": 1,
         "gcs_bucket": os.environ.get("PARSEBENCH_GCS_BUCKET", ""),
         "gcs_destination": env("DESTINATION"),
+        "dataset": {
+            "branch": env("DATASET_BRANCH"),
+            "commit_url": env("DATASET_COMMIT_URL"),
+            "repository": env("DATASET_REPOSITORY"),
+            "resolved_sha": env("DATASET_SHA"),
+        },
         "source_stack": compatibility,
     }
     write_json(output_dir / "_github_run.json", metadata)

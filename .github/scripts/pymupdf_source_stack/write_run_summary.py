@@ -23,6 +23,12 @@ def main() -> int:
             )
             for name, component in COMPONENTS.items()
         ),
+        (
+            "ParseBench dataset",
+            env("DATASET_REPOSITORY"),
+            env("DATASET_BRANCH"),
+            env("DATASET_SHA"),
+        ),
     ]
     lines = [
         "## What this run is testing",
@@ -30,6 +36,7 @@ def main() -> int:
         f"- **Test size:** {markdown_cell(env('RUN_SCOPE_SELECTION'))}",
         f"- **Document category:** {markdown_cell(env('GROUP_SELECTION'))}",
         f"- **Pipeline:** {markdown_cell(env('PIPELINE'))}",
+        "- **Dataset download:** fresh, pinned to the exact commit shown below",
         "- **MuPDF:** selected automatically by the chosen PyMuPDF revision",
         "",
         "| Component | Repository | Requested selection | Exact commit used |",

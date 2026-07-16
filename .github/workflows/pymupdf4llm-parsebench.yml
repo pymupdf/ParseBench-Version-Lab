@@ -46,7 +46,7 @@ env:
   PIPELINE: pymupdf4llm_markdown_150dpi
   PYTHON_VERSION: "3.12"
   GCP_PROJECT_ID: pypi-download-analysis-457820
-  DATASET_CACHE_VERSION: v1
+  WORKFLOW_SCRIPTS: .workflow-support/.github/scripts/pymupdf_source_stack
 
 jobs:
   benchmark:
@@ -59,6 +59,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.benchmark_ref || github.ref }}
+
+      - name: Checkout workflow helpers
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow-support
+          persist-credentials: false
+          sparse-checkout: .github/scripts/pymupdf_source_stack
 
       - name: Resolve run configuration
         id: config
@@ -97,6 +105,30 @@ jobs:
             echo "run_scope=${RUN_SCOPE}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Resolve exact ParseBench dataset commit
+        id: dataset
+        env:
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+          RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
+        run: python3 "$WORKFLOW_SCRIPTS/resolve_dataset.py"
+
+      - name: Add dataset version to workflow summary
+        env:
+          DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
+          DATASET_COMMIT_URL: ${{ steps.dataset.outputs.commit_url }}
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
+          DATASET_SHA: ${{ steps.dataset.outputs.sha }}
+        run: |
+          {
+            echo "## Dataset version"
+            echo
+            echo "- Repository: \`${DATASET_REPOSITORY}\`"
+            echo "- Selected branch: \`${DATASET_BRANCH}\`"
+            echo "- Exact commit: [\`${DATASET_SHA}\`](${DATASET_COMMIT_URL})"
+            echo "- Download: fresh snapshot; no dataset cache restored"
+            echo
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -112,16 +144,6 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra runners
-
-      - name: Restore ParseBench dataset cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            data
-            ~/.cache/huggingface
-          key: parsebench-data-${{ runner.os }}-${{ env.DATASET_CACHE_VERSION }}-${{ steps.config.outputs.run_scope }}
-          restore-keys: |
-            parsebench-data-${{ runner.os }}-${{ env.DATASET_CACHE_VERSION }}-${{ steps.config.outputs.run_scope }}-
 
       - name: Verify OCR dependencies
         run: |
@@ -147,23 +169,22 @@ jobs:
           print("Tesseract language data: eng")
           PY
 
-      - name: Download ParseBench dataset
+      - name: Download fresh versioned ParseBench dataset
         env:
-          RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
-        run: |
-          set -euo pipefail
-
-          if [[ "${RUN_SCOPE}" == "test" ]]; then
-            uv run parse-bench download --test
-          else
-            uv run parse-bench download
-          fi
+          DATA_DIR: ${{ steps.config.outputs.data_dir }}
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
+          DATASET_SHA: ${{ steps.dataset.outputs.sha }}
+        run: uv run python "$WORKFLOW_SCRIPTS/benchmark.py" download
 
       - name: Write run metadata
         env:
           BENCHMARK_REF: ${{ steps.config.outputs.benchmark_ref }}
           CHECKED_OUT_REF: ${{ steps.config.outputs.checked_out_ref }}
           CHECKED_OUT_SHA: ${{ steps.config.outputs.checked_out_sha }}
+          DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
+          DATASET_COMMIT_URL: ${{ steps.dataset.outputs.commit_url }}
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
+          DATASET_SHA: ${{ steps.dataset.outputs.sha }}
           DESTINATION: ${{ steps.config.outputs.destination }}
           GROUP: ${{ steps.config.outputs.group }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
@@ -186,6 +207,12 @@ jobs:
             "run_scope": "${RUN_SCOPE}",
             "group": "${GROUP}",
             "max_concurrent": 1,
+            "dataset": {
+              "repository": "${DATASET_REPOSITORY}",
+              "branch": "${DATASET_BRANCH}",
+              "resolved_sha": "${DATASET_SHA}",
+              "commit_url": "${DATASET_COMMIT_URL}"
+            },
             "gcs_bucket": "${{ vars.PARSEBENCH_GCS_BUCKET }}",
             "gcs_destination": "${DESTINATION}"
           }

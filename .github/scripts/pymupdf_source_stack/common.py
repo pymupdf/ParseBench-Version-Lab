@@ -27,6 +27,12 @@ COMPONENTS = {
     },
 }
 
+DATASET_REPOSITORY = "llamaindex/ParseBench"
+DATASET_BRANCHES = {
+    "full": "main",
+    "test": "test-data",
+}
+
 
 def env(name: str) -> str:
     """Return a required environment variable with a useful error."""

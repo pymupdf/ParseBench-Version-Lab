@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +27,7 @@ def _load_module(name: str):
 
 configure = _load_module("configure")
 benchmark = _load_module("benchmark")
+resolve_dataset = _load_module("resolve_dataset")
 results_summary = _load_module("write_results_summary")
 
 
@@ -85,6 +87,60 @@ def test_evaluation_groups_expands_text_categories(tmp_path: Path) -> None:
 def test_evaluation_groups_rejects_missing_inference_results(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="No inference result groups found"):
         benchmark.evaluation_groups(tmp_path)
+
+
+@pytest.mark.parametrize(("scope", "branch"), [("full", "main"), ("test", "test-data")])
+def test_dataset_branch_matches_run_scope(scope: str, branch: str) -> None:
+    assert resolve_dataset.branch_for_scope(scope) == branch
+
+
+def test_resolve_dataset_records_immutable_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    github_output = tmp_path / "github-output"
+    output_dir = tmp_path / "output"
+    sha = "a" * 40
+    monkeypatch.setenv("GITHUB_OUTPUT", str(github_output))
+    monkeypatch.setenv("OUTPUT_DIR", str(output_dir))
+    monkeypatch.setenv("RUN_SCOPE", "test")
+    monkeypatch.setattr(resolve_dataset, "resolve_branch", lambda repository, branch: sha)
+
+    assert resolve_dataset.main() == 0
+
+    outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
+    assert outputs["branch"] == "test-data"
+    assert outputs["sha"] == sha
+    dataset = json.loads((output_dir / "_dataset.json").read_text())
+    assert dataset["repository"] == "llamaindex/ParseBench"
+    assert dataset["resolved_sha"] == sha
+
+
+def test_dataset_download_is_fresh_and_uses_exact_sha(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import parse_bench.data.download
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "stale-file").write_text("old", encoding="utf-8")
+    sha = "b" * 40
+    call: dict[str, object] = {}
+
+    def snapshot_download(**kwargs: object) -> None:
+        assert not data_dir.exists()
+        call.update(kwargs)
+        data_dir.mkdir()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "huggingface_hub",
+        SimpleNamespace(snapshot_download=snapshot_download),
+    )
+    monkeypatch.setattr(parse_bench.data.download, "is_dataset_ready", lambda path: True)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    monkeypatch.setenv("DATASET_REPOSITORY", "llamaindex/ParseBench")
+    monkeypatch.setenv("DATASET_SHA", sha)
+
+    benchmark.download()
+
+    assert call["revision"] == sha
+    assert call["force_download"] is True
 
 
 def _write_report(path: Path, *, total: int, metrics: dict[str, float]) -> None:

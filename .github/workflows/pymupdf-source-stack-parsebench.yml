@@ -61,7 +61,6 @@ env:
   PYTHON_VERSION: "3.12"
   GCP_PROJECT_ID: pypi-download-analysis-457820
   GCS_PREFIX: parsebench/pymupdf_source_stack
-  DATASET_CACHE_VERSION: v1
   UV_NO_SYNC: "1"
   WORKFLOW_SCRIPTS: .workflow-support/.github/scripts/pymupdf_source_stack
 
@@ -99,6 +98,13 @@ jobs:
           RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
         run: python3 "$WORKFLOW_SCRIPTS/configure.py"
 
+      - name: Resolve exact ParseBench dataset commit
+        id: dataset
+        env:
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+          RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
+        run: python3 "$WORKFLOW_SCRIPTS/resolve_dataset.py"
+
       - name: Checkout PyMuPDF
         uses: actions/checkout@v4
         with:
@@ -132,6 +138,9 @@ jobs:
       - name: Add selected configuration to workflow summary
         env:
           BENCHMARK_REF: ${{ inputs.benchmark_ref }}
+          DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
+          DATASET_SHA: ${{ steps.dataset.outputs.sha }}
           GROUP_SELECTION: ${{ inputs.group }}
           PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
           PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
@@ -203,24 +212,20 @@ jobs:
             --pymupdf4llm-ref "$PYMUPDF4LLM_REF" \
             --pymupdf4llm-sha "${{ steps.sources.outputs.llm_sha }}"
 
-      - name: Restore ParseBench dataset cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            data
-            ~/.cache/huggingface
-          key: parsebench-data-${{ runner.os }}-${{ env.DATASET_CACHE_VERSION }}-${{ steps.config.outputs.run_scope }}
-          restore-keys: |
-            parsebench-data-${{ runner.os }}-${{ env.DATASET_CACHE_VERSION }}-${{ steps.config.outputs.run_scope }}-
-
-      - name: Download ParseBench dataset
+      - name: Download fresh versioned ParseBench dataset
         env:
-          RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
+          DATA_DIR: ${{ steps.config.outputs.data_dir }}
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
+          DATASET_SHA: ${{ steps.dataset.outputs.sha }}
         run: .venv/bin/python "$WORKFLOW_SCRIPTS/benchmark.py" download
 
       - name: Write run metadata
         env:
           BENCHMARK_REF: ${{ steps.config.outputs.benchmark_ref }}
+          DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
+          DATASET_COMMIT_URL: ${{ steps.dataset.outputs.commit_url }}
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
+          DATASET_SHA: ${{ steps.dataset.outputs.sha }}
           DESTINATION: ${{ steps.config.outputs.destination }}
           GROUP: ${{ steps.config.outputs.group }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}

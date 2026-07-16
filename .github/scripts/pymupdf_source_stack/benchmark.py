@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -19,10 +20,26 @@ def parse_bench(*arguments: str) -> None:
 
 
 def download() -> None:
-    arguments = ["download"]
-    if env("RUN_SCOPE") == "test":
-        arguments.append("--test")
-    parse_bench(*arguments)
+    from huggingface_hub import snapshot_download
+
+    from parse_bench.data.download import is_dataset_ready
+
+    data_dir = Path(env("DATA_DIR"))
+    if data_dir.exists():
+        shutil.rmtree(data_dir)
+
+    repository = env("DATASET_REPOSITORY")
+    revision = env("DATASET_SHA")
+    print(f"Downloading fresh dataset snapshot: {repository}@{revision}")
+    snapshot_download(
+        repo_id=repository,
+        repo_type="dataset",
+        local_dir=str(data_dir),
+        revision=revision,
+        force_download=True,
+    )
+    if not is_dataset_ready(data_dir):
+        raise SystemExit(f"Dataset snapshot {repository}@{revision} is incomplete at {data_dir}")
 
 
 def inference() -> None:

@@ -12,10 +12,12 @@ an overall aggregate plus category headline scores directly to the GitHub run
 summary. `_benchmark_scores.json` records the same values in the uploaded
 artifact.
 
-Each script is a small command with one responsibility. Inputs supplied by the
-workflow are passed through environment variables, while values needed by later
-steps are written using the standard `GITHUB_OUTPUT` and
-`GITHUB_STEP_SUMMARY` files.
+Each script is a small command with one responsibility. `resolve_dataset.py`
+resolves the selected Hugging Face branch to a full commit SHA, and
+`benchmark.py download` always downloads that immutable snapshot into a clean
+directory. Inputs supplied by the workflow are passed through environment
+variables, while values needed by later steps are written using the standard
+`GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY` files.
 
 Run the local checks with:
 
