@@ -41,6 +41,8 @@ RUN sed -i "/^URIs:/a Snapshot: ${UBUNTU_SNAPSHOT}" /etc/apt/sources.list.d/ubun
         libgdbm-compat4t64 \
         libgdbm6t64 \
         libgif7=5.2.2-1ubuntu1 \
+        libgl1=1.7.0-1build1 \
+        libglib2.0-0t64=2.80.0-6ubuntu1 \
         libgomp1 \
         liblept5=1.82.0-3build4 \
         liblzma5 \
@@ -79,6 +81,8 @@ RUN mkdir -p /usr/local/share/parsebench \
         "python=3.12.13" \
         "uv=${UV_VERSION}" \
         "build_essential=12.10ubuntu1" \
+        "libgl1=1.7.0-1build1" \
+        "libglib2.0-0t64=2.80.0-6ubuntu1" \
         "swig=4.2.0-2ubuntu1" \
         "tesseract=5.3.4-1build5" \
         "tesseract_eng=1:4.1.0-2" \

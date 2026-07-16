@@ -11,7 +11,7 @@ permissions:
 
 env:
   ENVIRONMENT_IMAGE: ghcr.io/pymupdf/parsebench-source-stack-env
-  ENVIRONMENT_VERSION_TAG: ubuntu24-python3.12.13-20260716
+  ENVIRONMENT_VERSION_TAG: ubuntu24-python3.12.13-20260716-r2
 
 jobs:
   build_test_publish:
@@ -53,6 +53,8 @@ jobs:
             set -x
             test "$(python --version)" = "Python 3.12.13"
             test "$(uv --version | cut -d" " -f2)" = "0.11.29"
+            test "$(dpkg-query -W -f="\${Version}" libgl1)" = "1.7.0-1build1"
+            test "$(dpkg-query -W -f="\${Version}" libglib2.0-0t64)" = "2.80.0-6ubuntu1"
             test "$(dpkg-query -W -f="\${Version}" swig)" = "4.2.0-2ubuntu1"
             test "$(dpkg-query -W -f="\${Version}" tesseract-ocr)" = "5.3.4-1build5"
             test "$(dpkg-query -W -f="\${Version}" tesseract-ocr-eng)" = "1:4.1.0-2"
@@ -61,6 +63,11 @@ jobs:
             cc --version
             swig -version
             cat /usr/local/share/parsebench/environment.txt
+            uv venv /tmp/rapidocr-smoke
+            uv pip install --python /tmp/rapidocr-smoke/bin/python \
+              "rapidocr-onnxruntime==1.2.3" "opencv-python==4.13.0.92"
+            /tmp/rapidocr-smoke/bin/python -c \
+              "from rapidocr_onnxruntime import RapidOCR; print(RapidOCR)"
           '
 
       - name: Log in to GitHub Container Registry
