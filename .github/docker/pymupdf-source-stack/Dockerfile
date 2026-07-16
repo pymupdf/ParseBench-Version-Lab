@@ -18,6 +18,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     TZ=Etc/UTC
 
+# The minimal Ubuntu base does not include a CA bundle. Bootstrap it from the
+# digest-pinned Python stage so APT can verify snapshot.ubuntu.com, then replace
+# it with Ubuntu's snapshot-pinned ca-certificates package below.
+COPY --from=python-runtime /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
 # Freeze Ubuntu packages to the archive state used by the reference workflow
 # run. The explicitly versioned OCR and build packages are the versions that
 # run 29534227627 installed; all transitive packages come from the same archive
