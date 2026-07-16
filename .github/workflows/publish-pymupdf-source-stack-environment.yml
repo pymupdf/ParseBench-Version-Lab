@@ -1,0 +1,100 @@
+name: Publish ParseBench source-stack environment
+
+run-name: Publish source-stack environment · ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  ENVIRONMENT_IMAGE: ghcr.io/pymupdf/parsebench-source-stack-env
+  ENVIRONMENT_VERSION_TAG: ubuntu24-python3.12.13-20260716
+
+jobs:
+  build_test_publish:
+    name: Build, test, and publish environment image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout environment definition
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Define candidate image tag
+        id: candidate
+        run: echo "tag=${ENVIRONMENT_IMAGE}:run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Build candidate environment image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: .github/docker/pymupdf-source-stack/Dockerfile
+          load: true
+          platforms: linux/amd64
+          tags: ${{ steps.candidate.outputs.tag }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.workflow_sha }}
+            org.opencontainers.image.version=${{ env.ENVIRONMENT_VERSION_TAG }}
+
+      - name: Smoke-test candidate environment image
+        env:
+          IMAGE_TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          docker run --rm "$IMAGE_TAG" bash -euo pipefail -c '
+            test "$(python --version)" = "Python 3.12.13"
+            test "$(uv --version)" = "uv 0.11.29"
+            test "$(dpkg-query -W -f="\${Version}" swig)" = "4.2.0-2ubuntu1"
+            test "$(dpkg-query -W -f="\${Version}" tesseract-ocr)" = "5.3.4-1build5"
+            test "$(dpkg-query -W -f="\${Version}" tesseract-ocr-eng)" = "1:4.1.0-2"
+            tesseract --list-langs | grep -Fx eng
+            python -c "import ctypes, sqlite3, ssl; print(ssl.OPENSSL_VERSION)"
+            cc --version
+            swig -version
+            cat /usr/local/share/parsebench/environment.txt
+          '
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish immutable candidate and version tags
+        id: publish
+        env:
+          IMAGE_TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          docker push "$IMAGE_TAG"
+          version_tag="${ENVIRONMENT_IMAGE}:${ENVIRONMENT_VERSION_TAG}"
+          docker tag "$IMAGE_TAG" "$version_tag"
+          docker push "$version_tag"
+
+          repository_digest="$(docker image inspect --format='{{index .RepoDigests 0}}' "$IMAGE_TAG")"
+          digest="${repository_digest#*@}"
+          image_ref="${ENVIRONMENT_IMAGE}@${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "image_ref=${image_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Add published image to workflow summary
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE_REF: ${{ steps.publish.outputs.image_ref }}
+        run: |
+          {
+            echo "## Published environment image"
+            echo
+            echo "- Version tag: \`${ENVIRONMENT_IMAGE}:${ENVIRONMENT_VERSION_TAG}\`"
+            echo "- Digest: \`${DIGEST}\`"
+            echo "- Immutable reference: \`${IMAGE_REF}\`"
+            echo "- Platform: \`linux/amd64\`"
+          } >> "$GITHUB_STEP_SUMMARY"
