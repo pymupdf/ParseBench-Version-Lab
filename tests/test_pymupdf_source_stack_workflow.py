@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 import pytest
 
@@ -75,7 +76,7 @@ def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monk
     assert request["pymupdf"] == {"ref": "main", "repository": "pymupdf/PyMuPDF"}
     assert request["pymupdf_layout"] == {
         "ref": "1.28.0",
-        "repositories": ["ArtifexSoftware/pymupdf_layout", "ArtifexSoftware/sce"],
+        "repositories": ["ArtifexSoftware/sce", "ArtifexSoftware/pymupdf_layout"],
     }
 
 
@@ -91,7 +92,7 @@ def _layout_resolution_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     return output_dir
 
 
-def test_layout_resolution_prefers_current_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_layout_resolution_prefers_legacy_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output_dir = _layout_resolution_environment(tmp_path, monkeypatch)
     sha = "a" * 40
     calls: list[str] = []
@@ -105,33 +106,44 @@ def test_layout_resolution_prefers_current_repository(tmp_path: Path, monkeypatc
     monkeypatch.setattr(resolve_layout_source, "resolve_commit", resolve)
 
     assert resolve_layout_source.main() == 0
-    assert calls == ["ArtifexSoftware/pymupdf_layout"]
+    assert calls == ["ArtifexSoftware/sce"]
     request = json.loads((output_dir / "_source_request.json").read_text())
     assert request["pymupdf_layout"] == {
         "ref": "main",
-        "repository": "ArtifexSoftware/pymupdf_layout",
+        "repository": "ArtifexSoftware/sce",
         "resolved_sha": sha,
     }
 
 
-def test_layout_resolution_falls_back_to_legacy_repository(
+def test_layout_resolution_falls_back_to_current_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     output_dir = _layout_resolution_environment(tmp_path, monkeypatch)
     sha = "b" * 40
 
     def resolve(repository: str, requested_ref: str, token: str) -> str | None:
-        return sha if repository == "ArtifexSoftware/sce" else None
+        return sha if repository == "ArtifexSoftware/pymupdf_layout" else None
 
     monkeypatch.setattr(resolve_layout_source, "resolve_commit", resolve)
 
     assert resolve_layout_source.main() == 0
     source = json.loads((output_dir / "_layout_source.json").read_text())
     assert source == {
-        "repository": "ArtifexSoftware/sce",
+        "repository": "ArtifexSoftware/pymupdf_layout",
         "requested_ref": "main",
         "resolved_sha": sha,
     }
+
+
+def test_layout_resolution_treats_unprocessable_ref_as_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unprocessable(*args: object, **kwargs: object) -> None:
+        raise HTTPError("https://api.github.com", 422, "No commit found", None, None)
+
+    monkeypatch.setattr(resolve_layout_source, "urlopen", unprocessable)
+
+    assert resolve_layout_source.resolve_commit("ArtifexSoftware/sce", "a" * 40, "token") is None
 
 
 def test_layout_resolution_reports_missing_ref(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,7 +173,7 @@ def test_layout_resolution_records_github_service_outage(
     failure = json.loads((output_dir / "_failure.json").read_text())
     assert failure["title"] == "GitHub API temporarily unavailable"
     assert failure["http_status"] == 503
-    assert failure["repository"] == "ArtifexSoftware/pymupdf_layout"
+    assert failure["repository"] == "ArtifexSoftware/sce"
     assert failure["requested_ref"] == "main"
     assert "not a PyMuPDF source compatibility failure" in failure["error"]
     assert "benchmark execution were skipped" in failure["details"]

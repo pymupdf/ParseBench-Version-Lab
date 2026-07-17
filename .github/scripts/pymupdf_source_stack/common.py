@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 LAYOUT_REPOSITORIES = (
-    "ArtifexSoftware/pymupdf_layout",
     "ArtifexSoftware/sce",
+    "ArtifexSoftware/pymupdf_layout",
 )
 
 COMPONENTS = {

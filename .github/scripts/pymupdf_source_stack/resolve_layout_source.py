@@ -70,7 +70,7 @@ def resolve_commit(repository: str, requested_ref: str, token: str) -> str | Non
                 metadata = json.load(response)
             break
         except HTTPError as error:
-            if error.code == 404:
+            if error.code in {404, 422}:
                 return None
             if error.code >= 500 and attempt < 2:
                 time.sleep(2**attempt)
