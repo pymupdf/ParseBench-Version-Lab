@@ -31,6 +31,7 @@ benchmark = _load_module("benchmark")
 resolve_dataset = _load_module("resolve_dataset")
 resolve_layout_source = _load_module("resolve_layout_source")
 results_summary = _load_module("write_results_summary")
+run_summary = _load_module("write_run_summary")
 
 
 @pytest.mark.parametrize(
@@ -237,6 +238,35 @@ def test_layout_resolution_records_github_service_outage(
     assert failure["requested_ref"] == "main"
     assert "not a PyMuPDF source compatibility failure" in failure["error"]
     assert "benchmark execution were skipped" in failure["details"]
+
+
+def _source_revisions(commits_after: int | None) -> list[run_summary.SourceRevision]:
+    return [
+        run_summary.SourceRevision(
+            label="PyMuPDF",
+            repository="pymupdf/PyMuPDF",
+            requested_ref="1.28.0",
+            sha="a" * 40,
+            commit_date="2026-07-19 12:34:56 UTC",
+            commits_after=commits_after,
+        )
+    ]
+
+
+def test_versioned_source_summary_links_commit_and_newer_commits() -> None:
+    markdown = "\n".join(run_summary.source_table(_source_revisions(7), all_latest=False))
+
+    assert "[" + "a" * 40 + "](https://github.com/pymupdf/PyMuPDF/commit/" + "a" * 40 + ")" in markdown
+    assert "2026-07-19 12:34:56 UTC" in markdown
+    assert "[7](https://github.com/pymupdf/PyMuPDF/compare/" + "a" * 40 + "...main)" in markdown
+
+
+def test_all_latest_source_summary_shows_dates_without_comparison_count() -> None:
+    markdown = "\n".join(run_summary.source_table(_source_revisions(None), all_latest=True))
+
+    assert "Latest commits were requested for all three PyMuPDF repositories." in markdown
+    assert "2026-07-19 12:34:56 UTC" in markdown
+    assert "Commits after this commit" not in markdown
 
 
 def test_evaluation_groups_expands_text_categories(tmp_path: Path) -> None:

@@ -3,35 +3,138 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
 from common import COMPONENTS, append_summary, env, git_sha, markdown_cell
 
 
+@dataclass(frozen=True)
+class SourceRevision:
+    label: str
+    repository: str
+    requested_ref: str
+    sha: str
+    commit_date: str
+    commits_after: int | None
+
+
+def commit_date(root: object) -> str:
+    value = subprocess.check_output(
+        ["git", "-C", str(root), "show", "-s", "--format=%cI", "HEAD"],
+        text=True,
+    ).strip()
+    parsed = datetime.fromisoformat(value).astimezone(UTC)
+    return parsed.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def commits_after_main(repository: str, sha: str, token: str) -> int | None:
+    comparison = f"{quote(sha, safe='')}...main"
+    request = Request(  # noqa: S310 - fixed GitHub API host
+        f"https://api.github.com/repos/{repository}/compare/{comparison}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "ParseBench-source-stack-workflow",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API host
+            metadata = json.load(response)
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+        return None
+    count = metadata.get("ahead_by")
+    return count if isinstance(count, int) and count >= 0 else None
+
+
+def github_link(label: str, repository: str, suffix: str = "") -> str:
+    url = f"https://github.com/{repository}{suffix}"
+    return f"[{markdown_cell(label)}]({url})"
+
+
+def source_table(revisions: list[SourceRevision], all_latest: bool) -> list[str]:
+    lines = ["### PyMuPDF source commits", ""]
+    if all_latest:
+        lines.extend(
+            [
+                "Latest commits were requested for all three PyMuPDF repositories.",
+                "",
+                "| Component | Repository | Exact commit used | Commit date |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        lines.extend(
+            f"| {markdown_cell(revision.label)} | "
+            f"{github_link(revision.repository, revision.repository)} | "
+            f"{github_link(revision.sha, revision.repository, f'/commit/{revision.sha}')} | "
+            f"{markdown_cell(revision.commit_date)} |"
+            for revision in revisions
+        )
+        return lines
+
+    lines.extend(
+        [
+            "| Component | Repository | Requested selection | Exact commit used | "
+            "Commit date | Commits after this commit |",
+            "| --- | --- | --- | --- | --- | ---: |",
+        ]
+    )
+    for revision in revisions:
+        if revision.commits_after is None:
+            commits_after = "Unavailable"
+        else:
+            commits_after = github_link(
+                str(revision.commits_after),
+                revision.repository,
+                f"/compare/{revision.sha}...main",
+            )
+        lines.append(
+            f"| {markdown_cell(revision.label)} | "
+            f"{github_link(revision.repository, revision.repository)} | "
+            f"`{markdown_cell(revision.requested_ref)}` | "
+            f"{github_link(revision.sha, revision.repository, f'/commit/{revision.sha}')} | "
+            f"{markdown_cell(revision.commit_date)} | {commits_after} |"
+        )
+    return lines
+
+
 def main() -> int:
+    all_latest = env("ALL_LATEST").strip().lower() == "true"
     refs = {
         "pymupdf": env("PYMUPDF_REF"),
         "pymupdf_layout": env("PYMUPDF_LAYOUT_REF"),
         "pymupdf4llm": env("PYMUPDF4LLM_REF"),
     }
-    rows = [
-        ("ParseBench", env("GITHUB_REPOSITORY"), env("BENCHMARK_REF"), git_sha()),
-        *(
-            (
-                str(component["label"]),
-                env("PYMUPDF_LAYOUT_REPOSITORY")
-                if name == "pymupdf_layout"
-                else str(component["repository"]),
-                refs[name],
-                git_sha(component["root"]),
+    token = env("GITHUB_TOKEN")
+    revisions = []
+    for name, component in COMPONENTS.items():
+        repository = (
+            env("PYMUPDF_LAYOUT_REPOSITORY")
+            if name == "pymupdf_layout"
+            else str(component["repository"])
+        )
+        sha = git_sha(component["root"])
+        revisions.append(
+            SourceRevision(
+                label=str(component["label"]),
+                repository=repository,
+                requested_ref=refs[name],
+                sha=sha,
+                commit_date=commit_date(component["root"]),
+                commits_after=None if all_latest else commits_after_main(repository, sha, token),
             )
-            for name, component in COMPONENTS.items()
-        ),
-        (
-            "ParseBench dataset",
-            env("DATASET_REPOSITORY"),
-            env("DATASET_REQUESTED_REF"),
-            env("DATASET_SHA"),
-        ),
-    ]
+        )
+
+    benchmark_repository = env("GITHUB_REPOSITORY")
+    benchmark_sha = git_sha()
+    dataset_repository = env("DATASET_REPOSITORY")
+    dataset_sha = env("DATASET_SHA")
     lines = [
         "## What this run is testing",
         "",
@@ -41,15 +144,21 @@ def main() -> int:
         "- **Dataset download:** immutable SHA cache; downloads only on a cache miss",
         "- **MuPDF:** selected automatically by the chosen PyMuPDF revision",
         "",
+        *source_table(revisions, all_latest),
+        "",
+        "### Benchmark revisions",
+        "",
         "| Component | Repository | Requested selection | Exact commit used |",
         "| --- | --- | --- | --- |",
+        f"| ParseBench | {github_link(benchmark_repository, benchmark_repository)} | "
+        f"`{markdown_cell(env('BENCHMARK_REF'))}` | "
+        f"{github_link(benchmark_sha, benchmark_repository, f'/commit/{benchmark_sha}')} |",
+        f"| ParseBench dataset | `{markdown_cell(dataset_repository)}` | "
+        f"`{markdown_cell(env('DATASET_REQUESTED_REF'))}` | "
+        f"[{markdown_cell(dataset_sha)}]"
+        f"(https://huggingface.co/datasets/{dataset_repository}/commit/{dataset_sha}) |",
+        "",
     ]
-    lines.extend(
-        f"| {markdown_cell(component)} | `{markdown_cell(repository)}` | "
-        f"`{markdown_cell(requested)}` | `{markdown_cell(commit)}` |"
-        for component, repository, requested, commit in rows
-    )
-    lines.append("")
     append_summary(lines)
     return 0
 

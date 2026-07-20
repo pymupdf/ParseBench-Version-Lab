@@ -198,11 +198,13 @@ jobs:
 
       - name: Add selected configuration to workflow summary
         env:
+          ALL_LATEST: ${{ steps.config.outputs.all_latest }}
           BENCHMARK_REF: main
           DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
           DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
           DATASET_REQUESTED_REF: ${{ steps.dataset.outputs.requested_ref }}
           DATASET_SHA: ${{ steps.dataset.outputs.sha }}
+          GITHUB_TOKEN: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
           GROUP_SELECTION: ${{ inputs.group }}
           PYMUPDF4LLM_REF: ${{ steps.config.outputs.pymupdf4llm_ref }}
           PYMUPDF_LAYOUT_REF: ${{ steps.config.outputs.pymupdf_layout_ref }}
