@@ -58,6 +58,16 @@ def github_link(label: str, repository: str, suffix: str = "") -> str:
     return f"[{markdown_cell(label)}]({url})"
 
 
+def commit_label(commits_after: int | None) -> str:
+    if commits_after == 0:
+        return "Latest commit"
+    if commits_after == 1:
+        return "1 commit ago"
+    if commits_after is not None:
+        return f"{commits_after} commits ago"
+    return "Selected commit"
+
+
 def source_table(revisions: list[SourceRevision], all_latest: bool) -> list[str]:
     lines = ["### PyMuPDF source commits", ""]
     if all_latest:
@@ -65,14 +75,14 @@ def source_table(revisions: list[SourceRevision], all_latest: bool) -> list[str]
             [
                 "Latest commits were requested for all three PyMuPDF repositories.",
                 "",
-                "| Component | Repository | Exact commit used | Commit date |",
+                "| Component | Repository | Commit used | Commit date |",
                 "| --- | --- | --- | --- |",
             ]
         )
         lines.extend(
             f"| {markdown_cell(revision.label)} | "
             f"{github_link(revision.repository, revision.repository)} | "
-            f"{github_link(revision.sha, revision.repository, f'/commit/{revision.sha}')} | "
+            f"{github_link('Latest commit', revision.repository, f'/commit/{revision.sha}')} | "
             f"{markdown_cell(revision.commit_date)} |"
             for revision in revisions
         )
@@ -80,26 +90,17 @@ def source_table(revisions: list[SourceRevision], all_latest: bool) -> list[str]
 
     lines.extend(
         [
-            "| Component | Repository | Requested selection | Exact commit used | "
-            "Commit date | Commits after this commit |",
-            "| --- | --- | --- | --- | --- | ---: |",
+            "| Component | Repository | Requested selection | Commit used | Commit date |",
+            "| --- | --- | --- | --- | --- |",
         ]
     )
     for revision in revisions:
-        if revision.commits_after is None:
-            commits_after = "Unavailable"
-        else:
-            commits_after = github_link(
-                str(revision.commits_after),
-                revision.repository,
-                f"/compare/{revision.sha}...main",
-            )
         lines.append(
             f"| {markdown_cell(revision.label)} | "
             f"{github_link(revision.repository, revision.repository)} | "
             f"`{markdown_cell(revision.requested_ref)}` | "
-            f"{github_link(revision.sha, revision.repository, f'/commit/{revision.sha}')} | "
-            f"{markdown_cell(revision.commit_date)} | {commits_after} |"
+            f"{github_link(commit_label(revision.commits_after), revision.repository, f'/commit/{revision.sha}')} | "
+            f"{markdown_cell(revision.commit_date)} |"
         )
     return lines
 
@@ -148,14 +149,14 @@ def main() -> int:
         "",
         "### Benchmark revisions",
         "",
-        "| Component | Repository | Requested selection | Exact commit used |",
+        "| Component | Repository | Requested selection | Commit used |",
         "| --- | --- | --- | --- |",
         f"| ParseBench | {github_link(benchmark_repository, benchmark_repository)} | "
         f"`{markdown_cell(env('BENCHMARK_REF'))}` | "
-        f"{github_link(benchmark_sha, benchmark_repository, f'/commit/{benchmark_sha}')} |",
+        f"{github_link('Workflow commit', benchmark_repository, f'/commit/{benchmark_sha}')} |",
         f"| ParseBench dataset | `{markdown_cell(dataset_repository)}` | "
         f"`{markdown_cell(env('DATASET_REQUESTED_REF'))}` | "
-        f"[{markdown_cell(dataset_sha)}]"
+        f"[{'Current dataset commit' if env('DATASET_REQUESTED_REF') == 'current' else 'Selected dataset commit'}]"
         f"(https://huggingface.co/datasets/{dataset_repository}/commit/{dataset_sha}) |",
         "",
     ]

@@ -253,20 +253,28 @@ def _source_revisions(commits_after: int | None) -> list[run_summary.SourceRevis
     ]
 
 
-def test_versioned_source_summary_links_commit_and_newer_commits() -> None:
+def test_versioned_source_summary_uses_readable_clickable_commit_distance() -> None:
     markdown = "\n".join(run_summary.source_table(_source_revisions(7), all_latest=False))
 
-    assert "[" + "a" * 40 + "](https://github.com/pymupdf/PyMuPDF/commit/" + "a" * 40 + ")" in markdown
+    assert "[7 commits ago](https://github.com/pymupdf/PyMuPDF/commit/" + "a" * 40 + ")" in markdown
     assert "2026-07-19 12:34:56 UTC" in markdown
-    assert "[7](https://github.com/pymupdf/PyMuPDF/compare/" + "a" * 40 + "...main)" in markdown
+    assert "Exact commit used" not in markdown
 
 
 def test_all_latest_source_summary_shows_dates_without_comparison_count() -> None:
     markdown = "\n".join(run_summary.source_table(_source_revisions(None), all_latest=True))
 
     assert "Latest commits were requested for all three PyMuPDF repositories." in markdown
+    assert "[Latest commit](https://github.com/pymupdf/PyMuPDF/commit/" + "a" * 40 + ")" in markdown
     assert "2026-07-19 12:34:56 UTC" in markdown
-    assert "Commits after this commit" not in markdown
+
+
+@pytest.mark.parametrize(
+    ("commits_after", "label"),
+    [(0, "Latest commit"), (1, "1 commit ago"), (4, "4 commits ago"), (None, "Selected commit")],
+)
+def test_commit_label_is_human_readable(commits_after: int | None, label: str) -> None:
+    assert run_summary.commit_label(commits_after) == label
 
 
 def test_evaluation_groups_expands_text_categories(tmp_path: Path) -> None:
