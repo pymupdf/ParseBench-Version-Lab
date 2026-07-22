@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -429,6 +430,62 @@ def test_resolve_dataset_records_immutable_revision(tmp_path: Path, monkeypatch:
     assert dataset["repository"] == "llamaindex/ParseBench"
     assert dataset["requested_ref"] == "current"
     assert dataset["resolved_sha"] == sha
+
+
+def test_resolve_dataset_retries_and_records_git_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output_dir = tmp_path / "output"
+    calls: list[list[str]] = []
+    sleeps: list[int] = []
+    monkeypatch.setenv("DATASET_REF", "current")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    monkeypatch.setenv("OUTPUT_DIR", str(output_dir))
+    monkeypatch.setenv("RUN_SCOPE", "full")
+
+    def failed_git(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs == {"check": False, "capture_output": True, "text": True}
+        return subprocess.CompletedProcess(
+            command,
+            128,
+            stdout="",
+            stderr="fatal: unable to access remote: HTTP 503",
+        )
+
+    monkeypatch.setattr(resolve_dataset.subprocess, "run", failed_git)
+    monkeypatch.setattr(resolve_dataset.time, "sleep", sleeps.append)
+
+    with pytest.raises(SystemExit, match="HTTP 503"):
+        resolve_dataset.main()
+
+    assert len(calls) == 3
+    assert sleeps == [1, 2]
+    failure = json.loads((output_dir / "_failure.json").read_text())
+    assert failure["title"] == "Cannot resolve ParseBench dataset branch"
+    assert failure["component"] == "Hugging Face dataset Git hosting"
+    assert failure["requested_ref"] == "main"
+    assert failure["git_exit_code"] == 128
+    assert failure["git_stderr"] == "fatal: unable to access remote: HTTP 503"
+    assert failure["attempts"] == 3
+    assert "Exit code: 128" in failure["details"]
+    assert "fatal: unable to access remote: HTTP 503" in failure["details"]
+
+
+def test_resolve_dataset_retry_can_recover(monkeypatch: pytest.MonkeyPatch) -> None:
+    sha = "e" * 40
+    results = iter(
+        [
+            subprocess.CompletedProcess([], 128, stdout="", stderr="temporary failure"),
+            subprocess.CompletedProcess([], 0, stdout=f"{sha}\trefs/heads/main\n", stderr=""),
+        ]
+    )
+    sleeps: list[int] = []
+    monkeypatch.setattr(resolve_dataset.subprocess, "run", lambda *args, **kwargs: next(results))
+    monkeypatch.setattr(resolve_dataset.time, "sleep", sleeps.append)
+
+    assert resolve_dataset.resolve_branch("llamaindex/ParseBench", "main") == sha
+    assert sleeps == [1]
 
 
 def test_resolve_dataset_accepts_existing_full_commit_sha(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
