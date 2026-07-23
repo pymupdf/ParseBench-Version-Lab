@@ -72,7 +72,7 @@ permissions:
   packages: read
 
 env:
-  PIPELINE: pymupdf4llm_markdown_150dpi
+  PIPELINE: pymupdf4llm_html_tables
   GCP_PROJECT_ID: pypi-download-analysis-457820
   GCS_PREFIX: parsebench/pymupdf_source_stack
   UV_NO_SYNC: "1"
