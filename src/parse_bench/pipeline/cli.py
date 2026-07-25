@@ -1,5 +1,6 @@
 """Command-line interface for running end-to-end pipeline benchmarks."""
 
+import shutil
 import sys
 import tempfile
 import webbrowser
@@ -214,9 +215,18 @@ class PipelineCLI:
             force: Force re-evaluation.
             group: Optional group filter.
             open_report: Open report in browser.
-            report_dir: Directory for report output (default: pipeline_output_dir).
+            report_dir: Directory for report output (default: pipeline_output_dir,
+                or pipeline_output_dir/<group> when a group is given).
         """
-        actual_report_dir = report_dir or pipeline_output_dir
+        # Group runs write reports under <pipeline>/<group>/ so the aggregation
+        # dashboard and leaderboard can link to them, matching the multi-group
+        # layout.
+        if report_dir is not None:
+            actual_report_dir = report_dir
+        elif group is not None:
+            actual_report_dir = pipeline_output_dir / group
+        else:
+            actual_report_dir = pipeline_output_dir
 
         # Step 2: Evaluation
         print("\n" + "=" * 60)
@@ -259,6 +269,19 @@ class PipelineCLI:
             print(f"\nReport generation failed with exit code {exit_code}", file=sys.stderr)
             return exit_code
 
+        if group is not None:
+            # parse-bench compare reads <pipeline>/_evaluation_report.json,
+            # so keep a copy of the group report at the pipeline root.
+            report_json = actual_report_dir / "_evaluation_report.json"
+            if report_json.exists():
+                shutil.copy2(report_json, pipeline_output_dir / "_evaluation_report.json")
+
+            self._generate_summaries(
+                pipeline_output_dir=pipeline_output_dir,
+                groups=[group],
+                pipeline_name=inferred_pipeline_name,
+            )
+
         # Open report in browser
         report_path = actual_report_dir / "_evaluation_report_detailed.html"
         if open_report and report_path.exists():
@@ -275,6 +298,34 @@ class PipelineCLI:
         print(f"Report:  {report_path}")
 
         return 0
+
+    def _generate_summaries(
+        self,
+        pipeline_output_dir: Path,
+        groups: list[str],
+        pipeline_name: str,
+    ) -> Path:
+        """Generate the aggregation dashboard and cross-pipeline leaderboard.
+
+        Both consume the per-group report layout
+        (<pipeline>/<group>/_evaluation_report.json), so callers must have
+        written reports there first.
+        """
+        dashboard_path = generate_aggregation_report(
+            pipeline_output_dir=pipeline_output_dir,
+            groups=groups,
+            pipeline_name=pipeline_name,
+        )
+        print(f"\nDashboard: {dashboard_path.absolute()}")
+
+        try:
+            leaderboard_path = generate_leaderboard_report(output_dir=pipeline_output_dir.parent)
+            print(f"Leaderboard: {leaderboard_path.absolute()}")
+        except Exception as e:
+            # Non-fatal: the leaderboard needs at least one pipeline with results
+            print(f"Leaderboard generation skipped: {e}")
+
+        return dashboard_path
 
     def _run_multi_group_evaluation(
         self,
@@ -303,7 +354,7 @@ class PipelineCLI:
             )
 
         if len(groups) == 1:
-            # Single group - run as single evaluation with report at pipeline root
+            # Single group - same flow as an explicit --group run
             print(f"Single group found: {groups[0]}")
             return self._run_evaluation_and_report(
                 pipeline_output_dir=pipeline_output_dir,
@@ -355,35 +406,20 @@ class PipelineCLI:
             if exit_code != 0:
                 print(f"\nReport generation failed for group '{g}'", file=sys.stderr)
 
-        # Generate aggregation dashboard
+        # Generate aggregation dashboard + cross-pipeline leaderboard
         print("\n" + "=" * 60)
-        print("Generating Aggregation Dashboard")
+        print("Generating Summary Reports")
         print("=" * 60 + "\n")
 
-        dashboard_path = generate_aggregation_report(
+        dashboard_path = self._generate_summaries(
             pipeline_output_dir=pipeline_output_dir,
             groups=groups,
             pipeline_name=pipeline_name,
         )
-
-        print(f"Dashboard: {dashboard_path.absolute()}")
         for g in groups:
             detail_path = pipeline_output_dir / g / "_evaluation_report_detailed.html"
             if detail_path.exists():
                 print(f"  {g}: {detail_path.absolute()}")
-
-        # Generate leaderboard across all pipelines in the output directory
-        output_base = pipeline_output_dir.parent
-        print("\n" + "=" * 60)
-        print("Generating Leaderboard")
-        print("=" * 60 + "\n")
-
-        try:
-            leaderboard_path = generate_leaderboard_report(output_dir=output_base)
-            print(f"Leaderboard: {leaderboard_path.absolute()}")
-        except Exception as e:
-            # Non-fatal: leaderboard requires at least one pipeline with results
-            print(f"Leaderboard generation skipped: {e}")
 
         # Open dashboard in browser
         if open_report and dashboard_path.exists():
@@ -411,8 +447,6 @@ class PipelineCLI:
         skip_inference: bool,
     ) -> int:
         """Run pipeline on a single file by creating a temporary directory structure."""
-        import shutil
-
         file_path = file_path.resolve()
 
         if not file_path.exists():
