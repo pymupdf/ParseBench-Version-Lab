@@ -251,6 +251,15 @@ class BenchCLI:
 
 def main() -> int:
     """Main entry point for the unified CLI."""
+    # Progress output includes non-ASCII glyphs (checkmarks, emoji); Windows
+    # consoles often use a legacy codepage that cannot encode them, which
+    # would abort the run mid-pipeline. Degrade those glyphs instead.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(errors="replace")
+            except Exception:
+                pass
     # Load .env file before any commands run
     _load_env()
     cli = BenchCLI()
