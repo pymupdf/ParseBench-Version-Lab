@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from dataclasses import asdict, dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
@@ -64,7 +63,3 @@ def resolve_dataset(config: RunConfig, runner: CommandRunner) -> DatasetRevision
         sha,
         f"https://huggingface.co/datasets/{repository}/commit/{sha}",
     )
-
-
-def git_version() -> str:
-    return subprocess.check_output(["git", "--version"], text=True).strip()

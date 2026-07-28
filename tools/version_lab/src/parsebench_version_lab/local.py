@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -11,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .dataset import DatasetRevision, resolve_dataset
-from .model import DATASET_REPOSITORY, RunConfig
+from .model import COMPONENT_SPECS, DATASET_REPOSITORY, RunConfig
 from .process import CommandRunner, executable, platform_description, runtime_environment, venv_executable
 from .provenance import mupdf_build_spec
 from .results import build_summary, load_scores
@@ -56,9 +55,7 @@ def ensure_ready(*, resolve_only: bool = False) -> None:
     missing = [name for name in required if status["tools"][name] is None]
     if missing:
         raise RuntimeError(
-            "Missing required local tools: "
-            + ", ".join(missing)
-            + ". Install them and rerun `version-lab doctor`."
+            "Missing required local tools: " + ", ".join(missing) + ". Install them and rerun `version-lab doctor`."
         )
 
 
@@ -76,10 +73,6 @@ def create_paths(repository: Path, workspace_root: Path) -> LocalPaths:
         dataset=dataset_cache,
         tool_source=repository / "tools" / "version_lab" / "src",
     )
-
-
-def source_manifest(sources: dict[str, ResolvedSource]) -> dict[str, dict[str, str | None]]:
-    return {name: source.to_dict() for name, source in sources.items()}
 
 
 def package_dir(source: ResolvedSource) -> Path:
@@ -112,7 +105,7 @@ class LocalRun:
             "config": self.config.to_dict(),
             "paths": self.paths.to_dict(),
             "platform": platform_description(),
-            "sources": source_manifest(self.sources),
+            "sources": {name: source.to_dict() for name, source in self.sources.items()},
             "dataset": self.dataset.to_dict() if self.dataset else None,
         }
         write_json(self.paths.run / "run.json", value)
@@ -208,13 +201,8 @@ class LocalRun:
             "--output",
             self.paths.output / "_compatibility.json",
         ]
-        option_names = {
-            "mupdf": "mupdf",
-            "pymupdf": "pymupdf",
-            "pymupdf_layout": "pymupdf-layout",
-            "pymupdf4llm": "pymupdf4llm",
-        }
-        for name, option in option_names.items():
+        for name in COMPONENT_SPECS:
+            option = name.replace("_", "-")
             source = self.sources[name]
             arguments.extend(
                 [
@@ -252,13 +240,3 @@ class LocalRun:
         self.compatibility(python)
         self.benchmark(python)
         self.record_manifest(status="completed")
-
-
-def remove_incomplete_environment(paths: LocalPaths) -> None:
-    """Remove only a target environment inside the exact run directory."""
-    try:
-        paths.environment.relative_to(paths.run)
-    except ValueError as error:
-        raise RuntimeError(f"Refusing to remove environment outside run directory: {paths.environment}") from error
-    if paths.environment.exists():
-        shutil.rmtree(paths.environment)

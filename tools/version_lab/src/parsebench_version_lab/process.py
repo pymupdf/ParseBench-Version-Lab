@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -83,7 +82,3 @@ def platform_description() -> dict[str, str]:
         "python": platform.python_version(),
         "system": platform.system(),
     }
-
-
-def controller_python() -> str:
-    return sys.executable

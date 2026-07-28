@@ -10,6 +10,7 @@ LAYOUT_REPOSITORIES = (
     "ArtifexSoftware/sce",
     "ArtifexSoftware/pymupdf_layout",
 )
+STANDARD_REF = "1.28.0"
 
 
 @dataclass(frozen=True)
@@ -19,20 +20,11 @@ class ComponentSpec:
     repositories: tuple[str, ...]
     checkout_dir: str
     default_branch: str
-    standard_ref: str = "1.28.0"
-
-    @property
-    def repository(self) -> str:
-        return self.repositories[0]
 
 
 COMPONENT_SPECS = {
-    "mupdf": ComponentSpec(
-        "mupdf", "MuPDF", ("ArtifexSoftware/mupdf",), "mupdf", "master"
-    ),
-    "pymupdf": ComponentSpec(
-        "pymupdf", "PyMuPDF", ("pymupdf/PyMuPDF",), "pymupdf", "main"
-    ),
+    "mupdf": ComponentSpec("mupdf", "MuPDF", ("ArtifexSoftware/mupdf",), "mupdf", "master"),
+    "pymupdf": ComponentSpec("pymupdf", "PyMuPDF", ("pymupdf/PyMuPDF",), "pymupdf", "main"),
     "pymupdf_layout": ComponentSpec(
         "pymupdf_layout",
         "PyMuPDF Layout",
@@ -40,16 +32,14 @@ COMPONENT_SPECS = {
         "pymupdf-layout",
         "main",
     ),
-    "pymupdf4llm": ComponentSpec(
-        "pymupdf4llm", "PyMuPDF4LLM", ("pymupdf/pymupdf4llm",), "pymupdf4llm", "main"
-    ),
+    "pymupdf4llm": ComponentSpec("pymupdf4llm", "PyMuPDF4LLM", ("pymupdf/pymupdf4llm",), "pymupdf4llm", "main"),
 }
 
 # Backward-compatible view used by the existing GitHub workflow helpers.
 COMPONENTS = {
     name: {
         "label": component.label,
-        "repository": component.repository,
+        "repository": component.repositories[0],
         "root": Path(f".source/{component.checkout_dir}"),
         "default_branch": component.default_branch,
     }
@@ -67,10 +57,10 @@ PIPELINE = "pymupdf4llm_markdown_150dpi"
 class RunConfig:
     """A frontend-independent description of one Version Lab run."""
 
-    mupdf_ref: str = "1.28.0"
-    pymupdf_ref: str = "1.28.0"
-    pymupdf_layout_ref: str = "1.28.0"
-    pymupdf4llm_ref: str = "1.28.0"
+    mupdf_ref: str = STANDARD_REF
+    pymupdf_ref: str = STANDARD_REF
+    pymupdf_layout_ref: str = STANDARD_REF
+    pymupdf4llm_ref: str = STANDARD_REF
     dataset_ref: str = "current"
     scope: str = "quick"
     group: str = "all"
@@ -87,16 +77,9 @@ class RunConfig:
             raise ValueError(f"Unsupported group {self.group!r}; expected one of: {', '.join(GROUPS)}")
         if self.all_latest and self.latest_any_branch:
             raise ValueError("Select all-latest or latest-any-branch, not both")
-        requested = {
-            "mupdf": self.mupdf_ref,
-            "pymupdf": self.pymupdf_ref,
-            "pymupdf_layout": self.pymupdf_layout_ref,
-            "pymupdf4llm": self.pymupdf4llm_ref,
-        }
+        requested = {name: getattr(self, f"{name}_ref") for name in COMPONENT_SPECS}
         if self.all_latest:
-            requested = {
-                name: component.default_branch for name, component in COMPONENT_SPECS.items()
-            }
+            requested = {name: component.default_branch for name, component in COMPONENT_SPECS.items()}
         object.__setattr__(self, "refs", requested)
 
     @property

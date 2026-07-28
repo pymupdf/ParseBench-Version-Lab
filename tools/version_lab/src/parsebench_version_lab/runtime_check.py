@@ -12,6 +12,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from .model import COMPONENT_SPECS
 from .provenance import verify_mupdf_build_source
 
 SMOKE_MARKERS = ("PARSEBENCH", "INVOICE NUMBER", "GRAND TOTAL")
@@ -30,26 +31,12 @@ def _github_escape(value: str) -> str:
 
 def _source_metadata(args: argparse.Namespace) -> dict[str, dict[str, str]]:
     return {
-        "mupdf": {
-            "repository": args.mupdf_repository,
-            "requested_ref": args.mupdf_ref,
-            "resolved_sha": args.mupdf_sha,
-        },
-        "pymupdf": {
-            "repository": args.pymupdf_repository,
-            "requested_ref": args.pymupdf_ref,
-            "resolved_sha": args.pymupdf_sha,
-        },
-        "pymupdf_layout": {
-            "repository": args.pymupdf_layout_repository,
-            "requested_ref": args.pymupdf_layout_ref,
-            "resolved_sha": args.pymupdf_layout_sha,
-        },
-        "pymupdf4llm": {
-            "repository": args.pymupdf4llm_repository,
-            "requested_ref": args.pymupdf4llm_ref,
-            "resolved_sha": args.pymupdf4llm_sha,
-        },
+        name: {
+            "repository": getattr(args, f"{name}_repository"),
+            "requested_ref": getattr(args, f"{name}_ref"),
+            "resolved_sha": getattr(args, f"{name}_sha"),
+        }
+        for name in COMPONENT_SPECS
     }
 
 
@@ -136,18 +123,10 @@ def run_compatibility_check(mupdf_repository: str, mupdf_sha: str) -> dict[str, 
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--mupdf-repository", required=True)
-    parser.add_argument("--mupdf-ref", required=True)
-    parser.add_argument("--mupdf-sha", required=True)
-    parser.add_argument("--pymupdf-repository", required=True)
-    parser.add_argument("--pymupdf-ref", required=True)
-    parser.add_argument("--pymupdf-sha", required=True)
-    parser.add_argument("--pymupdf-layout-repository", required=True)
-    parser.add_argument("--pymupdf-layout-ref", required=True)
-    parser.add_argument("--pymupdf-layout-sha", required=True)
-    parser.add_argument("--pymupdf4llm-repository", required=True)
-    parser.add_argument("--pymupdf4llm-ref", required=True)
-    parser.add_argument("--pymupdf4llm-sha", required=True)
+    for name in COMPONENT_SPECS:
+        option = name.replace("_", "-")
+        for field in ("repository", "ref", "sha"):
+            parser.add_argument(f"--{option}-{field}", required=True)
     return parser.parse_args(arguments)
 
 

@@ -8,15 +8,13 @@ import sys
 from pathlib import Path
 
 from .local import LocalRun, create_paths, doctor, ensure_ready
-from .model import GROUPS, RUN_SCOPES, RunConfig
+from .model import COMPONENT_SPECS, GROUPS, RUN_SCOPES, STANDARD_REF, RunConfig
 from .util import repository_root
 
 
 def add_run_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--mupdf-ref", default="1.28.0")
-    parser.add_argument("--pymupdf-ref", default="1.28.0")
-    parser.add_argument("--pymupdf-layout-ref", default="1.28.0")
-    parser.add_argument("--pymupdf4llm-ref", default="1.28.0")
+    for name in COMPONENT_SPECS:
+        parser.add_argument(f"--{name.replace('_', '-')}-ref", default=STANDARD_REF)
     parser.add_argument("--dataset-ref", default="current")
     parser.add_argument("--scope", choices=RUN_SCOPES, default="quick")
     parser.add_argument("--group", choices=GROUPS, default="all")
@@ -28,10 +26,7 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
 
 def config_from_args(args: argparse.Namespace) -> RunConfig:
     return RunConfig(
-        mupdf_ref=args.mupdf_ref,
-        pymupdf_ref=args.pymupdf_ref,
-        pymupdf_layout_ref=args.pymupdf_layout_ref,
-        pymupdf4llm_ref=args.pymupdf4llm_ref,
+        **{f"{name}_ref": getattr(args, f"{name}_ref") for name in COMPONENT_SPECS},
         dataset_ref=args.dataset_ref,
         scope=args.scope,
         group=args.group,

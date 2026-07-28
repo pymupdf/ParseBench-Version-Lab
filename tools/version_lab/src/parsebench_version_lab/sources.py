@@ -111,21 +111,16 @@ class SourceManager:
                 env=self.git_environment(),
             )
             self.runner.run(["git", "-C", destination, "checkout", "--quiet", "--detach", "FETCH_HEAD"])
-            result = self.runner.run(
-                ["git", "-C", destination, "rev-parse", "HEAD"], capture=True
-            )
+            result = self.runner.run(["git", "-C", destination, "rev-parse", "HEAD"], capture=True)
             return result.stdout.strip()
         except Exception:
             shutil.rmtree(destination, ignore_errors=True)
             raise
 
-    def _repositories(self, component: ComponentSpec, config: RunConfig) -> tuple[str, ...]:
-        if component.name == "pymupdf_layout" and (config.all_latest or config.latest_any_branch):
-            return (component.repositories[-1],)
-        return component.repositories
-
     def resolve_component(self, component: ComponentSpec, config: RunConfig, root: Path) -> ResolvedSource:
-        repositories = self._repositories(component, config)
+        repositories = component.repositories
+        if component.name == "pymupdf_layout" and (config.all_latest or config.latest_any_branch):
+            repositories = (repositories[-1],)
         errors: list[str] = []
         for repository in repositories:
             branch: str | None = None
@@ -153,7 +148,4 @@ class SourceManager:
 
     def resolve_all(self, config: RunConfig, root: Path) -> dict[str, ResolvedSource]:
         root.mkdir(parents=True, exist_ok=True)
-        return {
-            name: self.resolve_component(component, config, root)
-            for name, component in COMPONENT_SPECS.items()
-        }
+        return {name: self.resolve_component(component, config, root) for name, component in COMPONENT_SPECS.items()}

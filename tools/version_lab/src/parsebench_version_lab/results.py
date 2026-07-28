@@ -66,8 +66,7 @@ def category_score(category: str, report: dict[str, Any]) -> CategoryScore:
 
 def discover_reports(pipeline_output_dir: Path, selected_group: str) -> list[tuple[str, Path]]:
     category_reports = [
-        (path.parent.name, path)
-        for path in sorted(pipeline_output_dir.glob("*/_evaluation_report.json"))
+        (path.parent.name, path) for path in sorted(pipeline_output_dir.glob("*/_evaluation_report.json"))
     ]
     if category_reports:
         return category_reports

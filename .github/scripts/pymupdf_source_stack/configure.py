@@ -20,12 +20,7 @@ GROUPS = {
     "Text content": "text_content",
     "Text formatting": "text_formatting",
 }
-LATEST_REFS = {
-    "mupdf": "master",
-    "pymupdf": "main",
-    "pymupdf_layout": "main",
-    "pymupdf4llm": "main",
-}
+LATEST_REFS = {name: str(component["default_branch"]) for name, component in COMPONENTS.items()}
 LATEST_ANY_BRANCH_REFS = dict.fromkeys(LATEST_REFS, "latest-any-branch")
 
 
@@ -83,8 +78,7 @@ def main() -> int:
     artifact_name = f"pymupdf-source-stack-{env('GITHUB_RUN_ID')}-{env('GITHUB_RUN_ATTEMPT')}"
 
     request = {
-        name: {"repository": component["repository"], "ref": refs[name]}
-        for name, component in COMPONENTS.items()
+        name: {"repository": component["repository"], "ref": refs[name]} for name, component in COMPONENTS.items()
     }
     request["pymupdf_layout"] = {
         "ref": refs["pymupdf_layout"],

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import json
-import os
 import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 VERSION_LAB_SRC = Path(__file__).resolve().parents[3] / "tools" / "version_lab" / "src"
 if not VERSION_LAB_SRC.is_dir():
@@ -22,14 +19,8 @@ from parsebench_version_lab.model import (  # noqa: E402, F401 - compatibility r
     LAYOUT_REPOSITORIES,
 )
 from parsebench_version_lab.provenance import mupdf_build_spec  # noqa: E402, F401 - compatibility re-export
-
-
-def env(name: str) -> str:
-    """Return a required environment variable with a useful error."""
-    try:
-        return os.environ[name]
-    except KeyError as error:
-        raise SystemExit(f"Required environment variable {name} is not set") from error
+from parsebench_version_lab.util import required_env as env  # noqa: E402, F401
+from parsebench_version_lab.util import write_json  # noqa: E402, F401
 
 
 def git_sha(path: str | Path = ".") -> str:
@@ -37,11 +28,6 @@ def git_sha(path: str | Path = ".") -> str:
         ["git", "-C", str(path), "rev-parse", "HEAD"],
         text=True,
     ).strip()
-
-
-def write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def write_github_outputs(values: Mapping[str, str]) -> None:
