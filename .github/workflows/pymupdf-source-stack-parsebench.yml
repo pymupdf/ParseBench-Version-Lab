@@ -199,7 +199,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 720
     container:
-      image: ghcr.io/pymupdf/parsebench-source-stack-env@sha256:be78034c9188ad341b8d02d34d1702e3d8a870c47dc65a261e3d972718d26601
+      image: ghcr.io/pymupdf/parsebench-source-stack-env@sha256:e41e0c615011482a18ef950dc49f5befcd2700752eeab11670e8c64a9d9d9d07
       credentials:
         username: ${{ github.actor }}
         password: ${{ github.token }}
@@ -268,12 +268,14 @@ jobs:
           test "$(uv --version | cut -d' ' -f2)" = "0.11.29"
           test "$(dpkg-query -W -f='${Version}' tesseract-ocr)" = "5.3.4-1build5"
           test "$(dpkg-query -W -f='${Version}' tesseract-ocr-eng)" = "1:4.1.0-2"
+          test "$(dpkg-query -W -f='${Version}' unzip)" = "6.0-28ubuntu4.1"
           tesseract --list-langs | grep -Fx eng
+          unzip -v | sed -n '1p'
           {
             echo "## Container environment"
             echo
             echo "- Image: \`ghcr.io/pymupdf/parsebench-source-stack-env\`"
-            echo "- Digest: \`sha256:be78034c9188ad341b8d02d34d1702e3d8a870c47dc65a261e3d972718d26601\`"
+            echo "- Digest: \`sha256:e41e0c615011482a18ef950dc49f5befcd2700752eeab11670e8c64a9d9d9d07\`"
             echo "- Python: \`$(python --version)\`"
             echo "- Tesseract package: \`$(dpkg-query -W -f='${Version}' tesseract-ocr)\`"
             echo
@@ -384,13 +386,6 @@ jobs:
 
       - name: Verify RapidOCR native runtime
         run: .venv/bin/python -c "from rapidocr_onnxruntime import RapidOCR; print(RapidOCR)"
-
-      - name: Install current MuPDF source-build dependency
-        run: |
-          apt-get update
-          apt-get install --yes --no-install-recommends unzip
-          rm -rf /var/lib/apt/lists/*
-          unzip -v | sed -n '1p'
 
       - name: Build and install selected PyMuPDF
         env:

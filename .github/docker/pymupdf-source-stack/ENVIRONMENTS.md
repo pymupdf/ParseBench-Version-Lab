@@ -20,7 +20,8 @@ tag without `-r2` was overwritten by a later successful build.
 | --- | --- | --- | --- | --- |
 | [29536412797](https://github.com/pymupdf/ParseBench-Version-Lab/actions/runs/29536412797) | `a26592adb64d6da01f7fdf22dfdbb5977b54cd96` | `run-29536412797-attempt-1`, initially `ubuntu24-python3.12.13-20260716` | `sha256:09dc41716541e62e3eb21b0b5ef23495fba6c921a62b8eda032990c6575add86` | First successfully published complete native Python environment. The date-based tag was later moved to the next image. |
 | [29536709611](https://github.com/pymupdf/ParseBench-Version-Lab/actions/runs/29536709611) | `b5d501497ac00c0768b757c4b52559bc6358f4f1` | `run-29536709611-attempt-1`, `ubuntu24-python3.12.13-20260716` | `sha256:ffc187e250ab4a1f3f70f1487460eef9e54ca5d2e63f64f8cc4fd2f18a9b5696` | Added `zstd` for GitHub cache extraction. This was the first image used by the container benchmark workflow. |
-| [29538267457](https://github.com/pymupdf/ParseBench-Version-Lab/actions/runs/29538267457) | `76584a7fb569fad25e162f878d73b2434d6223ea` | `run-29538267457-attempt-1`, `ubuntu24-python3.12.13-20260716-r2` | `sha256:be78034c9188ad341b8d02d34d1702e3d8a870c47dc65a261e3d972718d26601` | Added the native `libgl1` and `libglib2.0-0t64` libraries required by the pinned RapidOCR/OpenCV stack. This is the latest and recommended image. |
+| [29538267457](https://github.com/pymupdf/ParseBench-Version-Lab/actions/runs/29538267457) | `76584a7fb569fad25e162f878d73b2434d6223ea` | `run-29538267457-attempt-1`, `ubuntu24-python3.12.13-20260716-r2` | `sha256:be78034c9188ad341b8d02d34d1702e3d8a870c47dc65a261e3d972718d26601` | Added the native `libgl1` and `libglib2.0-0t64` libraries required by the pinned RapidOCR/OpenCV stack. |
+| [30343780721](https://github.com/pymupdf/ParseBench-Version-Lab/actions/runs/30343780721) | `5030c28384587b79d7ebc4bc41011e76935de87d` | `run-30343780721-attempt-1`, `ubuntu24-python3.12.13-20260716-r3` | `sha256:e41e0c615011482a18ef950dc49f5befcd2700752eeab11670e8c64a9d9d9d07` | Added pinned `unzip=6.0-28ubuntu4.1`, eliminating runtime APT access before current MuPDF source builds. This is the latest and recommended image. |
 
 The first three publisher attempts failed before the publish step and therefore
 did not create usable registry images.
@@ -42,15 +43,15 @@ The latest image uses:
 - `liblept5=1.82.0-3build4`
 - `libgl1=1.7.0-1build1`
 - `libglib2.0-0t64=2.80.0-6ubuntu1`
+- `unzip=6.0-28ubuntu4.1`
 - `zstd` for Actions cache archives
 
 The image contains system and build dependencies, not the selected PyMuPDF
 source stack or the ParseBench Python environment. The benchmark workflow still
 needs to install its locked dependencies and build the selected MuPDF,
-PyMuPDF, PyMuPDF Layout, and PyMuPDF4LLM revisions inside the container. In
-particular, the workflow installs `unzip` from the image's pinned Ubuntu
-snapshot because current MuPDF source uses it while generating the Extract
-DOCX template. `rapidocr-onnxruntime==1.2.3` and
+PyMuPDF, PyMuPDF Layout, and PyMuPDF4LLM revisions inside the container. The
+image includes `unzip` because current MuPDF source uses it while generating
+the Extract DOCX template. `rapidocr-onnxruntime==1.2.3` and
 `opencv-python==4.13.0.92` were installed only inside the publisher's
 validation environment; they were not baked into the image.
 
