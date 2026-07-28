@@ -58,9 +58,9 @@ validation environment; they were not baked into the image.
 The image writes its principal versions to
 `/usr/local/share/parsebench/environment.txt` for runtime verification.
 
-## Previous benchmark validation
+## Benchmark validation
 
-The recommended `r2` digest completed the full 15-case, all-category smoke path
+The previous `r2` digest completed the full 15-case, all-category smoke path
 successfully in these runs:
 
 - [Run 29538603995](https://github.com/pymupdf/ParseBench-Version-Lab/actions/runs/29538603995)
@@ -69,6 +69,14 @@ successfully in these runs:
 The second run used the then-latest PyMuPDF, PyMuPDF Layout from the new
 `ArtifexSoftware/pymupdf_layout` repository, and PyMuPDF4LLM commits. It
 predates independent MuPDF source selection.
+
+The current `r3` digest completed the all-latest, four-source, 15-case quick
+benchmark successfully in
+[run 30344912754](https://github.com/pymupdf/ParseBench-Version-Lab/actions/runs/30344912754).
+That run source-built PyMuPDF against the independently selected MuPDF commit,
+passed Layout/OCR compatibility and exact MuPDF provenance checks, completed
+all five category evaluations without failed examples, generated the aggregate
+score summary, uploaded its artifact, and published the results.
 
 ## Version Lab integration
 
