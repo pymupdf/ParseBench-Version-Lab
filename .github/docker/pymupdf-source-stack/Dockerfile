@@ -28,8 +28,8 @@ COPY --from=python-runtime /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-
 # run 29534227627 installed; all transitive packages come from the same archive
 # snapshot.
 RUN sed -i "/^URIs:/a Snapshot: ${UBUNTU_SNAPSHOT}" /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         build-essential=12.10ubuntu1 \
         ca-certificates \
         curl \
@@ -59,6 +59,7 @@ RUN sed -i "/^URIs:/a Snapshot: ${UBUNTU_SNAPSHOT}" /etc/apt/sources.list.d/ubun
         tesseract-ocr-eng=1:4.1.0-2 \
         tesseract-ocr-osd=1:4.1.0-2 \
         tzdata \
+        unzip=6.0-28ubuntu4.1 \
         zlib1g \
         zstd \
     && rm -rf /var/lib/apt/lists/*
@@ -73,7 +74,8 @@ RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}" \
     && uv --version \
     && swig -version \
     && tesseract --version \
-    && tesseract --list-langs | grep -Fx eng
+    && tesseract --list-langs | grep -Fx eng \
+    && unzip -v | sed -n '1p'
 
 RUN mkdir -p /usr/local/share/parsebench \
     && printf '%s\n' \
@@ -87,6 +89,7 @@ RUN mkdir -p /usr/local/share/parsebench \
         "tesseract=5.3.4-1build5" \
         "tesseract_eng=1:4.1.0-2" \
         "tesseract_osd=1:4.1.0-2" \
+        "unzip=6.0-28ubuntu4.1" \
         "leptonica=1.82.0-3build4" \
         > /usr/local/share/parsebench/environment.txt
 
