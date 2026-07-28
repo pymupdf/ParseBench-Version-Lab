@@ -15,6 +15,30 @@ from typing import Any
 SMOKE_MARKERS = ("PARSEBENCH", "INVOICE NUMBER", "GRAND TOTAL")
 
 
+def expected_mupdf_build_source(repository: str, sha: str) -> str:
+    """Return the source selector that the installed PyMuPDF must report."""
+    return f"git:--sha {sha} https://github.com/{repository}.git"
+
+
+def verify_mupdf_build_source(pymupdf_module: Any, repository: str, sha: str) -> dict[str, Any]:
+    """Verify that installed PyMuPDF records the independently selected MuPDF source."""
+    expected = expected_mupdf_build_source(repository, sha)
+    actual = getattr(pymupdf_module, "mupdf_location", None)
+    if actual != expected:
+        raise RuntimeError(
+            "Installed PyMuPDF does not report the selected MuPDF source: "
+            f"expected pymupdf.mupdf_location={expected!r}, received {actual!r}. "
+            "PyMuPDF may have used its fixed default MuPDF instead of the requested commit."
+        )
+
+    return {
+        "expected_build_source": expected,
+        "installed_build_source": actual,
+        "mupdf_version": getattr(pymupdf_module, "mupdf_version", None),
+        "verified": True,
+    }
+
+
 def _distribution_version(name: str) -> str | None:
     try:
         return importlib.metadata.version(name)
@@ -80,8 +104,11 @@ def _make_smoke_pdf(path: Path) -> None:
     document.close()
 
 
-def run_compatibility_check() -> dict[str, Any]:
+def run_compatibility_check(mupdf_repository: str, mupdf_sha: str) -> dict[str, Any]:
     import pymupdf
+
+    build_provenance = verify_mupdf_build_source(pymupdf, mupdf_repository, mupdf_sha)
+
     import pymupdf.layout
 
     pymupdf.layout.activate()
@@ -125,6 +152,7 @@ def run_compatibility_check() -> dict[str, Any]:
         raise RuntimeError("PyMuPDF4LLM output did not contain non-empty Layout page_boxes")
 
     return {
+        "mupdf_build_provenance": build_provenance,
         "layout_mode": True,
         "ocr_markers_found": list(SMOKE_MARKERS),
         "page_box_count": len(page_boxes),
@@ -160,7 +188,7 @@ def main() -> int:
 
     try:
         result["installed_versions"] = _installed_versions()
-        result["checks"] = run_compatibility_check()
+        result["checks"] = run_compatibility_check(args.mupdf_repository, args.mupdf_sha)
         result["status"] = "compatible"
     except Exception as error:
         result["installed_versions"] = _installed_versions()

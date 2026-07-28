@@ -11,7 +11,11 @@ MuPDF is an independently selected source component. The workflow resolves its
 requested branch, tag, or commit to the checkout's full SHA, then gives
 PyMuPDF's build system a reproducible
 `git:--sha <sha> https://github.com/ArtifexSoftware/mupdf.git` selector through
-`PYMUPDF_SETUP_MUPDF_BUILD`.
+`PYMUPDF_SETUP_MUPDF_BUILD`. The compatibility gate independently compares
+that selector with the source embedded in the installed
+`pymupdf.mupdf_location` build metadata. This prevents a successful benchmark
+from being attributed to the selected MuPDF commit if PyMuPDF silently used its
+fixed default MuPDF source instead.
 
 Successful runs read the generated `_evaluation_report.json` files and append
 an overall aggregate plus category headline scores directly to the GitHub run

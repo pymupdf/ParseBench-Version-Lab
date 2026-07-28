@@ -103,7 +103,11 @@ The workflow builds and installs source packages in this order:
 Before downloading the ParseBench dataset, the compatibility gate activates
 Layout, creates a small PDF, calls PyMuPDF4LLM with the same page-chunk and OCR
 DPI option shape used by the benchmark pipeline, and verifies that the result
-contains both the marker text and non-empty Layout page boxes.
+contains both the marker text and non-empty Layout page boxes. Before that
+behavioral check, it compares the selected MuPDF SHA against the source selector
+embedded in the installed PyMuPDF build metadata. A PyMuPDF installation built
+with its fixed default MuPDF therefore fails the gate even if its basic PDF
+operations happen to work.
 
 An incompatible stack fails before benchmark inference and writes diagnostic
 details to `_compatibility.json` in the GitHub artifact. Successful runs also

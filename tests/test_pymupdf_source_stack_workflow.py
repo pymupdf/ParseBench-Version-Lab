@@ -29,6 +29,7 @@ def _load_module(name: str):
 
 configure = _load_module("configure")
 benchmark = _load_module("benchmark")
+check_compatibility = _load_module("check_compatibility")
 resolve_dataset = _load_module("resolve_dataset")
 resolve_layout_source = _load_module("resolve_layout_source")
 resolve_latest_branches = _load_module("resolve_latest_branches")
@@ -410,6 +411,31 @@ def test_mupdf_build_spec_pins_exact_sha() -> None:
     sha = "d" * 40
 
     assert resolve_sources.mupdf_build_spec(sha) == (f"git:--sha {sha} https://github.com/ArtifexSoftware/mupdf.git")
+
+
+def test_mupdf_build_provenance_accepts_selected_source() -> None:
+    sha = "d" * 40
+    source = f"git:--sha {sha} https://github.com/ArtifexSoftware/mupdf.git"
+    pymupdf = SimpleNamespace(mupdf_location=source, mupdf_version="1.28.0")
+
+    assert check_compatibility.verify_mupdf_build_source(
+        pymupdf, "ArtifexSoftware/mupdf", sha
+    ) == {
+        "expected_build_source": source,
+        "installed_build_source": source,
+        "mupdf_version": "1.28.0",
+        "verified": True,
+    }
+
+
+@pytest.mark.parametrize("reported_source", [None, "https://mupdf.com/downloads/archive/mupdf-1.28.0-source.tar.gz"])
+def test_mupdf_build_provenance_rejects_missing_or_fixed_source(reported_source: str | None) -> None:
+    pymupdf = SimpleNamespace(mupdf_location=reported_source, mupdf_version="1.28.0")
+
+    with pytest.raises(RuntimeError, match="fixed default MuPDF"):
+        check_compatibility.verify_mupdf_build_source(
+            pymupdf, "ArtifexSoftware/mupdf", "d" * 40
+        )
 
 
 def test_evaluation_groups_expands_text_categories(tmp_path: Path) -> None:
