@@ -5,47 +5,23 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-LAYOUT_REPOSITORIES = (
-    "ArtifexSoftware/sce",
-    "ArtifexSoftware/pymupdf_layout",
+VERSION_LAB_SRC = Path(__file__).resolve().parents[3] / "tools" / "version_lab" / "src"
+if not VERSION_LAB_SRC.is_dir():
+    raise RuntimeError(f"Version Lab shared source is missing: {VERSION_LAB_SRC}")
+sys.path.insert(0, str(VERSION_LAB_SRC))
+
+from parsebench_version_lab.model import (  # noqa: E402, F401 - compatibility re-exports
+    COMPONENTS,
+    DATASET_BRANCHES,
+    DATASET_REPOSITORY,
+    LAYOUT_REPOSITORIES,
 )
-
-COMPONENTS = {
-    "mupdf": {
-        "label": "MuPDF",
-        "repository": "ArtifexSoftware/mupdf",
-        "root": Path(".source/mupdf"),
-        "default_branch": "master",
-    },
-    "pymupdf": {
-        "label": "PyMuPDF",
-        "repository": "pymupdf/PyMuPDF",
-        "root": Path(".source/pymupdf"),
-        "default_branch": "main",
-    },
-    "pymupdf_layout": {
-        "label": "PyMuPDF Layout",
-        "repository": LAYOUT_REPOSITORIES[0],
-        "root": Path(".source/pymupdf-layout"),
-        "default_branch": "main",
-    },
-    "pymupdf4llm": {
-        "label": "PyMuPDF4LLM",
-        "repository": "pymupdf/pymupdf4llm",
-        "root": Path(".source/pymupdf4llm"),
-        "default_branch": "main",
-    },
-}
-
-DATASET_REPOSITORY = "llamaindex/ParseBench"
-DATASET_BRANCHES = {
-    "full": "main",
-    "test": "test-data",
-}
+from parsebench_version_lab.provenance import mupdf_build_spec  # noqa: E402, F401 - compatibility re-export
 
 
 def env(name: str) -> str:

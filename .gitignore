@@ -219,4 +219,5 @@ data/
 CLAUDE.md
 .DS_Store
 output/
+.version-lab/
 data_small/

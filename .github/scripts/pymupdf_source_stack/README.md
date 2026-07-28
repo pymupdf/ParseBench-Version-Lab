@@ -1,11 +1,12 @@
 # PyMuPDF source-stack workflow helpers
 
-These scripts implement the executable parts of
-`../../workflows/pymupdf-source-stack-parsebench.yml`. The workflow YAML is
-kept as the orchestration layer: inputs, permissions, jobs, third-party actions,
-and user-facing step names stay visible there. Branching, JSON generation,
-source discovery, benchmark commands, publishing, and summary rendering live
-here so they can be linted and tested as normal Python.
+These scripts are GitHub Actions adapters for
+`../../workflows/pymupdf-source-stack-parsebench.yml`. The workflow YAML keeps
+inputs, permissions, jobs, third-party actions, and user-facing step names
+visible. Portable configuration, build provenance, compatibility, benchmark,
+and result logic lives in `../../../tools/version_lab/`; the adapters in this
+directory translate GitHub environment variables and output files to that
+shared core. GitHub-only publishing and failure-summary behavior remains here.
 
 MuPDF is an independently selected source component. The workflow resolves its
 requested branch, tag, or commit to the checkout's full SHA, then gives
@@ -22,7 +23,7 @@ an overall aggregate plus category headline scores directly to the GitHub run
 summary. `_benchmark_scores.json` records the same values in the uploaded
 artifact.
 
-Each script is a small command with one responsibility. `resolve_dataset.py`
+Each adapter is a small command with one responsibility. `resolve_dataset.py`
 resolves the `current` Hugging Face branch or validates a user-supplied full
 commit SHA. `resolve_layout_source.py` resolves a PyMuPDF Layout selection
 against the legacy `ArtifexSoftware/sce` repository first, then falls back to

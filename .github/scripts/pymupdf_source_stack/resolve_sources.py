@@ -5,9 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from common import COMPONENTS, env, git_sha, write_github_outputs, write_json
-
-MUPDF_REMOTE = "https://github.com/ArtifexSoftware/mupdf.git"
+from common import COMPONENTS, env, git_sha, mupdf_build_spec, write_github_outputs, write_json
 
 CANDIDATES = {
     "pymupdf": [Path(".source/pymupdf")],
@@ -18,11 +16,6 @@ CANDIDATES = {
 
 class SourceResolutionError(RuntimeError):
     pass
-
-
-def mupdf_build_spec(sha: str) -> str:
-    """Return the pipcl source selector consumed by PyMuPDF's build."""
-    return f"git:--sha {sha} {MUPDF_REMOTE}"
 
 
 def package_dir(name: str, requested_ref: str, output_dir: Path) -> tuple[Path, str]:

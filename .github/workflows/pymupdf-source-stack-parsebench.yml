@@ -113,7 +113,9 @@ jobs:
           ref: ${{ github.workflow_sha }}
           path: .workflow-support
           persist-credentials: false
-          sparse-checkout: .github/scripts/pymupdf_source_stack
+          sparse-checkout: |
+            .github/scripts/pymupdf_source_stack
+            tools/version_lab/src
 
       - name: Initialize run configuration
         id: config
@@ -394,7 +396,9 @@ jobs:
           ref: ${{ github.workflow_sha }}
           path: .workflow-support
           persist-credentials: false
-          sparse-checkout: .github/scripts/pymupdf_source_stack
+          sparse-checkout: |
+            .github/scripts/pymupdf_source_stack
+            tools/version_lab/src
 
       - name: Download benchmark artifact
         uses: actions/download-artifact@v4
@@ -438,7 +442,9 @@ jobs:
           ref: ${{ github.workflow_sha }}
           path: .workflow-support
           persist-credentials: false
-          sparse-checkout: .github/scripts/pymupdf_source_stack
+          sparse-checkout: |
+            .github/scripts/pymupdf_source_stack
+            tools/version_lab/src
 
       - name: Report successful completion
         if: ${{ needs.benchmark.result == 'success' && needs.publish.result == 'success' }}
