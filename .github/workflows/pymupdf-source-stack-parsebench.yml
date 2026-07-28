@@ -274,6 +274,13 @@ jobs:
       - name: Verify RapidOCR native runtime
         run: .venv/bin/python -c "from rapidocr_onnxruntime import RapidOCR; print(RapidOCR)"
 
+      - name: Install current MuPDF source-build dependency
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends unzip
+          rm -rf /var/lib/apt/lists/*
+          unzip -v | sed -n '1p'
+
       - name: Build and install selected PyMuPDF
         env:
           PACKAGE_DIR: ${{ steps.sources.outputs.pymupdf_dir }}

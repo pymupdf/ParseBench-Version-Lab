@@ -48,10 +48,11 @@ The image contains system and build dependencies, not the selected PyMuPDF
 source stack or the ParseBench Python environment. The benchmark workflow still
 needs to install its locked dependencies and build the selected MuPDF,
 PyMuPDF, PyMuPDF Layout, and PyMuPDF4LLM revisions inside the container. In
-particular,
-`rapidocr-onnxruntime==1.2.3` and `opencv-python==4.13.0.92` were installed only
-inside the publisher's validation environment; they were not baked into the
-image.
+particular, the workflow installs `unzip` from the image's pinned Ubuntu
+snapshot because current MuPDF source uses it while generating the Extract
+DOCX template. `rapidocr-onnxruntime==1.2.3` and
+`opencv-python==4.13.0.92` were installed only inside the publisher's
+validation environment; they were not baked into the image.
 
 The image writes its principal versions to
 `/usr/local/share/parsebench/environment.txt` for runtime verification.
