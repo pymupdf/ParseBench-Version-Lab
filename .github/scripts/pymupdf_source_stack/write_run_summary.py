@@ -33,8 +33,8 @@ def commit_date(root: object) -> str:
     return parsed.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-def commits_after_main(repository: str, sha: str, token: str) -> int | None:
-    comparison = f"{quote(sha, safe='')}...main"
+def commits_after_default_branch(repository: str, sha: str, token: str, default_branch: str) -> int | None:
+    comparison = f"{quote(sha, safe='')}...{quote(default_branch, safe='')}"
     request = Request(  # noqa: S310 - fixed GitHub API host
         f"https://api.github.com/repos/{repository}/compare/{comparison}",
         headers={
@@ -73,11 +73,11 @@ def source_table(
     all_latest: bool,
     latest_any_branch: bool = False,
 ) -> list[str]:
-    lines = ["### PyMuPDF source commits", ""]
+    lines = ["### Source-stack commits", ""]
     if latest_any_branch:
         lines.extend(
             [
-                "The newest branch-head commit was requested from each PyMuPDF repository.",
+                "The newest branch-head commit was requested from each source repository.",
                 "",
                 "| Component | Repository | Branch selected | Commit used | Commit date |",
                 "| --- | --- | --- | --- | --- |",
@@ -95,7 +95,7 @@ def source_table(
     if all_latest:
         lines.extend(
             [
-                "Latest commits were requested for all three PyMuPDF repositories.",
+                "Latest default-branch commits were requested for all four source repositories.",
                 "",
                 "| Component | Repository | Commit used | Commit date |",
                 "| --- | --- | --- | --- |",
@@ -131,6 +131,7 @@ def main() -> int:
     all_latest = env("ALL_LATEST").strip().lower() == "true"
     latest_any_branch = env("LATEST_ANY_BRANCH").strip().lower() == "true"
     refs = {
+        "mupdf": env("MUPDF_REF"),
         "pymupdf": env("PYMUPDF_REF"),
         "pymupdf_layout": env("PYMUPDF_LAYOUT_REF"),
         "pymupdf4llm": env("PYMUPDF4LLM_REF"),
@@ -153,7 +154,12 @@ def main() -> int:
                 commit_date=commit_date(component["root"]),
                 commits_after=None
                 if all_latest or latest_any_branch
-                else commits_after_main(repository, sha, token),
+                else commits_after_default_branch(
+                    repository,
+                    sha,
+                    token,
+                    str(component["default_branch"]),
+                ),
             )
         )
 
@@ -168,7 +174,6 @@ def main() -> int:
         f"- **Document category:** {markdown_cell(env('GROUP_SELECTION'))}",
         f"- **Pipeline:** {markdown_cell(env('PIPELINE'))}",
         "- **Dataset download:** immutable SHA cache; downloads only on a cache miss",
-        "- **MuPDF:** selected automatically by the chosen PyMuPDF revision",
         "",
         *source_table(revisions, all_latest, latest_any_branch),
         "",

@@ -7,6 +7,12 @@ and user-facing step names stay visible there. Branching, JSON generation,
 source discovery, benchmark commands, publishing, and summary rendering live
 here so they can be linted and tested as normal Python.
 
+MuPDF is an independently selected source component. The workflow resolves its
+requested branch, tag, or commit to the checkout's full SHA, then gives
+PyMuPDF's build system a reproducible
+`git:--sha <sha> https://github.com/ArtifexSoftware/mupdf.git` selector through
+`PYMUPDF_SETUP_MUPDF_BUILD`.
+
 Successful runs read the generated `_evaluation_report.json` files and append
 an overall aggregate plus category headline scores directly to the GitHub run
 summary. `_benchmark_scores.json` records the same values in the uploaded

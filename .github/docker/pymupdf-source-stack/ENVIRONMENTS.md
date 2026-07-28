@@ -46,8 +46,9 @@ The latest image uses:
 
 The image contains system and build dependencies, not the selected PyMuPDF
 source stack or the ParseBench Python environment. The benchmark workflow still
-needs to install its locked dependencies and build the selected PyMuPDF,
-PyMuPDF Layout, and PyMuPDF4LLM revisions inside the container. In particular,
+needs to install its locked dependencies and build the selected MuPDF,
+PyMuPDF, PyMuPDF Layout, and PyMuPDF4LLM revisions inside the container. In
+particular,
 `rapidocr-onnxruntime==1.2.3` and `opencv-python==4.13.0.92` were installed only
 inside the publisher's validation environment; they were not baked into the
 image.
@@ -64,7 +65,8 @@ successfully in these runs:
 - [Run 29539899461](https://github.com/pymupdf/ParseBench-Version-Lab/actions/runs/29539899461)
 
 The second run used the then-latest PyMuPDF, PyMuPDF Layout from the new
-`ArtifexSoftware/pymupdf_layout` repository, and PyMuPDF4LLM commits.
+`ArtifexSoftware/pymupdf_layout` repository, and PyMuPDF4LLM commits. It
+predates independent MuPDF source selection.
 
 ## Version Lab integration
 
@@ -74,7 +76,7 @@ The production workflow uses the following integration:
 2. Grant `packages: read` and provide `github.actor` / `github.token` as GHCR
    credentials if the package requires authentication.
 3. Run workflow shell steps with Bash inside the container.
-4. Mark the workspace and the three source checkouts as Git safe directories,
+4. Mark the workspace and the four source checkouts as Git safe directories,
    because Actions mounts them with host ownership.
 5. Use `uv sync --locked --extra runners`, excluding the three source-built
    PyMuPDF packages as the current workflow does.

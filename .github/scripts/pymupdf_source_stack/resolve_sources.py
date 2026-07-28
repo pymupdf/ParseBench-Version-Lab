@@ -7,6 +7,8 @@ from pathlib import Path
 
 from common import COMPONENTS, env, git_sha, write_github_outputs, write_json
 
+MUPDF_REMOTE = "https://github.com/ArtifexSoftware/mupdf.git"
+
 CANDIDATES = {
     "pymupdf": [Path(".source/pymupdf")],
     "pymupdf_layout": [Path(".source/pymupdf-layout"), Path(".source/pymupdf-layout/pymupdf_layout")],
@@ -16,6 +18,11 @@ CANDIDATES = {
 
 class SourceResolutionError(RuntimeError):
     pass
+
+
+def mupdf_build_spec(sha: str) -> str:
+    """Return the pipcl source selector consumed by PyMuPDF's build."""
+    return f"git:--sha {sha} {MUPDF_REMOTE}"
 
 
 def package_dir(name: str, requested_ref: str, output_dir: Path) -> tuple[Path, str]:
@@ -52,13 +59,17 @@ def package_dir(name: str, requested_ref: str, output_dir: Path) -> tuple[Path, 
 def main() -> int:
     output_dir = Path(env("OUTPUT_DIR"))
     refs = {
+        "mupdf": env("MUPDF_REF"),
         "pymupdf": env("PYMUPDF_REF"),
         "pymupdf_layout": env("PYMUPDF_LAYOUT_REF"),
         "pymupdf4llm": env("PYMUPDF4LLM_REF"),
     }
-    resolved = {name: package_dir(name, refs[name], output_dir) for name in COMPONENTS}
+    resolved = {name: package_dir(name, refs[name], output_dir) for name in CANDIDATES}
+    mupdf_sha = git_sha(COMPONENTS["mupdf"]["root"])
     write_github_outputs(
         {
+            "mupdf_build": mupdf_build_spec(mupdf_sha),
+            "mupdf_sha": mupdf_sha,
             "pymupdf_dir": str(resolved["pymupdf"][0]),
             "pymupdf_sha": resolved["pymupdf"][1],
             "layout_dir": str(resolved["pymupdf_layout"][0]),

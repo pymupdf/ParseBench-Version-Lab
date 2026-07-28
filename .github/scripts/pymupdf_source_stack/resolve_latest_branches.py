@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve the newest branch-head commit in each PyMuPDF source repository."""
+"""Resolve the newest branch-head commit in each source-stack repository."""
 
 from __future__ import annotations
 

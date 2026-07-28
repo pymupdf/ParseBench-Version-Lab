@@ -32,6 +32,7 @@ benchmark = _load_module("benchmark")
 resolve_dataset = _load_module("resolve_dataset")
 resolve_layout_source = _load_module("resolve_layout_source")
 resolve_latest_branches = _load_module("resolve_latest_branches")
+resolve_sources = _load_module("resolve_sources")
 results_summary = _load_module("write_results_summary")
 run_summary = _load_module("write_run_summary")
 
@@ -60,6 +61,7 @@ def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monk
         "GITHUB_RUN_ID": "123",
         "GROUP_SELECTION": "Page layout",
         "LATEST_ANY_BRANCH": "false",
+        "MUPDF_REF": "feature/native",
         "PYMUPDF4LLM_REF": "feature/llm",
         "PYMUPDF_LAYOUT_REF": "1.28.0",
         "PYMUPDF_REF": "main",
@@ -78,9 +80,11 @@ def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monk
     assert outputs["artifact_name"] == "pymupdf-source-stack-123-2"
     assert "4llm-feature-llm" in outputs["destination"]
     assert outputs["all_latest"] == "false"
+    assert outputs["mupdf_ref"] == "feature/native"
     assert outputs["pymupdf4llm_ref"] == "feature/llm"
 
     request = json.loads((tmp_path / "parsebench-output" / "_source_request.json").read_text())
+    assert request["mupdf"] == {"ref": "feature/native", "repository": "ArtifexSoftware/mupdf"}
     assert request["pymupdf"] == {"ref": "main", "repository": "pymupdf/PyMuPDF"}
     assert request["pymupdf_layout"] == {
         "ref": "1.28.0",
@@ -102,6 +106,7 @@ def test_configure_all_latest_overrides_source_inputs_but_preserves_dataset_vers
         "GITHUB_RUN_ID": "456",
         "GROUP_SELECTION": "All categories",
         "LATEST_ANY_BRANCH": "false",
+        "MUPDF_REF": "1.27.0",
         "PYMUPDF4LLM_REF": "1.28.0",
         "PYMUPDF_LAYOUT_REF": "1.28.0",
         "PYMUPDF_REF": "a" * 40,
@@ -116,11 +121,13 @@ def test_configure_all_latest_overrides_source_inputs_but_preserves_dataset_vers
     outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
     assert outputs["all_latest"] == "true"
     assert outputs["dataset_ref"] == "d" * 40
+    assert outputs["mupdf_ref"] == "master"
     assert outputs["pymupdf_ref"] == "main"
     assert outputs["pymupdf_layout_ref"] == "main"
     assert outputs["pymupdf4llm_ref"] == "main"
 
     request = json.loads((tmp_path / "parsebench-output" / "_source_request.json").read_text())
+    assert request["mupdf"] == {"ref": "master", "repository": "ArtifexSoftware/mupdf"}
     assert request["pymupdf"] == {"ref": "main", "repository": "pymupdf/PyMuPDF"}
 
 
@@ -138,6 +145,7 @@ def test_configure_latest_any_branch_uses_resolver_placeholders(
         "GITHUB_RUN_ID": "789",
         "GROUP_SELECTION": "All categories",
         "LATEST_ANY_BRANCH": "true",
+        "MUPDF_REF": "1.28.0",
         "PYMUPDF4LLM_REF": "1.28.0",
         "PYMUPDF_LAYOUT_REF": "1.28.0",
         "PYMUPDF_REF": "1.28.0",
@@ -151,6 +159,7 @@ def test_configure_latest_any_branch_uses_resolver_placeholders(
 
     outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
     assert outputs["latest_any_branch"] == "true"
+    assert outputs["mupdf_ref"] == "latest-any-branch"
     assert outputs["pymupdf_ref"] == "latest-any-branch"
     assert "pymupdf-latest-any-branch" in outputs["destination"]
 
@@ -193,6 +202,7 @@ def test_resolve_latest_branches_records_pinned_shas(
     monkeypatch.setenv("OUTPUT_DIR", str(output_dir))
 
     heads = {
+        "ArtifexSoftware/mupdf": resolve_latest_branches.BranchHead("feature/native", "d" * 40, 40),
         "pymupdf/PyMuPDF": resolve_latest_branches.BranchHead("feature/core", "a" * 40, 10),
         "ArtifexSoftware/pymupdf_layout": resolve_latest_branches.BranchHead(
             "feature/layout", "b" * 40, 20
@@ -208,10 +218,14 @@ def test_resolve_latest_branches_records_pinned_shas(
     assert resolve_latest_branches.main() == 0
 
     outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
+    assert outputs["mupdf_branch"] == "feature/native"
+    assert outputs["mupdf_sha"] == "d" * 40
     assert outputs["pymupdf_branch"] == "feature/core"
     assert outputs["pymupdf_sha"] == "a" * 40
     assert outputs["pymupdf_layout_repository"] == "ArtifexSoftware/pymupdf_layout"
     request = json.loads((output_dir / "_source_request.json").read_text())
+    assert request["mupdf"]["branch"] == "feature/native"
+    assert request["mupdf"]["resolved_sha"] == "d" * 40
     assert request["pymupdf4llm"]["branch"] == "feature/llm"
     assert request["pymupdf4llm"]["resolved_sha"] == "c" * 40
 
@@ -360,7 +374,7 @@ def test_versioned_source_summary_uses_readable_clickable_commit_distance() -> N
 def test_all_latest_source_summary_shows_dates_without_comparison_count() -> None:
     markdown = "\n".join(run_summary.source_table(_source_revisions(None), all_latest=True))
 
-    assert "Latest commits were requested for all three PyMuPDF repositories." in markdown
+    assert "Latest default-branch commits were requested for all four source repositories." in markdown
     assert "[Latest commit](https://github.com/pymupdf/PyMuPDF/commit/" + "a" * 40 + ")" in markdown
     assert "2026-07-19 12:34:56 UTC" in markdown
 
@@ -390,6 +404,12 @@ def test_latest_any_branch_summary_shows_selected_branch_and_pinned_commit() -> 
 )
 def test_commit_label_is_human_readable(commits_after: int | None, label: str) -> None:
     assert run_summary.commit_label(commits_after) == label
+
+
+def test_mupdf_build_spec_pins_exact_sha() -> None:
+    sha = "d" * 40
+
+    assert resolve_sources.mupdf_build_spec(sha) == (f"git:--sha {sha} https://github.com/ArtifexSoftware/mupdf.git")
 
 
 def test_evaluation_groups_expands_text_categories(tmp_path: Path) -> None:

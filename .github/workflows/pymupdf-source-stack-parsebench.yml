@@ -5,7 +5,8 @@ run-name: >-
     inputs.latest_any_branch &&
     'Latest commits from any branches' ||
     inputs.all_latest &&
-    'Latest main-branch commits' ||
+    'Latest default-branch commits' ||
+    inputs.mupdf_ref == '1.28.0' &&
     inputs.pymupdf_ref == '1.28.0' &&
     inputs.pymupdf_layout_ref == '1.28.0' &&
     inputs.pymupdf4llm_ref == '1.28.0' &&
@@ -17,12 +18,12 @@ on:
   workflow_dispatch:
     inputs:
       all_latest:
-        description: "Use latest main-branch commits for PyMuPDF, Layout and PyMuPDF4LLM. Their ref inputs are ignored."
+        description: "Use latest default-branch commits for MuPDF, PyMuPDF, Layout and PyMuPDF4LLM. Their ref inputs are ignored."
         required: true
         default: false
         type: boolean
       latest_any_branch:
-        description: "Use the newest branch-head commit in each of the three source repositories. Cannot be combined with latest main-branch commits."
+        description: "Use the newest branch-head commit in each of the four source repositories. Cannot be combined with latest default-branch commits."
         required: true
         default: false
         type: boolean
@@ -30,6 +31,11 @@ on:
         description: "Dataset version: current, or a full 40-character Hugging Face commit SHA."
         required: true
         default: current
+        type: string
+      mupdf_ref:
+        description: "MuPDF version, branch or full 40-character commit SHA. Standard: 1.28.0. Ignored by either automatic latest mode."
+        required: true
+        default: "1.28.0"
         type: string
       pymupdf_ref:
         description: "PyMuPDF version, branch or full 40-character commit SHA. Standard: 1.28.0. Ignored by either automatic latest mode."
@@ -117,6 +123,7 @@ jobs:
           DATASET_REF: ${{ inputs.dataset_version }}
           GROUP_SELECTION: ${{ inputs.group }}
           LATEST_ANY_BRANCH: ${{ inputs.latest_any_branch }}
+          MUPDF_REF: ${{ inputs.mupdf_ref }}
           PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
           PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
           PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
@@ -186,6 +193,16 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
 
+      - name: Checkout MuPDF
+        uses: actions/checkout@v4
+        with:
+          repository: ArtifexSoftware/mupdf
+          ref: ${{ steps.latest-branches.outputs.mupdf_sha || steps.config.outputs.mupdf_ref }}
+          path: .source/mupdf
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
+
       - name: Checkout PyMuPDF Layout
         uses: actions/checkout@v4
         with:
@@ -209,6 +226,7 @@ jobs:
       - name: Trust container-mounted Git checkouts
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/mupdf"
           git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf"
           git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf-layout"
           git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf4llm"
@@ -224,6 +242,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
           GROUP_SELECTION: ${{ inputs.group }}
           LATEST_ANY_BRANCH: ${{ steps.config.outputs.latest_any_branch }}
+          MUPDF_REF: ${{ steps.latest-branches.outputs.mupdf_branch || steps.config.outputs.mupdf_ref }}
           PYMUPDF4LLM_REF: ${{ steps.latest-branches.outputs.pymupdf4llm_branch || steps.config.outputs.pymupdf4llm_ref }}
           PYMUPDF_LAYOUT_REF: ${{ steps.latest-branches.outputs.pymupdf_layout_branch || steps.config.outputs.pymupdf_layout_ref }}
           PYMUPDF_LAYOUT_REPOSITORY: ${{ steps.latest-branches.outputs.pymupdf_layout_repository || steps.layout-source.outputs.repository }}
@@ -234,6 +253,7 @@ jobs:
       - name: Resolve source packages and commits
         id: sources
         env:
+          MUPDF_REF: ${{ steps.latest-branches.outputs.mupdf_branch || steps.config.outputs.mupdf_ref }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
           PYMUPDF4LLM_REF: ${{ steps.latest-branches.outputs.pymupdf4llm_branch || steps.config.outputs.pymupdf4llm_ref }}
           PYMUPDF_LAYOUT_REF: ${{ steps.latest-branches.outputs.pymupdf_layout_branch || steps.config.outputs.pymupdf_layout_ref }}
@@ -257,6 +277,7 @@ jobs:
       - name: Build and install selected PyMuPDF
         env:
           PACKAGE_DIR: ${{ steps.sources.outputs.pymupdf_dir }}
+          PYMUPDF_SETUP_MUPDF_BUILD: ${{ steps.sources.outputs.mupdf_build }}
         run: uv pip install --python .venv --reinstall --no-deps "$PACKAGE_DIR"
 
       - name: Build and install selected PyMuPDF Layout
@@ -273,6 +294,7 @@ jobs:
 
       - name: Check source stack compatibility
         env:
+          MUPDF_REF: ${{ steps.latest-branches.outputs.mupdf_branch || steps.config.outputs.mupdf_ref }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
           PYMUPDF4LLM_REF: ${{ steps.latest-branches.outputs.pymupdf4llm_branch || steps.config.outputs.pymupdf4llm_ref }}
           PYMUPDF_LAYOUT_REF: ${{ steps.latest-branches.outputs.pymupdf_layout_branch || steps.config.outputs.pymupdf_layout_ref }}
@@ -281,6 +303,9 @@ jobs:
         run: |
           .venv/bin/python "$WORKFLOW_SCRIPTS/check_compatibility.py" \
             --output "$OUTPUT_DIR/_compatibility.json" \
+            --mupdf-repository ArtifexSoftware/mupdf \
+            --mupdf-ref "$MUPDF_REF" \
+            --mupdf-sha "${{ steps.sources.outputs.mupdf_sha }}" \
             --pymupdf-repository pymupdf/PyMuPDF \
             --pymupdf-ref "$PYMUPDF_REF" \
             --pymupdf-sha "${{ steps.sources.outputs.pymupdf_sha }}" \

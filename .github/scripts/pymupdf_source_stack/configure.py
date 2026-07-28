@@ -21,6 +21,7 @@ GROUPS = {
     "Text formatting": "text_formatting",
 }
 LATEST_REFS = {
+    "mupdf": "master",
     "pymupdf": "main",
     "pymupdf_layout": "main",
     "pymupdf4llm": "main",
@@ -48,9 +49,10 @@ def main() -> int:
     all_latest = env("ALL_LATEST").strip().lower() == "true"
     latest_any_branch = env("LATEST_ANY_BRANCH").strip().lower() == "true"
     if all_latest and latest_any_branch:
-        raise SystemExit("Select either all latest main-branch commits or latest commits from any branch, not both")
+        raise SystemExit("Select either all latest default-branch commits or latest commits from any branch, not both")
     requested_refs = {
         "dataset": env("DATASET_REF"),
+        "mupdf": env("MUPDF_REF"),
         "pymupdf": env("PYMUPDF_REF"),
         "pymupdf_layout": env("PYMUPDF_LAYOUT_REF"),
         "pymupdf4llm": env("PYMUPDF4LLM_REF"),
@@ -67,6 +69,7 @@ def main() -> int:
 
     stack_label = "_".join(
         (
+            f"mupdf-{safe_ref(refs['mupdf'])}",
             f"pymupdf-{safe_ref(refs['pymupdf'])}",
             f"layout-{safe_ref(refs['pymupdf_layout'])}",
             f"4llm-{safe_ref(refs['pymupdf4llm'])}",
@@ -98,6 +101,7 @@ def main() -> int:
             "destination": destination,
             "group": group,
             "latest_any_branch": str(latest_any_branch).lower(),
+            "mupdf_ref": refs["mupdf"],
             "output_dir": str(output_dir),
             "pymupdf4llm_ref": refs["pymupdf4llm"],
             "pymupdf_layout_ref": refs["pymupdf_layout"],

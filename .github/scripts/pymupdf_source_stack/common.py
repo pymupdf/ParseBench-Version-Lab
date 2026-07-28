@@ -15,20 +15,29 @@ LAYOUT_REPOSITORIES = (
 )
 
 COMPONENTS = {
+    "mupdf": {
+        "label": "MuPDF",
+        "repository": "ArtifexSoftware/mupdf",
+        "root": Path(".source/mupdf"),
+        "default_branch": "master",
+    },
     "pymupdf": {
         "label": "PyMuPDF",
         "repository": "pymupdf/PyMuPDF",
         "root": Path(".source/pymupdf"),
+        "default_branch": "main",
     },
     "pymupdf_layout": {
         "label": "PyMuPDF Layout",
         "repository": LAYOUT_REPOSITORIES[0],
         "root": Path(".source/pymupdf-layout"),
+        "default_branch": "main",
     },
     "pymupdf4llm": {
         "label": "PyMuPDF4LLM",
         "repository": "pymupdf/pymupdf4llm",
         "root": Path(".source/pymupdf4llm"),
+        "default_branch": "main",
     },
 }
 

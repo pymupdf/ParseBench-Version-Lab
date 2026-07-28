@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test a source-built PyMuPDF / Layout / PyMuPDF4LLM stack."""
+"""Smoke-test a source-built MuPDF / PyMuPDF / Layout / PyMuPDF4LLM stack."""
 
 from __future__ import annotations
 
@@ -28,6 +28,11 @@ def _github_escape(value: str) -> str:
 
 def _source_metadata(args: argparse.Namespace) -> dict[str, dict[str, str]]:
     return {
+        "mupdf": {
+            "repository": args.mupdf_repository,
+            "requested_ref": args.mupdf_ref,
+            "resolved_sha": args.mupdf_sha,
+        },
         "pymupdf": {
             "repository": args.pymupdf_repository,
             "requested_ref": args.pymupdf_ref,
@@ -131,6 +136,9 @@ def run_compatibility_check() -> dict[str, Any]:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--mupdf-repository", required=True)
+    parser.add_argument("--mupdf-ref", required=True)
+    parser.add_argument("--mupdf-sha", required=True)
     parser.add_argument("--pymupdf-repository", required=True)
     parser.add_argument("--pymupdf-ref", required=True)
     parser.add_argument("--pymupdf-sha", required=True)

@@ -5,15 +5,15 @@ from each component of the PyMuPDF parsing stack without changing the pinned
 `PyMuPDF4LLM ParseBench` workflow.
 
 The manual form keeps the repositories fixed and asks only for the ParseBench
-ref, three component refs, dataset size, and document category. Each component
+ref, four component refs, dataset size, and document category. Each component
 ref accepts a release tag, branch, or full commit SHA. Leave the displayed
 defaults unchanged for a standard quick test; prefer full commit SHAs for
 reproducible benchmark runs.
 
 Two optional checkboxes provide automatic source selection:
 
-- **Latest main-branch commits** selects the current `main` head in all three
-  source repositories.
+- **Latest default-branch commits** selects the current `master` head for MuPDF
+  and the current `main` head in the other three source repositories.
 - **Latest commits from any branch** fetches every branch head and selects the
   one with the newest commit timestamp independently in each repository. The
   workflow records the selected branch names and pins their exact SHAs before
@@ -31,13 +31,14 @@ Enter only the Git ref, not a GitHub URL. Examples:
 
 The fixed source repositories are:
 
+- MuPDF: `ArtifexSoftware/mupdf`
 - PyMuPDF: `pymupdf/PyMuPDF`
 - PyMuPDF Layout: `ArtifexSoftware/sce`, with automatic latest modes using the
   current `ArtifexSoftware/pymupdf_layout` repository
 - PyMuPDF4LLM: `pymupdf/pymupdf4llm`
 
 Every run starts its GitHub summary with the selected test size, document
-category, pipeline, and source configuration. For ParseBench and all three
+category, pipeline, and source configuration. For ParseBench and all four
 components, the summary shows both the branch, tag, or SHA entered by the user
 and the exact 40-character commit checked out for that run.
 
@@ -49,7 +50,7 @@ machine-readable `_benchmark_scores.json` artifact records those values and the
 aggregation method.
 
 The Actions run list uses a deliberately short title. It shows `Versions
-1.28.0` when all three standard versions are selected and `Custom versions`
+1.28.0` when all four standard versions are selected and `Custom versions`
 for any other combination, followed by the dataset size and document category.
 Full refs and commits remain in the run summary rather than making the run-list
 title unreadably long.
@@ -78,25 +79,26 @@ replacement runtime repository is available to the ParseBench workflow token.
 ## MuPDF version
 
 MuPDF is the native engine wrapped by PyMuPDF, not a separately installed
-Python dependency. Each PyMuPDF source revision defines the MuPDF source
-release it requires. When this workflow builds the selected PyMuPDF revision,
-PyMuPDF automatically downloads and compiles that matching MuPDF source. For
-example, PyMuPDF `1.28.0` selects MuPDF `1.28.0`.
+Python dependency. The workflow nevertheless exposes it as an independent
+source selection so developers can test a MuPDF branch, tag, or full commit
+against any PyMuPDF revision. The standard default remains `1.28.0`.
 
-PyMuPDF has an advanced build override for selecting a different MuPDF source,
-but ParseBench intentionally does not expose it. Allowing the native engine and
-its Python wrapper to vary independently would create unsupported combinations
-that can fail while compiling PyMuPDF, before the source-stack compatibility
-gate. Selecting the PyMuPDF ref therefore selects the corresponding MuPDF
-version automatically.
+The workflow checks out the selected MuPDF ref to resolve its immutable commit
+SHA. When PyMuPDF is built, that SHA is passed through
+`PYMUPDF_SETUP_MUPDF_BUILD` as
+`git:--sha <sha> https://github.com/ArtifexSoftware/mupdf.git`. PyMuPDF's build
+system clones, compiles, and links that exact MuPDF revision. Unsupported
+MuPDF/PyMuPDF combinations can fail during compilation or at the compatibility
+gate; those failures are retained as workflow diagnostics.
 
 ## Compatibility gate
 
 The workflow builds and installs source packages in this order:
 
-1. PyMuPDF
-2. PyMuPDF Layout, linked against the selected PyMuPDF build
-3. PyMuPDF4LLM, using the selected PyMuPDF and Layout builds
+1. MuPDF, as part of the PyMuPDF source build
+2. PyMuPDF
+3. PyMuPDF Layout, linked against the selected PyMuPDF build
+4. PyMuPDF4LLM, using the selected PyMuPDF and Layout builds
 
 Before downloading the ParseBench dataset, the compatibility gate activates
 Layout, creates a small PDF, calls PyMuPDF4LLM with the same page-chunk and OCR
