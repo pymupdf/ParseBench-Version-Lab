@@ -4,13 +4,7 @@ run-name: >-
   ${{
     format(
       '{0} · {1} · {2} · {3} · data:{4}',
-      inputs.pipeline == 'pymupdf4llm_markdown_150dpi' && '150 DPI' ||
-        inputs.pipeline == 'pymupdf4llm_markdown' && 'Default' ||
-        inputs.pipeline == 'pymupdf4llm_markdown_tesseract' && 'Tesseract' ||
-        inputs.pipeline == 'pymupdf4llm_markdown_rapidocr' && 'RapidOCR' ||
-        inputs.pipeline == 'pymupdf4llm_markdown_no_ocr' && 'No OCR' ||
-        inputs.pipeline == 'pymupdf4llm_html_tables' && 'HTML tables' ||
-        inputs.pipeline,
+      inputs.pipeline,
       inputs.latest_any_branch && 'Latest branch' ||
         inputs.all_latest && 'Latest default' ||
         inputs.mupdf_ref == inputs.pymupdf_ref &&

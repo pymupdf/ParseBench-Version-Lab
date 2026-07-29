@@ -80,12 +80,6 @@ def test_github_run_name_identifies_selected_benchmark_configuration() -> None:
     ):
         assert selection in run_name
     for concise_label in (
-        "'150 DPI'",
-        "'Default'",
-        "'Tesseract'",
-        "'RapidOCR'",
-        "'No OCR'",
-        "'HTML tables'",
         "'Latest branch'",
         "'Latest default'",
         "'Quick 15'",
@@ -95,6 +89,7 @@ def test_github_run_name_identifies_selected_benchmark_configuration() -> None:
     assert "'BENCH" not in run_name
     assert "workflow@" not in run_name
     assert "M:{0},P:{1},L:{2},4:{3}" in run_name
+    assert "'{0} · {1} · {2} · {3} · data:{4}'" in run_name
 
 
 def test_container_publisher_is_isolated_from_benchmark_workflow() -> None:
