@@ -3,25 +3,32 @@ name: ParseBench Version Lab
 run-name: >-
   ${{
     format(
-      'BENCH · {0} · {1} · {2} · {3} · data@{4} · workflow@{5}',
-      inputs.pipeline,
-      inputs.latest_any_branch && 'sources@latest-any-branch' ||
-        inputs.all_latest && 'sources@latest-default-branches' ||
+      '{0} · {1} · {2} · {3} · data:{4}',
+      inputs.pipeline == 'pymupdf4llm_markdown_150dpi' && '150 DPI' ||
+        inputs.pipeline == 'pymupdf4llm_markdown' && 'Default' ||
+        inputs.pipeline == 'pymupdf4llm_markdown_tesseract' && 'Tesseract' ||
+        inputs.pipeline == 'pymupdf4llm_markdown_rapidocr' && 'RapidOCR' ||
+        inputs.pipeline == 'pymupdf4llm_markdown_no_ocr' && 'No OCR' ||
+        inputs.pipeline == 'pymupdf4llm_html_tables' && 'HTML tables' ||
+        inputs.pipeline,
+      inputs.latest_any_branch && 'Latest branch' ||
+        inputs.all_latest && 'Latest default' ||
         inputs.mupdf_ref == inputs.pymupdf_ref &&
         inputs.mupdf_ref == inputs.pymupdf_layout_ref &&
         inputs.mupdf_ref == inputs.pymupdf4llm_ref &&
-        format('stack@{0}', inputs.mupdf_ref) ||
+        inputs.mupdf_ref ||
         format(
-          'MuPDF@{0},PyMuPDF@{1},Layout@{2},4LLM@{3}',
+          'M:{0},P:{1},L:{2},4:{3}',
           inputs.mupdf_ref,
           inputs.pymupdf_ref,
           inputs.pymupdf_layout_ref,
           inputs.pymupdf4llm_ref
         ),
-      inputs.run_scope,
-      inputs.group,
-      inputs.dataset_version,
-      github.ref_name
+      inputs.run_scope == 'Quick test (15 cases)' && 'Quick 15' || 'Full ~2k',
+      inputs.group == 'All categories' && 'All' ||
+        inputs.group == 'Page layout' && 'Layout' ||
+        inputs.group,
+      inputs.dataset_version
     )
   }}
 

@@ -60,19 +60,21 @@ ParseBench dashboard, and the overall score is their unweighted average. The
 machine-readable `_benchmark_scores.json` artifact records those values and the
 aggregation method.
 
-The Actions run list identifies a benchmark by pipeline, source selection, test
-size, document category, dataset selection, and workflow branch. If all four
-explicit component refs are equal, the source selection is compacted to
-`stack@<ref>`; mixed refs list MuPDF, PyMuPDF, Layout, and PyMuPDF4LLM
-individually. Automatic modes appear as `sources@latest-default-branches` or
-`sources@latest-any-branch`. The latter cannot name the resolved branch heads
-in the run title because GitHub fixes that title before the resolver job runs;
-the exact selected branches and commits remain in the run summary.
+The Actions run list uses a compact title containing only the pipeline variant,
+source selection, test size, document category, and dataset selection. GitHub
+already displays the workflow branch alongside the title. Common pipeline-name
+prefixes are removed: for example, `pymupdf4llm_markdown_150dpi` appears as
+`150 DPI`. If all four explicit component refs are equal, only that ref is
+shown; mixed refs use the compact `M:`, `P:`, `L:`, and `4:` labels. Automatic
+modes appear as `Latest default` or `Latest branch`. The latter cannot name the
+resolved branch heads in the run title because GitHub fixes that title before
+the resolver job runs; the exact selected branches and commits remain in the
+run summary.
 
 For example, a standard feature-branch run appears as:
 
 ```text
-BENCH · pymupdf4llm_markdown_150dpi · stack@1.28.0 · Quick test (15 cases) · All categories · data@current · workflow@feature/local-version-lab
+150 DPI · 1.28.0 · Quick 15 · All · data:current
 ```
 
 ## Private repository access
