@@ -1,121 +1,138 @@
-# ParseBench Version Lab runner
+# ParseBench Version Lab
 
-This cross-platform controller runs the MuPDF, PyMuPDF, PyMuPDF Layout, and
-PyMuPDF4LLM source-stack benchmark locally. It creates an isolated target
-environment for the selected stack without changing the developer's normal
-ParseBench environment.
+Benchmark selected MuPDF, PyMuPDF, PyMuPDF Layout, and PyMuPDF4LLM source
+revisions.
 
-## Prerequisites
+## Requirements
 
-Install Python 3.12, `uv`, Git, a native C/C++ compiler, Tesseract, and the
-English Tesseract language data. For example, on Ubuntu:
+- Git
+- `uv` and Python 3.12
+- A native C/C++ compiler
+- Tesseract with the English (`eng`) language data
+- Network access to GitHub, PyPI, Hugging Face, and `astral.sh`
+- At least 5 GB of free space for a quick run; allow more for the full dataset
+
+SWIG is installed in the benchmark environment.
+
+### Linux
+
+Ubuntu or Debian:
 
 ```shell
 sudo apt-get update
-sudo apt-get install build-essential git tesseract-ocr tesseract-ocr-eng
+sudo apt-get install build-essential curl git tesseract-ocr tesseract-ocr-eng
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-The standard PyMuPDF Layout `1.28.0` ref is fetched from the private
-`ArtifexSoftware/sce` repository. Developers using this ref must already have
-access to that repository and must configure a Git credential helper. If GitHub
-CLI is authenticated with an authorized account, run `gh auth setup-git`.
+Open a new shell if `uv` is not yet on `PATH`, then run:
 
-Automatic latest modes use the public `ArtifexSoftware/pymupdf_layout`
-repository and do not require private-repository access. MuPDF, PyMuPDF, and
-PyMuPDF4LLM are also fetched from public repositories.
+```shell
+uv python install 3.12
+```
 
-Native benchmark execution supports Linux, macOS, and Windows. On Windows, run
-the CLI from a developer shell where the selected C/C++ compiler is available.
-Use `version-lab doctor` to identify missing prerequisites on the current
-machine.
+Use equivalent packages on other distributions.
 
-## Run locally
+### macOS
 
-From the repository root:
+Install [Homebrew](https://brew.sh/) if needed, then run:
+
+```shell
+xcode-select --install
+brew install git tesseract uv
+uv python install 3.12
+```
+
+### Windows
+
+Install:
+
+- [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+  with the **Desktop development with C++** workload, MSVC, and a Windows SDK
+- [Git for Windows](https://git-scm.com/downloads/win)
+- [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki) with English data
+
+Install `uv` from PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Open **Developer PowerShell for VS 2022** or an **x64 Native Tools Command
+Prompt for VS 2022**, then install Python 3.12 and check the compiler and
+Tesseract:
+
+```powershell
+uv python install 3.12
+where.exe cl
+where.exe tesseract
+tesseract --list-langs
+```
+
+The language list must contain `eng`. If Tesseract is not found, add
+`C:\Program Files\Tesseract-OCR` to `PATH` and open a new developer shell.
+
+## Repository
+
+```shell
+git clone https://github.com/pymupdf/ParseBench-Version-Lab.git
+cd ParseBench-Version-Lab
+```
+
+## Source access
+
+The default PyMuPDF Layout `1.28.0` ref uses the private
+`ArtifexSoftware/sce` repository. Configure Git credentials for an account with
+access. If GitHub CLI is already authenticated:
+
+```shell
+gh auth setup-git
+```
+
+`--all-latest` uses the public `ArtifexSoftware/pymupdf_layout` repository.
+
+## Run
+
+Run all commands from the repository root.
+
+Check the required tools:
 
 ```shell
 uv run --project tools/version_lab version-lab doctor
+```
+
+Continue when `doctor` reports `"ready": true`.
+
+Preview the normalized selection:
+
+```shell
 uv run --project tools/version_lab version-lab plan --all-latest --scope quick
+```
+
+Run the 15-document quick benchmark:
+
+```shell
 uv run --project tools/version_lab version-lab run --all-latest --scope quick
 ```
 
-- `version-lab doctor` checks that the operating system, compiler, Git,
-  Tesseract, and English Tesseract language data are available. It
-  reports the result as JSON and must show `"ready": true` before a native run.
-- `version-lab plan --all-latest --scope quick` prints the normalized run
-  configuration without checking out sources, building packages, downloading
-  the dataset, or changing files. `--all-latest` selects each repository's
-  default branch, and `--scope quick` selects the 15-document test dataset.
-- `version-lab run --all-latest --scope quick` resolves the exact latest commit
-  on each default branch, creates an isolated environment, builds all four
-  selected projects, verifies MuPDF provenance and Layout/OCR behavior, and
-  runs the 15-document quick benchmark.
-
-To run the complete benchmark instead of the 15-document quick test:
+Run the full benchmark, which typically takes around one hour:
 
 ```shell
 uv run --project tools/version_lab version-lab run --all-latest --scope full
 ```
 
-A full benchmark typically takes around one hour. The actual duration depends
-on the machine, network speed, selected source versions, and whether build and
-dataset caches are already populated.
-
-To verify source access without compiling or downloading the dataset:
+Resolve source and dataset commits without building:
 
 ```shell
 uv run --project tools/version_lab version-lab run --all-latest --resolve-only
 ```
 
-To select explicit refs:
+Select explicit refs and a pipeline:
 
 ```shell
-uv run --project tools/version_lab version-lab run \
-  --mupdf-ref 1.28.0 \
-  --pymupdf-ref 1.28.0 \
-  --pymupdf-layout-ref 1.28.0 \
-  --pymupdf4llm-ref 1.28.0 \
-  --pipeline pymupdf4llm_markdown_150dpi \
-  --scope quick \
-  --group all
+uv run --project tools/version_lab version-lab run --mupdf-ref 1.28.0 --pymupdf-ref 1.28.0 --pymupdf-layout-ref 1.28.0 --pymupdf4llm-ref 1.28.0 --pipeline pymupdf4llm_markdown_150dpi --scope quick --group all
 ```
 
-The `1.28.0` Layout selection resolves from the legacy
-`ArtifexSoftware/sce` repository; automatic latest modes use
-`ArtifexSoftware/pymupdf_layout`.
-
-## Important options
-
-The `plan` and `run` commands support the same source and benchmark selections:
-
-- `--all-latest` selects the latest commit on each repository's default branch.
-- `--latest-any-branch` selects the newest branch-head commit in each
-  repository. It cannot be combined with `--all-latest`.
-- `--mupdf-ref`, `--pymupdf-ref`, `--pymupdf-layout-ref`, and
-  `--pymupdf4llm-ref` select an explicit tag, branch, or commit for each source.
-  Their default is `1.28.0`, and automatic latest modes override them.
-- `--scope quick` runs the 15-document smoke benchmark; `--scope full` runs the
-  complete benchmark.
-- `--pipeline` selects a registered PyMuPDF4LLM pipeline. The available values
-  are `pymupdf4llm_markdown_150dpi`, `pymupdf4llm_markdown`,
-  `pymupdf4llm_markdown_tesseract`, `pymupdf4llm_markdown_rapidocr`,
-  `pymupdf4llm_markdown_no_ocr`, and `pymupdf4llm_html_tables`; the default is
-  `pymupdf4llm_markdown_150dpi`.
-- `--group` accepts `all`, `chart`, `table`, `layout`, `text_content`, or
-  `text_formatting`.
-- `--dataset-ref` accepts `current` or a full 40-character dataset commit SHA.
-- `--python` selects the Python version or executable understood by `uv`; its
-  default is `3.12`.
-
-The `run` command additionally supports:
-
-- `--resolve-only` to resolve and check out exact source and dataset commits
-  without compiling or benchmarking.
-- `--workspace PATH` to place retained runs and caches somewhere other than the
-  default `.version-lab/` directory.
-
-The CLI help is the authoritative reference for every command, argument,
-default, and accepted value:
+View all arguments and accepted values:
 
 ```shell
 uv run --project tools/version_lab version-lab --help
@@ -123,23 +140,14 @@ uv run --project tools/version_lab version-lab plan --help
 uv run --project tools/version_lab version-lab run --help
 ```
 
-Runs are retained under `.version-lab/run-*`. Each run contains `run.json`,
-resolved source commits, compatibility diagnostics, benchmark reports, and
-aggregate scores. The immutable dataset cache is shared under
-`.version-lab/cache/datasets/`.
+## Results
 
-Selected packages are installed with `--no-deps` so dependency resolution
-cannot replace another selected source component. ParseBench's locked runner
-dependencies plus the explicitly pinned source-stack supplements provide the
-runtime. A selected commit that requires an additional dependency may therefore
-need an explicit runner update.
+Each run is stored under `.version-lab/run-*`. The main outputs are:
 
-Run its focused tests from the repository root with:
+- `run.json`: selected configuration, exact source commits, and status
+- `output/_benchmark_scores.md`: aggregate score summary
+- `output/_benchmark_scores.json`: machine-readable aggregate scores
+- `output/<pipeline>/_evaluation_report_dashboard.html`: HTML dashboard
 
-```shell
-uv run --extra dev pytest tools/version_lab/tests
-```
-
-The runner uses platform-native paths, subprocesses, and build tools. Individual
-source revisions must still support the operating system and compiler selected
-for that run.
+The dataset cache is stored under `.version-lab/cache/datasets/`. Use
+`--workspace PATH` to select another location.

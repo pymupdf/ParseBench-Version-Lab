@@ -8,6 +8,19 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+SENSITIVE_ENV_MARKERS = ("AUTH", "CREDENTIAL", "KEY", "PASSWD", "PASSWORD", "SECRET", "TOKEN")
+
+
+def subprocess_environment(extra: Mapping[str, str] | None = None) -> dict[str, str]:
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not any(marker in name.upper() for marker in SENSITIVE_ENV_MARKERS)
+    }
+    if extra:
+        env.update(extra)
+    return env
+
 
 class CommandError(RuntimeError):
     def __init__(self, command: Sequence[str], result: subprocess.CompletedProcess[str]) -> None:
@@ -64,7 +77,7 @@ def venv_executable(environment: Path, name: str) -> Path:
 
 
 def runtime_environment(tool_source: Path, extra: Mapping[str, str] | None = None) -> dict[str, str]:
-    env = os.environ.copy()
+    env = subprocess_environment()
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = str(tool_source) if not existing else str(tool_source) + os.pathsep + existing
     if extra:

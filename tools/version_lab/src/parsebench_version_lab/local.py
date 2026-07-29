@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import platform
 import subprocess
 import tempfile
@@ -13,7 +12,14 @@ from typing import Any
 
 from .dataset import DatasetRevision, resolve_dataset
 from .model import COMPONENT_SPECS, DATASET_REPOSITORY, RunConfig
-from .process import CommandRunner, executable, platform_description, runtime_environment, venv_executable
+from .process import (
+    CommandRunner,
+    executable,
+    platform_description,
+    runtime_environment,
+    subprocess_environment,
+    venv_executable,
+)
 from .provenance import mupdf_build_spec
 from .results import build_summary, load_scores
 from .sources import ResolvedSource, SourceManager
@@ -146,6 +152,14 @@ class LocalRun:
         self.sources: dict[str, ResolvedSource] = {}
         self.dataset: DatasetRevision | None = None
 
+    def command_environment(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        temporary = self.paths.run / "tmp"
+        temporary.mkdir(parents=True, exist_ok=True)
+        values = {"TEMP": str(temporary), "TMP": str(temporary), "TMPDIR": str(temporary)}
+        if extra:
+            values.update(extra)
+        return subprocess_environment(values)
+
     def record_manifest(self, *, status: str) -> None:
         value = {
             "status": status,
@@ -164,7 +178,7 @@ class LocalRun:
         self.record_manifest(status="resolved")
 
     def create_environment(self) -> Path:
-        project_env = os.environ.copy()
+        project_env = self.command_environment()
         # The controller itself commonly runs under `uv run`. Do not let its
         # VIRTUAL_ENV leak into the disposable benchmark environment.
         project_env.pop("VIRTUAL_ENV", None)
@@ -178,10 +192,8 @@ class LocalRun:
                 "uv",
                 "sync",
                 "--project",
-                self.paths.repository,
+                self.paths.repository / "tools" / "version_lab",
                 "--locked",
-                "--extra",
-                "runners",
                 "--no-install-package",
                 "pymupdf",
                 "--no-install-package",
@@ -193,7 +205,7 @@ class LocalRun:
             env=project_env,
         )
         python = venv_executable(self.paths.environment, "python")
-        self.runner.run(["uv", "pip", "install", "--python", python, "pipcl==12", "psutil==7.2.2", swig_requirement()])
+        self.runner.run(["uv", "pip", "install", "--python", python, "pipcl==12", swig_requirement()])
         return python
 
     def build_stack(self, python: Path) -> None:
@@ -202,20 +214,22 @@ class LocalRun:
         layout = self.sources["pymupdf_layout"]
         llm = self.sources["pymupdf4llm"]
         swig = venv_executable(self.paths.environment, "swig")
-        build_env = {
-            **os.environ,
-            "PYMUPDF_SETUP_MUPDF_BUILD": mupdf_build_spec(mupdf.resolved_sha),
-            "PYMUPDF_SETUP_SWIG": str(swig),
-        }
+        build_env = self.command_environment(
+            {
+                "PYMUPDF_SETUP_MUPDF_BUILD": mupdf_build_spec(mupdf.resolved_sha),
+                "PYMUPDF_SETUP_SWIG": str(swig),
+            }
+        )
         self.runner.run(
             ["uv", "pip", "install", "--python", python, "--reinstall", "--no-deps", package_dir(pymupdf)],
             env=build_env,
         )
-        layout_env = {
-            **os.environ,
-            "PYMUPDF_LAYOUT_SETUP_BUILD_PYMUPDF": "1",
-            "PYMUPDF_LAYOUT_SETUP_SWIG": str(swig),
-        }
+        layout_env = self.command_environment(
+            {
+                "PYMUPDF_LAYOUT_SETUP_BUILD_PYMUPDF": "1",
+                "PYMUPDF_LAYOUT_SETUP_SWIG": str(swig),
+            }
+        )
         self.runner.run(
             [
                 "uv",
@@ -232,7 +246,7 @@ class LocalRun:
         )
         self.runner.run(
             ["uv", "pip", "install", "--python", python, "--reinstall", "--no-deps", package_dir(llm)],
-            env={**os.environ, "PYMUPDF_SETUP_VERSION": "1"},
+            env=self.command_environment({"PYMUPDF_SETUP_VERSION": "1"}),
         )
 
     def runtime_env(self) -> dict[str, str]:
@@ -245,8 +259,12 @@ class LocalRun:
                 "DATASET_REPOSITORY": DATASET_REPOSITORY,
                 "DATASET_SHA": self.dataset.resolved_sha,
                 "GROUP": self.config.group,
+                "LLAMACLOUD_BENCH_LLM_NORMALIZATION": "off",
                 "OUTPUT_DIR": str(self.paths.output),
                 "PIPELINE": self.config.pipeline,
+                "TEMP": str(self.paths.run / "tmp"),
+                "TMP": str(self.paths.run / "tmp"),
+                "TMPDIR": str(self.paths.run / "tmp"),
             },
         )
 

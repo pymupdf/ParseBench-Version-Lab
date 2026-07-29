@@ -16,7 +16,12 @@ sys.path.insert(0, str(VERSION_LAB_SRC))
 from parsebench_version_lab import cli, local  # noqa: E402
 from parsebench_version_lab.local import LocalRun, create_paths, ensure_ready, package_dir  # noqa: E402
 from parsebench_version_lab.model import DEFAULT_PIPELINE, PIPELINES, RunConfig  # noqa: E402
-from parsebench_version_lab.process import CommandRunner, runtime_environment, venv_executable  # noqa: E402
+from parsebench_version_lab.process import (  # noqa: E402
+    CommandRunner,
+    runtime_environment,
+    subprocess_environment,
+    venv_executable,
+)
 from parsebench_version_lab.sources import ResolvedSource, SourceManager, parse_branch_heads  # noqa: E402
 
 
@@ -204,6 +209,8 @@ def test_environment_creation_does_not_reuse_controller_virtualenv(
     assert isinstance(sync_environment, dict)
     assert "VIRTUAL_ENV" not in sync_environment
     assert sync_environment["UV_PROJECT_ENVIRONMENT"] == str(paths.environment)
+    assert paths.repository / "tools" / "version_lab" in runner.calls[1]["command"]
+    assert "--extra" not in runner.calls[1]["command"]
     assert local.swig_requirement() in runner.calls[2]["command"]
 
 
@@ -271,6 +278,27 @@ def test_runtime_environment_forces_utf8_for_cross_platform_documents(tmp_path: 
 
     assert environment["PYTHONUTF8"] == "1"
     assert environment["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_local_run_disables_optional_llm_normalization(tmp_path: Path) -> None:
+    paths = create_paths(tmp_path, tmp_path / ".version-lab")
+    run = LocalRun(RunConfig(), paths)
+    run.dataset = local.DatasetRevision("owner/dataset", "current", "test-data", "a" * 40, "https://example.invalid")
+
+    assert run.runtime_env()["LLAMACLOUD_BENCH_LLM_NORMALIZATION"] == "off"
+
+
+def test_subprocess_environment_does_not_forward_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PATH", "/test/bin")
+    monkeypatch.setenv("SERVICE_API_KEY", "secret-value")
+    monkeypatch.setenv("SERVICE_TOKEN", "secret-value")
+
+    environment = subprocess_environment({"BUILD_SETTING": "enabled"})
+
+    assert environment["PATH"] == "/test/bin"
+    assert environment["BUILD_SETTING"] == "enabled"
+    assert "SERVICE_API_KEY" not in environment
+    assert "SERVICE_TOKEN" not in environment
 
 
 @pytest.mark.parametrize("system", local.SUPPORTED_SYSTEMS)
