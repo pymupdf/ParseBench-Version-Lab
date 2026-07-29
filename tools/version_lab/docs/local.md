@@ -53,14 +53,14 @@ also requires:
 - Git, with credentials configured when using Layout sources from the private
   `ArtifexSoftware/sce` repository;
 - SWIG;
-- `unzip`;
 - Tesseract and English language data;
 - the native C/C++ toolchain expected by MuPDF and PyMuPDF.
 
-Native benchmark execution is currently supported on Linux. The preflight
-checks for a C compiler, all required commands, and English Tesseract language
-data, but intentionally does not install or modify system packages. Windows and
-macOS execution is not currently claimed or tested.
+Native benchmark execution supports Linux, macOS, and Windows. The preflight
+checks for a platform-appropriate C/C++ compiler, all required commands, and
+English Tesseract language data, but intentionally does not install or modify
+system packages. On Windows, run the CLI from a developer shell where the
+selected compiler is available.
 
 The standard PyMuPDF Layout `1.28.0` ref is fetched from the private
 `ArtifexSoftware/sce` repository. Developers using this ref must already have

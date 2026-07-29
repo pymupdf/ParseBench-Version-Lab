@@ -10,9 +10,7 @@ import pytest
 
 VERSION_LAB_SRC = Path(__file__).parents[1] / "src"
 WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-parsebench.yml"
-ENVIRONMENT_WORKFLOW = (
-    Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-environment.yml"
-)
+ENVIRONMENT_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-environment.yml"
 sys.path.insert(0, str(VERSION_LAB_SRC))
 
 from parsebench_version_lab import cli, local  # noqa: E402
@@ -55,12 +53,15 @@ def test_github_workflow_pipeline_dropdown_matches_local_choices() -> None:
     pipeline_input = workflow.split("      pipeline:\n", 1)[1].split("      dataset_version:\n", 1)[0]
 
     assert f'default: "{DEFAULT_PIPELINE}"' in pipeline_input
-    assert 'type: choice' in pipeline_input
-    assert tuple(
-        line.removeprefix('          - "').removesuffix('"')
-        for line in pipeline_input.splitlines()
-        if line.startswith('          - "')
-    ) == PIPELINES
+    assert "type: choice" in pipeline_input
+    assert (
+        tuple(
+            line.removeprefix('          - "').removesuffix('"')
+            for line in pipeline_input.splitlines()
+            if line.startswith('          - "')
+        )
+        == PIPELINES
+    )
     assert "PIPELINE: ${{ inputs.pipeline }}" in workflow
 
 
@@ -211,14 +212,16 @@ def test_venv_python_path_is_platform_specific(tmp_path: Path) -> None:
     assert venv_executable(tmp_path, "python") == expected
 
 
+@pytest.mark.parametrize("system", local.SUPPORTED_SYSTEMS)
 @pytest.mark.parametrize(("languages", "ready"), [("eng\nosd\n", True), ("osd\n", False)])
-def test_doctor_checks_linux_toolchain_and_english_tesseract(
+def test_doctor_checks_cross_platform_toolchain_and_english_tesseract(
+    system: str,
     languages: str,
     ready: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(local, "executable", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(local.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(local.platform, "system", lambda: system)
     monkeypatch.setattr(
         local.subprocess,
         "run",
@@ -227,8 +230,24 @@ def test_doctor_checks_linux_toolchain_and_english_tesseract(
 
     status = local.doctor()
 
+    assert status["supported_platform"] is True
     assert status["checks"]["tesseract_english"] is ready
     assert status["ready"] is ready
+
+
+def test_doctor_rejects_unknown_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(local, "executable", lambda name: f"/tools/{name}")
+    monkeypatch.setattr(local.platform, "system", lambda: "Plan9")
+    monkeypatch.setattr(
+        local.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, stdout="eng\n", stderr=""),
+    )
+
+    status = local.doctor()
+
+    assert status["supported_platform"] is False
+    assert status["ready"] is False
 
 
 def test_resolve_only_requires_git_but_not_build_tools(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -263,6 +282,60 @@ def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.Capture
 
     plan = json.loads(capsys.readouterr().out)
     assert set(plan["refs"].values()) == {"latest-any-branch"}
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_options"),
+    [
+        (
+            "plan",
+            (
+                "--mupdf-ref",
+                "--pymupdf-ref",
+                "--pymupdf-layout-ref",
+                "--pymupdf4llm-ref",
+                "--dataset-ref",
+                "--pipeline",
+                "--scope",
+                "--group",
+                "--all-latest",
+                "--latest-any-branch",
+                "--python",
+            ),
+        ),
+        (
+            "run",
+            (
+                "--mupdf-ref",
+                "--pymupdf-ref",
+                "--pymupdf-layout-ref",
+                "--pymupdf4llm-ref",
+                "--dataset-ref",
+                "--pipeline",
+                "--scope",
+                "--group",
+                "--all-latest",
+                "--latest-any-branch",
+                "--python",
+                "--workspace",
+                "--resolve-only",
+            ),
+        ),
+    ],
+)
+def test_cli_help_documents_every_option(
+    command: str,
+    expected_options: tuple[str, ...],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([command, "--help"])
+
+    assert exit_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert all(option in help_text for option in expected_options)
+    assert "(default:" in help_text
+    assert "tag, branch, or full commit SHA" in help_text
 
 
 @pytest.mark.parametrize("pipeline", PIPELINES)

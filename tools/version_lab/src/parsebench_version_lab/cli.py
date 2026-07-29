@@ -12,17 +12,61 @@ from .model import COMPONENT_SPECS, GROUPS, PIPELINES, RUN_SCOPES, STANDARD_REF,
 from .util import repository_root
 
 
+class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
+    """Show meaningful defaults while omitting argparse's internal None values."""
+
+    def _get_help_string(self, action: argparse.Action) -> str:
+        if action.default is None:
+            return action.help or ""
+        return super()._get_help_string(action)
+
+
 def add_run_options(parser: argparse.ArgumentParser) -> None:
-    for name in COMPONENT_SPECS:
-        parser.add_argument(f"--{name.replace('_', '-')}-ref", default=STANDARD_REF)
-    parser.add_argument("--dataset-ref", default="current")
-    parser.add_argument("--pipeline", choices=PIPELINES, default=PIPELINES[0])
-    parser.add_argument("--scope", choices=RUN_SCOPES, default="quick")
-    parser.add_argument("--group", choices=GROUPS, default="all")
+    for name, component in COMPONENT_SPECS.items():
+        parser.add_argument(
+            f"--{name.replace('_', '-')}-ref",
+            default=STANDARD_REF,
+            help=f"{component.label} tag, branch, or full commit SHA",
+        )
+    parser.add_argument(
+        "--dataset-ref",
+        default="current",
+        help="ParseBench dataset revision: 'current' or a full 40-character commit SHA",
+    )
+    parser.add_argument(
+        "--pipeline",
+        choices=PIPELINES,
+        default=PIPELINES[0],
+        help="Registered PyMuPDF4LLM pipeline to benchmark",
+    )
+    parser.add_argument(
+        "--scope",
+        choices=RUN_SCOPES,
+        default="quick",
+        help="Dataset size: the 15-document quick test or the complete benchmark",
+    )
+    parser.add_argument(
+        "--group",
+        choices=GROUPS,
+        default="all",
+        help="Document category to benchmark, or all categories",
+    )
     latest = parser.add_mutually_exclusive_group()
-    latest.add_argument("--all-latest", action="store_true")
-    latest.add_argument("--latest-any-branch", action="store_true")
-    parser.add_argument("--python", default="3.12", help="Python version or executable understood by uv")
+    latest.add_argument(
+        "--all-latest",
+        action="store_true",
+        help="Use the latest commit on every component's default branch; ignore explicit component refs",
+    )
+    latest.add_argument(
+        "--latest-any-branch",
+        action="store_true",
+        help="Use each component's newest branch-head commit; ignore explicit component refs",
+    )
+    parser.add_argument(
+        "--python",
+        default="3.12",
+        help="Python version or executable understood by uv for the isolated benchmark environment",
+    )
 
 
 def config_from_args(args: argparse.Namespace) -> RunConfig:
@@ -39,14 +83,29 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="version-lab", description=__doc__)
+    parser = argparse.ArgumentParser(prog="version-lab", description=__doc__, formatter_class=HelpFormatter)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("doctor", help="Check native platform prerequisites")
+    subparsers.add_parser(
+        "doctor",
+        help="Check native platform prerequisites",
+        description="Check the current platform and required native build tools.",
+        formatter_class=HelpFormatter,
+    )
 
-    plan = subparsers.add_parser("plan", help="Print a normalized run plan without changing files")
+    plan = subparsers.add_parser(
+        "plan",
+        help="Print a normalized run plan without changing files",
+        description="Normalize and print the selected source and benchmark configuration without running it.",
+        formatter_class=HelpFormatter,
+    )
     add_run_options(plan)
 
-    run = subparsers.add_parser("run", help="Resolve, build, verify, and benchmark the selected stack")
+    run = subparsers.add_parser(
+        "run",
+        help="Resolve, build, verify, and benchmark the selected stack",
+        description="Resolve, build, verify, and benchmark the selected source stack in an isolated environment.",
+        formatter_class=HelpFormatter,
+    )
     add_run_options(run)
     run.add_argument(
         "--workspace",

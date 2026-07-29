@@ -19,7 +19,13 @@ from .results import build_summary, load_scores
 from .sources import ResolvedSource, SourceManager
 from .util import write_json
 
-REQUIRED_TOOLS = ("cc", "git", "uv", "swig", "unzip", "tesseract")
+SUPPORTED_SYSTEMS = ("Linux", "Darwin", "Windows")
+REQUIRED_TOOLS = ("compiler", "git", "uv", "swig", "tesseract")
+COMPILER_CANDIDATES = {
+    "Linux": ("cc", "gcc", "clang"),
+    "Darwin": ("cc", "clang", "gcc"),
+    "Windows": ("cl", "clang", "gcc", "cc"),
+}
 
 
 @dataclass(frozen=True)
@@ -37,9 +43,23 @@ class LocalPaths:
         return {name: str(value) for name, value in asdict(self).items()}
 
 
+def first_executable(candidates: tuple[str, ...]) -> str | None:
+    for candidate in candidates:
+        if path := executable(candidate):
+            return path
+    return None
+
+
 def doctor() -> dict[str, Any]:
-    tools = {name: executable(name) for name in REQUIRED_TOOLS}
-    supported_platform = platform.system() == "Linux"
+    system = platform.system()
+    supported_platform = system in SUPPORTED_SYSTEMS
+    tools = {
+        "compiler": first_executable(COMPILER_CANDIDATES.get(system, ("cc", "gcc", "clang", "cl"))),
+        "git": executable("git"),
+        "uv": executable("uv"),
+        "swig": executable("swig"),
+        "tesseract": executable("tesseract"),
+    }
     tesseract_english = False
     if tools["tesseract"]:
         result = subprocess.run(
@@ -56,7 +76,8 @@ def doctor() -> dict[str, Any]:
         "checks": {"tesseract_english": tesseract_english},
         "ready": supported_platform and all(tools.values()) and tesseract_english,
         "notes": [
-            "Native benchmark execution is currently supported on Linux.",
+            "Native benchmark execution supports Linux, macOS, and Windows when their build tools are installed.",
+            "On Windows, run from a developer shell where the selected C/C++ compiler is available.",
             "Private Layout refs use the developer's existing Git credential helper.",
         ],
     }
@@ -71,7 +92,7 @@ def ensure_ready(*, resolve_only: bool = False) -> None:
             "Missing required local tools: " + ", ".join(missing) + ". Install them and rerun `version-lab doctor`."
         )
     if not resolve_only and not status["supported_platform"]:
-        raise RuntimeError("Native benchmark execution is currently supported on Linux only")
+        raise RuntimeError("Native benchmark execution requires Linux, macOS, or Windows")
     if not resolve_only and not status["checks"]["tesseract_english"]:
         raise RuntimeError("Tesseract English language data is missing; install it and rerun `version-lab doctor`")
 

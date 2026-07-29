@@ -1,18 +1,18 @@
 # ParseBench Version Lab runner
 
-This standalone Linux controller runs the MuPDF, PyMuPDF, PyMuPDF Layout, and
+This cross-platform controller runs the MuPDF, PyMuPDF, PyMuPDF Layout, and
 PyMuPDF4LLM source-stack benchmark locally. It creates an isolated target
 environment for the selected stack without changing the developer's normal
 ParseBench environment.
 
 ## Prerequisites
 
-Install Python 3.12, `uv`, Git, a C/C++ compiler, SWIG, `unzip`, Tesseract, and
+Install Python 3.12, `uv`, Git, a native C/C++ compiler, SWIG, Tesseract, and
 the English Tesseract language data. For example, on Ubuntu:
 
 ```shell
 sudo apt-get update
-sudo apt-get install build-essential git swig tesseract-ocr tesseract-ocr-eng unzip
+sudo apt-get install build-essential git swig tesseract-ocr tesseract-ocr-eng
 ```
 
 The standard PyMuPDF Layout `1.28.0` ref is fetched from the private
@@ -24,8 +24,10 @@ Automatic latest modes use the public `ArtifexSoftware/pymupdf_layout`
 repository and do not require private-repository access. MuPDF, PyMuPDF, and
 PyMuPDF4LLM are also fetched from public repositories.
 
-Native benchmark execution is currently supported on Linux. Windows and macOS
-support is not claimed or tested yet.
+Native benchmark execution supports Linux, macOS, and Windows. On Windows, run
+the CLI from a developer shell where the selected C/C++ compiler is available.
+Use `version-lab doctor` to identify missing prerequisites on the current
+machine.
 
 ## Run locally
 
@@ -112,8 +114,8 @@ The `run` command additionally supports:
 - `--workspace PATH` to place retained runs and caches somewhere other than the
   default `.version-lab/` directory.
 
-Use the CLI's built-in documentation to see every command, option, default, and
-accepted value:
+The CLI help is the authoritative reference for every command, argument,
+default, and accepted value:
 
 ```shell
 uv run --project tools/version_lab version-lab --help
@@ -132,15 +134,12 @@ dependencies plus the explicitly pinned source-stack supplements provide the
 runtime. A selected commit that requires an additional dependency may therefore
 need an explicit runner update.
 
-See [the complete local usage guide](docs/local.md) for additional operational
-details.
-
 Run its focused tests from the repository root with:
 
 ```shell
 uv run --extra dev pytest tools/version_lab/tests
 ```
 
-The current native backend is Linux-only. A future container adapter could
-provide cloud parity on other Docker-capable hosts without changing the core
-run model.
+The runner uses platform-native paths, subprocesses, and build tools. Individual
+source revisions must still support the operating system and compiler selected
+for that run.
