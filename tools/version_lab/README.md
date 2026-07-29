@@ -37,10 +37,27 @@ uv run --project tools/version_lab version-lab plan --all-latest --scope quick
 uv run --project tools/version_lab version-lab run --all-latest --scope quick
 ```
 
-The first command must report `"ready": true`. The plan command makes no
-changes. The run command resolves exact commits, builds all four selected
-projects, verifies MuPDF provenance and Layout/OCR behavior, then runs the
-15-document quick benchmark.
+- `version-lab doctor` checks that the operating system, compiler, Git, SWIG,
+  `unzip`, Tesseract, and English Tesseract language data are available. It
+  reports the result as JSON and must show `"ready": true` before a native run.
+- `version-lab plan --all-latest --scope quick` prints the normalized run
+  configuration without checking out sources, building packages, downloading
+  the dataset, or changing files. `--all-latest` selects each repository's
+  default branch, and `--scope quick` selects the 15-document test dataset.
+- `version-lab run --all-latest --scope quick` resolves the exact latest commit
+  on each default branch, creates an isolated environment, builds all four
+  selected projects, verifies MuPDF provenance and Layout/OCR behavior, and
+  runs the 15-document quick benchmark.
+
+To run the complete benchmark instead of the 15-document quick test:
+
+```shell
+uv run --project tools/version_lab version-lab run --all-latest --scope full
+```
+
+A full benchmark typically takes around one hour. The actual duration depends
+on the machine, network speed, selected source versions, and whether build and
+dataset caches are already populated.
 
 To verify source access without compiling or downloading the dataset:
 
