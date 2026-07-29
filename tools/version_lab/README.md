@@ -7,12 +7,12 @@ ParseBench environment.
 
 ## Prerequisites
 
-Install Python 3.12, `uv`, Git, a native C/C++ compiler, SWIG, Tesseract, and
-the English Tesseract language data. For example, on Ubuntu:
+Install Python 3.12, `uv`, Git, a native C/C++ compiler, Tesseract, and the
+English Tesseract language data. For example, on Ubuntu:
 
 ```shell
 sudo apt-get update
-sudo apt-get install build-essential git swig tesseract-ocr tesseract-ocr-eng
+sudo apt-get install build-essential git tesseract-ocr tesseract-ocr-eng
 ```
 
 The standard PyMuPDF Layout `1.28.0` ref is fetched from the private
@@ -39,8 +39,8 @@ uv run --project tools/version_lab version-lab plan --all-latest --scope quick
 uv run --project tools/version_lab version-lab run --all-latest --scope quick
 ```
 
-- `version-lab doctor` checks that the operating system, compiler, Git, SWIG,
-  `unzip`, Tesseract, and English Tesseract language data are available. It
+- `version-lab doctor` checks that the operating system, compiler, Git,
+  Tesseract, and English Tesseract language data are available. It
   reports the result as JSON and must show `"ready": true` before a native run.
 - `version-lab plan --all-latest --scope quick` prints the normalized run
   configuration without checking out sources, building packages, downloading

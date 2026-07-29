@@ -204,6 +204,44 @@ def test_environment_creation_does_not_reuse_controller_virtualenv(
     assert isinstance(sync_environment, dict)
     assert "VIRTUAL_ENV" not in sync_environment
     assert sync_environment["UV_PROJECT_ENVIRONMENT"] == str(paths.environment)
+    assert local.SWIG_REQUIREMENT in runner.calls[2]["command"]
+
+
+def test_stack_build_uses_one_pinned_swig_for_pymupdf_and_layout(tmp_path: Path) -> None:
+    class RecordingRunner:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def run(self, command: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            self.calls.append({"command": command, **kwargs})
+            return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+    paths = create_paths(tmp_path, tmp_path / ".version-lab")
+    runner = RecordingRunner()
+    run = LocalRun(RunConfig(), paths, runner=runner)  # type: ignore[arg-type]
+    sources = {}
+    for name, label in (
+        ("mupdf", "MuPDF"),
+        ("pymupdf", "PyMuPDF"),
+        ("pymupdf_layout", "PyMuPDF Layout"),
+        ("pymupdf4llm", "PyMuPDF4LLM"),
+    ):
+        source_path = tmp_path / name
+        source_path.mkdir()
+        if name != "mupdf":
+            (source_path / "pyproject.toml").touch()
+        sources[name] = ResolvedSource(name, label, f"owner/{name}", "main", "a" * 40, source_path)
+    run.sources = sources
+
+    run.build_stack(venv_executable(paths.environment, "python"))
+
+    expected_swig = str(venv_executable(paths.environment, "swig"))
+    pymupdf_environment = runner.calls[0]["env"]
+    layout_environment = runner.calls[1]["env"]
+    assert isinstance(pymupdf_environment, dict)
+    assert isinstance(layout_environment, dict)
+    assert pymupdf_environment["PYMUPDF_SETUP_SWIG"] == expected_swig
+    assert layout_environment["PYMUPDF_LAYOUT_SETUP_SWIG"] == expected_swig
 
 
 def test_venv_python_path_is_platform_specific(tmp_path: Path) -> None:

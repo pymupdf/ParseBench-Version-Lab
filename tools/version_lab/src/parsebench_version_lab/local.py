@@ -20,7 +20,8 @@ from .sources import ResolvedSource, SourceManager
 from .util import write_json
 
 SUPPORTED_SYSTEMS = ("Linux", "Darwin", "Windows")
-REQUIRED_TOOLS = ("compiler", "git", "uv", "swig", "tesseract")
+REQUIRED_TOOLS = ("compiler", "git", "uv", "tesseract")
+SWIG_REQUIREMENT = "swig==4.3.1"
 COMPILER_CANDIDATES = {
     "Linux": ("cc", "gcc", "clang"),
     "Darwin": ("cc", "clang", "gcc"),
@@ -57,7 +58,6 @@ def doctor() -> dict[str, Any]:
         "compiler": first_executable(COMPILER_CANDIDATES.get(system, ("cc", "gcc", "clang", "cl"))),
         "git": executable("git"),
         "uv": executable("uv"),
-        "swig": executable("swig"),
         "tesseract": executable("tesseract"),
     }
     tesseract_english = False
@@ -183,7 +183,7 @@ class LocalRun:
             env=project_env,
         )
         python = venv_executable(self.paths.environment, "python")
-        self.runner.run(["uv", "pip", "install", "--python", python, "pipcl==12", "psutil==7.2.2"])
+        self.runner.run(["uv", "pip", "install", "--python", python, "pipcl==12", "psutil==7.2.2", SWIG_REQUIREMENT])
         return python
 
     def build_stack(self, python: Path) -> None:
@@ -191,12 +191,21 @@ class LocalRun:
         pymupdf = self.sources["pymupdf"]
         layout = self.sources["pymupdf_layout"]
         llm = self.sources["pymupdf4llm"]
-        build_env = {**os.environ, "PYMUPDF_SETUP_MUPDF_BUILD": mupdf_build_spec(mupdf.resolved_sha)}
+        swig = venv_executable(self.paths.environment, "swig")
+        build_env = {
+            **os.environ,
+            "PYMUPDF_SETUP_MUPDF_BUILD": mupdf_build_spec(mupdf.resolved_sha),
+            "PYMUPDF_SETUP_SWIG": str(swig),
+        }
         self.runner.run(
             ["uv", "pip", "install", "--python", python, "--reinstall", "--no-deps", package_dir(pymupdf)],
             env=build_env,
         )
-        layout_env = {**os.environ, "PYMUPDF_LAYOUT_SETUP_BUILD_PYMUPDF": "1"}
+        layout_env = {
+            **os.environ,
+            "PYMUPDF_LAYOUT_SETUP_BUILD_PYMUPDF": "1",
+            "PYMUPDF_LAYOUT_SETUP_SWIG": str(swig),
+        }
         self.runner.run(
             [
                 "uv",

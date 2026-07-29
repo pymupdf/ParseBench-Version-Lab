@@ -52,7 +52,6 @@ also requires:
 
 - Git, with credentials configured when using Layout sources from the private
   `ArtifexSoftware/sce` repository;
-- SWIG;
 - Tesseract and English language data;
 - the native C/C++ toolchain expected by MuPDF and PyMuPDF.
 
