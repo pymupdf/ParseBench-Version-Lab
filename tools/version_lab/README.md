@@ -50,6 +50,7 @@ uv run --project tools/version_lab version-lab run \
   --pymupdf-ref 1.28.0 \
   --pymupdf-layout-ref 1.28.0 \
   --pymupdf4llm-ref 1.28.0 \
+  --pipeline pymupdf4llm_markdown_150dpi \
   --scope quick \
   --group all
 ```
@@ -70,6 +71,11 @@ The `plan` and `run` commands support the same source and benchmark selections:
   Their default is `1.28.0`, and automatic latest modes override them.
 - `--scope quick` runs the 15-document smoke benchmark; `--scope full` runs the
   complete benchmark.
+- `--pipeline` selects a registered PyMuPDF4LLM pipeline. The available values
+  are `pymupdf4llm_markdown_150dpi`, `pymupdf4llm_markdown`,
+  `pymupdf4llm_markdown_tesseract`, `pymupdf4llm_markdown_rapidocr`,
+  `pymupdf4llm_markdown_no_ocr`, and `pymupdf4llm_html_tables`; the default is
+  `pymupdf4llm_markdown_150dpi`.
 - `--group` accepts `all`, `chart`, `table`, `layout`, `text_content`, or
   `text_formatting`.
 - `--dataset-ref` accepts `current` or a full 40-character dataset commit SHA.

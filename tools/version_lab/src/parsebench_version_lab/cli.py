@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .local import LocalRun, create_paths, doctor, ensure_ready
-from .model import COMPONENT_SPECS, GROUPS, RUN_SCOPES, STANDARD_REF, RunConfig
+from .model import COMPONENT_SPECS, GROUPS, PIPELINES, RUN_SCOPES, STANDARD_REF, RunConfig
 from .util import repository_root
 
 
@@ -16,6 +16,7 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
     for name in COMPONENT_SPECS:
         parser.add_argument(f"--{name.replace('_', '-')}-ref", default=STANDARD_REF)
     parser.add_argument("--dataset-ref", default="current")
+    parser.add_argument("--pipeline", choices=PIPELINES, default=PIPELINES[0])
     parser.add_argument("--scope", choices=RUN_SCOPES, default="quick")
     parser.add_argument("--group", choices=GROUPS, default="all")
     latest = parser.add_mutually_exclusive_group()
@@ -28,6 +29,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
     return RunConfig(
         **{f"{name}_ref": getattr(args, f"{name}_ref") for name in COMPONENT_SPECS},
         dataset_ref=args.dataset_ref,
+        pipeline=args.pipeline,
         scope=args.scope,
         group=args.group,
         all_latest=args.all_latest,

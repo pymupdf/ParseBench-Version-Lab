@@ -9,11 +9,12 @@ from pathlib import Path
 import pytest
 
 VERSION_LAB_SRC = Path(__file__).parents[1] / "src"
+WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-parsebench.yml"
 sys.path.insert(0, str(VERSION_LAB_SRC))
 
 from parsebench_version_lab import cli, local  # noqa: E402
 from parsebench_version_lab.local import LocalRun, create_paths, ensure_ready, package_dir  # noqa: E402
-from parsebench_version_lab.model import RunConfig  # noqa: E402
+from parsebench_version_lab.model import DEFAULT_PIPELINE, PIPELINES, RunConfig  # noqa: E402
 from parsebench_version_lab.process import CommandRunner, venv_executable  # noqa: E402
 from parsebench_version_lab.sources import ResolvedSource, SourceManager, parse_branch_heads  # noqa: E402
 
@@ -34,6 +35,51 @@ def test_run_config_normalizes_latest_refs_and_scope() -> None:
 def test_run_config_rejects_conflicting_latest_modes() -> None:
     with pytest.raises(ValueError, match="not both"):
         RunConfig(all_latest=True, latest_any_branch=True)
+
+
+def test_run_config_defaults_to_150dpi_pipeline_and_accepts_registered_variants() -> None:
+    assert RunConfig().pipeline == DEFAULT_PIPELINE == "pymupdf4llm_markdown_150dpi"
+    assert RunConfig(pipeline="pymupdf4llm_markdown_no_ocr").pipeline == "pymupdf4llm_markdown_no_ocr"
+
+
+def test_run_config_rejects_unknown_pipeline() -> None:
+    with pytest.raises(ValueError, match="Unsupported pipeline"):
+        RunConfig(pipeline="unknown_pipeline")
+
+
+def test_github_workflow_pipeline_dropdown_matches_local_choices() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    pipeline_input = workflow.split("      pipeline:\n", 1)[1].split("      dataset_version:\n", 1)[0]
+
+    assert f'default: "{DEFAULT_PIPELINE}"' in pipeline_input
+    assert 'type: choice' in pipeline_input
+    assert tuple(
+        line.removeprefix('          - "').removesuffix('"')
+        for line in pipeline_input.splitlines()
+        if line.startswith('          - "')
+    ) == PIPELINES
+    assert "PIPELINE: ${{ inputs.pipeline }}" in workflow
+
+
+def test_github_run_name_identifies_selected_benchmark_configuration() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    run_name = workflow.split("run-name: >-\n", 1)[1].split("\non:\n", 1)[0]
+
+    for selection in (
+        "inputs.pipeline",
+        "inputs.mupdf_ref",
+        "inputs.pymupdf_ref",
+        "inputs.pymupdf_layout_ref",
+        "inputs.pymupdf4llm_ref",
+        "inputs.run_scope",
+        "inputs.group",
+        "inputs.dataset_version",
+        "github.ref_name",
+    ):
+        assert selection in run_name
+    assert "sources@latest-any-branch" in run_name
+    assert "sources@latest-default-branches" in run_name
+    assert "workflow@{5}" in run_name
 
 
 def test_run_config_marks_latest_any_branch_refs_as_dynamic() -> None:
@@ -182,3 +228,14 @@ def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.Capture
 
     plan = json.loads(capsys.readouterr().out)
     assert set(plan["refs"].values()) == {"latest-any-branch"}
+
+
+@pytest.mark.parametrize("pipeline", PIPELINES)
+def test_cli_plan_accepts_every_registered_pymupdf4llm_pipeline(
+    pipeline: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["plan", "--pipeline", pipeline]) == 0
+
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["pipeline"] == pipeline

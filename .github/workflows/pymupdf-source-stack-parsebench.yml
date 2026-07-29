@@ -2,19 +2,31 @@ name: ParseBench Version Lab
 
 run-name: >-
   ${{
-    inputs.rebuild_environment &&
-    'Publish source-stack environment' ||
-    inputs.latest_any_branch &&
-    'Latest commits from any branches' ||
-    inputs.all_latest &&
-    'Latest default-branch commits' ||
-    inputs.mupdf_ref == '1.28.0' &&
-    inputs.pymupdf_ref == '1.28.0' &&
-    inputs.pymupdf_layout_ref == '1.28.0' &&
-    inputs.pymupdf4llm_ref == '1.28.0' &&
-    'Versions 1.28.0' ||
-    'Custom versions'
-  }} · ${{ inputs.run_scope }} · ${{ inputs.group }}
+    inputs.rebuild_environment && format(
+      'ENV publish · workflow@{0}',
+      github.ref_name
+    ) || format(
+      'BENCH · {0} · {1} · {2} · {3} · data@{4} · workflow@{5}',
+      inputs.pipeline,
+      inputs.latest_any_branch && 'sources@latest-any-branch' ||
+        inputs.all_latest && 'sources@latest-default-branches' ||
+        inputs.mupdf_ref == inputs.pymupdf_ref &&
+        inputs.mupdf_ref == inputs.pymupdf_layout_ref &&
+        inputs.mupdf_ref == inputs.pymupdf4llm_ref &&
+        format('stack@{0}', inputs.mupdf_ref) ||
+        format(
+          'MuPDF@{0},PyMuPDF@{1},Layout@{2},4LLM@{3}',
+          inputs.mupdf_ref,
+          inputs.pymupdf_ref,
+          inputs.pymupdf_layout_ref,
+          inputs.pymupdf4llm_ref
+        ),
+      inputs.run_scope,
+      inputs.group,
+      inputs.dataset_version,
+      github.ref_name
+    )
+  }}
 
 on:
   workflow_dispatch:
@@ -34,6 +46,18 @@ on:
         required: true
         default: false
         type: boolean
+      pipeline:
+        description: "Which PyMuPDF4LLM pipeline should be benchmarked?"
+        required: true
+        default: "pymupdf4llm_markdown_150dpi"
+        type: choice
+        options:
+          - "pymupdf4llm_markdown_150dpi"
+          - "pymupdf4llm_markdown"
+          - "pymupdf4llm_markdown_tesseract"
+          - "pymupdf4llm_markdown_rapidocr"
+          - "pymupdf4llm_markdown_no_ocr"
+          - "pymupdf4llm_html_tables"
       dataset_version:
         description: "Dataset version: current, or a full 40-character Hugging Face commit SHA."
         required: true
@@ -87,7 +111,7 @@ permissions:
 env:
   ENVIRONMENT_IMAGE: ghcr.io/pymupdf/parsebench-source-stack-env
   ENVIRONMENT_VERSION_TAG: ubuntu24-python3.12.13-20260716-r3
-  PIPELINE: pymupdf4llm_markdown_150dpi
+  PIPELINE: ${{ inputs.pipeline }}
   GCP_PROJECT_ID: pypi-download-analysis-457820
   GCS_PREFIX: parsebench/pymupdf_source_stack
   UV_NO_SYNC: "1"
@@ -464,7 +488,7 @@ jobs:
           RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
         run: .venv/bin/python "$WORKFLOW_SCRIPTS/write_run_metadata.py"
 
-      - name: Run PyMuPDF4LLM 150 DPI inference
+      - name: Run selected PyMuPDF4LLM pipeline inference
         env:
           DATA_DIR: ${{ steps.config.outputs.data_dir }}
           GROUP: ${{ steps.config.outputs.group }}

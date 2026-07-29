@@ -32,9 +32,14 @@ uv run --project tools/version_lab version-lab run \
   --pymupdf-ref 1.28.0 \
   --pymupdf-layout-ref 1.28.0 \
   --pymupdf4llm-ref 1.28.0 \
+  --pipeline pymupdf4llm_markdown_150dpi \
   --scope quick \
   --group all
 ```
+
+Use `--pipeline` to select any registered PyMuPDF4LLM variant exposed by the
+Version Lab CLI. It defaults to `pymupdf4llm_markdown_150dpi`; run
+`version-lab run --help` to list every accepted pipeline name.
 
 Runs and the shared immutable dataset cache are stored under `.version-lab/`,
 which is ignored by Git. Every run retains `run.json`, resolved source SHAs,

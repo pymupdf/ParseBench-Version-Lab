@@ -5,10 +5,15 @@ from each component of the PyMuPDF parsing stack without changing the pinned
 `PyMuPDF4LLM ParseBench` workflow.
 
 The manual form keeps the repositories fixed and asks only for the ParseBench
-ref, four component refs, dataset size, and document category. Each component
-ref accepts a release tag, branch, or full commit SHA. Leave the displayed
-defaults unchanged for a standard quick test; prefer full commit SHAs for
-reproducible benchmark runs.
+ref, four component refs, PyMuPDF4LLM pipeline, dataset size, and document
+category. Each component ref accepts a release tag, branch, or full commit SHA.
+Leave the displayed defaults unchanged for a standard quick test; prefer full
+commit SHAs for reproducible benchmark runs.
+
+The pipeline dropdown exposes the registered PyMuPDF4LLM variants. It defaults
+to `pymupdf4llm_markdown_150dpi`, matching the workflow's previous fixed
+configuration. The selected name is recorded in the run title, summary,
+metadata, output directory, and score report.
 
 Two optional checkboxes provide automatic source selection:
 
@@ -49,11 +54,20 @@ ParseBench dashboard, and the overall score is their unweighted average. The
 machine-readable `_benchmark_scores.json` artifact records those values and the
 aggregation method.
 
-The Actions run list uses a deliberately short title. It shows `Versions
-1.28.0` when all four standard versions are selected and `Custom versions`
-for any other combination, followed by the dataset size and document category.
-Full refs and commits remain in the run summary rather than making the run-list
-title unreadably long.
+The Actions run list identifies a benchmark by pipeline, source selection, test
+size, document category, dataset selection, and workflow branch. If all four
+explicit component refs are equal, the source selection is compacted to
+`stack@<ref>`; mixed refs list MuPDF, PyMuPDF, Layout, and PyMuPDF4LLM
+individually. Automatic modes appear as `sources@latest-default-branches` or
+`sources@latest-any-branch`. The latter cannot name the resolved branch heads
+in the run title because GitHub fixes that title before the resolver job runs;
+the exact selected branches and commits remain in the run summary.
+
+For example, a standard feature-branch run appears as:
+
+```text
+BENCH · pymupdf4llm_markdown_150dpi · stack@1.28.0 · Quick test (15 cases) · All categories · data@current · workflow@feature/local-version-lab
+```
 
 ## Private repository access
 
@@ -101,13 +115,13 @@ The workflow builds and installs source packages in this order:
 4. PyMuPDF4LLM, using the selected PyMuPDF and Layout builds
 
 Before downloading the ParseBench dataset, the compatibility gate activates
-Layout, creates a small PDF, calls PyMuPDF4LLM with the same page-chunk and OCR
-DPI option shape used by the benchmark pipeline, and verifies that the result
-contains both the marker text and non-empty Layout page boxes. Before that
-behavioral check, it compares the selected MuPDF SHA against the source selector
-embedded in the installed PyMuPDF build metadata. A PyMuPDF installation built
-with its fixed default MuPDF therefore fails the gate even if its basic PDF
-operations happen to work.
+Layout, creates a small PDF, calls PyMuPDF4LLM with a forced-OCR compatibility
+configuration independent of the selected benchmark pipeline, and verifies
+that the result contains both the marker text and non-empty Layout page boxes.
+Before that behavioral check, it compares the selected MuPDF SHA against the
+source selector embedded in the installed PyMuPDF build metadata. A PyMuPDF
+installation built with its fixed default MuPDF therefore fails the gate even
+if its basic PDF operations happen to work.
 
 An incompatible stack fails before benchmark inference and writes diagnostic
 details to `_compatibility.json` in the GitHub artifact. Successful runs also

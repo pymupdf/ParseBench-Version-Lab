@@ -50,7 +50,15 @@ DATASET_REPOSITORY = "llamaindex/ParseBench"
 DATASET_BRANCHES = {"full": "main", "test": "test-data"}
 RUN_SCOPES = {"quick": "test", "full": "full"}
 GROUPS = ("all", "chart", "table", "layout", "text_content", "text_formatting")
-PIPELINE = "pymupdf4llm_markdown_150dpi"
+PIPELINES = (
+    "pymupdf4llm_markdown_150dpi",
+    "pymupdf4llm_markdown",
+    "pymupdf4llm_markdown_tesseract",
+    "pymupdf4llm_markdown_rapidocr",
+    "pymupdf4llm_markdown_no_ocr",
+    "pymupdf4llm_html_tables",
+)
+DEFAULT_PIPELINE = PIPELINES[0]
 
 
 @dataclass(frozen=True)
@@ -67,10 +75,12 @@ class RunConfig:
     all_latest: bool = False
     latest_any_branch: bool = False
     python: str = "3.12"
-    pipeline: str = PIPELINE
+    pipeline: str = DEFAULT_PIPELINE
     refs: dict[str, str] = field(init=False)
 
     def __post_init__(self) -> None:
+        if self.pipeline not in PIPELINES:
+            raise ValueError(f"Unsupported pipeline {self.pipeline!r}; expected one of: {', '.join(PIPELINES)}")
         if self.scope not in RUN_SCOPES:
             raise ValueError(f"Unsupported scope {self.scope!r}; expected one of: {', '.join(RUN_SCOPES)}")
         if self.group not in GROUPS:
