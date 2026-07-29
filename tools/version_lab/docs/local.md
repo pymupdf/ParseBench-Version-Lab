@@ -36,9 +36,6 @@ uv run --project tools/version_lab version-lab run \
   --group all
 ```
 
-On PowerShell, put the command on one line or use PowerShell's backtick line
-continuation instead of the backslashes shown above.
-
 Runs and the shared immutable dataset cache are stored under `.version-lab/`,
 which is ignored by Git. Every run retains `run.json`, resolved source SHAs,
 compatibility diagnostics, benchmark reports, and aggregate scores.
@@ -54,15 +51,10 @@ also requires:
 - Tesseract and English language data;
 - the native C/C++ toolchain expected by MuPDF and PyMuPDF.
 
-Use a Visual Studio developer environment on Windows, Xcode command-line tools
-on macOS, and the distribution compiler toolchain on Linux. The controller
-performs a portable preflight check but intentionally does not install or modify
-system packages.
-
-The current backend is native: Windows and macOS runs compile for those
-platforms rather than silently running a Linux container. A container adapter
-can be added later for developers who prefer exact parity with the pinned GitHub
-Actions environment.
+Native benchmark execution is currently supported on Linux. The preflight
+checks for a C compiler, all required commands, and English Tesseract language
+data, but intentionally does not install or modify system packages. Windows and
+macOS execution is not currently claimed or tested.
 
 For private refs, configure the normal Git credential helper first. Developers
 who use GitHub CLI can run `gh auth setup-git`; Version Lab never writes an

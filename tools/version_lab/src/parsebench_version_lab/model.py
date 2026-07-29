@@ -78,7 +78,9 @@ class RunConfig:
         if self.all_latest and self.latest_any_branch:
             raise ValueError("Select all-latest or latest-any-branch, not both")
         requested = {name: getattr(self, f"{name}_ref") for name in COMPONENT_SPECS}
-        if self.all_latest:
+        if self.latest_any_branch:
+            requested = dict.fromkeys(COMPONENT_SPECS, "latest-any-branch")
+        elif self.all_latest:
             requested = {name: component.default_branch for name, component in COMPONENT_SPECS.items()}
         object.__setattr__(self, "refs", requested)
 

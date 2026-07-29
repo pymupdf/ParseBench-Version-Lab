@@ -1,9 +1,27 @@
 # ParseBench Version Lab runner
 
-This standalone controller runs the MuPDF, PyMuPDF, PyMuPDF Layout, and
-PyMuPDF4LLM source-stack benchmark locally. The controller has no runtime Python
-dependencies and creates a disposable target environment for the selected
-source stack.
+This standalone Linux controller runs the MuPDF, PyMuPDF, PyMuPDF Layout, and
+PyMuPDF4LLM source-stack benchmark locally. It creates an isolated target
+environment for the selected stack without changing the developer's normal
+ParseBench environment.
+
+## Prerequisites
+
+Install Python 3.12, `uv`, Git, a C/C++ compiler, SWIG, `unzip`, Tesseract, and
+the English Tesseract language data. For example, on Ubuntu:
+
+```shell
+sudo apt-get update
+sudo apt-get install build-essential git swig tesseract-ocr tesseract-ocr-eng unzip
+```
+
+Private PyMuPDF Layout refs also require an existing Git credential helper. If
+GitHub CLI is already authenticated, configure it with `gh auth setup-git`.
+
+Native benchmark execution is currently supported on Linux. Windows and macOS
+support is not claimed or tested yet.
+
+## Run locally
 
 From the repository root:
 
@@ -13,10 +31,80 @@ uv run --project tools/version_lab version-lab plan --all-latest --scope quick
 uv run --project tools/version_lab version-lab run --all-latest --scope quick
 ```
 
-Use `version-lab run --help` for explicit component refs, category selection,
-workspace placement, source-resolution-only runs, and Python selection.
-See [the complete local usage guide](docs/local.md) for prerequisites, output
-layout, private-source authentication, and platform notes.
+The first command must report `"ready": true`. The plan command makes no
+changes. The run command resolves exact commits, builds all four selected
+projects, verifies MuPDF provenance and Layout/OCR behavior, then runs the
+15-document quick benchmark.
+
+To verify source access without compiling or downloading the dataset:
+
+```shell
+uv run --project tools/version_lab version-lab run --all-latest --resolve-only
+```
+
+To select explicit refs:
+
+```shell
+uv run --project tools/version_lab version-lab run \
+  --mupdf-ref 1.28.0 \
+  --pymupdf-ref 1.28.0 \
+  --pymupdf-layout-ref 1.28.0 \
+  --pymupdf4llm-ref 1.28.0 \
+  --scope quick \
+  --group all
+```
+
+The `1.28.0` Layout selection resolves from the legacy
+`ArtifexSoftware/sce` repository; automatic latest modes use
+`ArtifexSoftware/pymupdf_layout`.
+
+## Important options
+
+The `plan` and `run` commands support the same source and benchmark selections:
+
+- `--all-latest` selects the latest commit on each repository's default branch.
+- `--latest-any-branch` selects the newest branch-head commit in each
+  repository. It cannot be combined with `--all-latest`.
+- `--mupdf-ref`, `--pymupdf-ref`, `--pymupdf-layout-ref`, and
+  `--pymupdf4llm-ref` select an explicit tag, branch, or commit for each source.
+  Their default is `1.28.0`, and automatic latest modes override them.
+- `--scope quick` runs the 15-document smoke benchmark; `--scope full` runs the
+  complete benchmark.
+- `--group` accepts `all`, `chart`, `table`, `layout`, `text_content`, or
+  `text_formatting`.
+- `--dataset-ref` accepts `current` or a full 40-character dataset commit SHA.
+- `--python` selects the Python version or executable understood by `uv`; its
+  default is `3.12`.
+
+The `run` command additionally supports:
+
+- `--resolve-only` to resolve and check out exact source and dataset commits
+  without compiling or benchmarking.
+- `--workspace PATH` to place retained runs and caches somewhere other than the
+  default `.version-lab/` directory.
+
+Use the CLI's built-in documentation to see every command, option, default, and
+accepted value:
+
+```shell
+uv run --project tools/version_lab version-lab --help
+uv run --project tools/version_lab version-lab plan --help
+uv run --project tools/version_lab version-lab run --help
+```
+
+Runs are retained under `.version-lab/run-*`. Each run contains `run.json`,
+resolved source commits, compatibility diagnostics, benchmark reports, and
+aggregate scores. The immutable dataset cache is shared under
+`.version-lab/cache/datasets/`.
+
+Selected packages are installed with `--no-deps` so dependency resolution
+cannot replace another selected source component. ParseBench's locked runner
+dependencies plus the explicitly pinned source-stack supplements provide the
+runtime. A selected commit that requires an additional dependency may therefore
+need an explicit runner update.
+
+See [the complete local usage guide](docs/local.md) for additional operational
+details.
 
 Run its focused tests from the repository root with:
 
@@ -24,8 +112,6 @@ Run its focused tests from the repository root with:
 uv run --extra dev pytest tools/version_lab/tests
 ```
 
-The native backend is designed for Linux, macOS, and Windows. Developers need
-Git, uv, SWIG, unzip, Tesseract, and the platform C/C++ build toolchain. On
-Windows, run it from a Visual Studio developer environment. A future container
-adapter can provide Linux cloud parity on Docker-capable hosts without changing
-the core run model.
+The current native backend is Linux-only. A future container adapter could
+provide cloud parity on other Docker-capable hosts without changing the core
+run model.

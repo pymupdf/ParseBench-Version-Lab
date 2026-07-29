@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import platform
+import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -17,7 +19,7 @@ from .results import build_summary, load_scores
 from .sources import ResolvedSource, SourceManager
 from .util import write_json
 
-REQUIRED_TOOLS = ("git", "uv", "swig", "unzip", "tesseract")
+REQUIRED_TOOLS = ("cc", "git", "uv", "swig", "unzip", "tesseract")
 
 
 @dataclass(frozen=True)
@@ -37,13 +39,24 @@ class LocalPaths:
 
 def doctor() -> dict[str, Any]:
     tools = {name: executable(name) for name in REQUIRED_TOOLS}
+    supported_platform = platform.system() == "Linux"
+    tesseract_english = False
+    if tools["tesseract"]:
+        result = subprocess.run(
+            [tools["tesseract"], "--list-langs"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        tesseract_english = result.returncode == 0 and "eng" in result.stdout.splitlines()
     return {
         "platform": platform_description(),
+        "supported_platform": supported_platform,
         "tools": tools,
-        "ready": all(tools.values()),
+        "checks": {"tesseract_english": tesseract_english},
+        "ready": supported_platform and all(tools.values()) and tesseract_english,
         "notes": [
-            "A native C/C++ toolchain is also required.",
-            "On Windows, run from a Visual Studio developer environment.",
+            "Native benchmark execution is currently supported on Linux.",
             "Private Layout refs use the developer's existing Git credential helper.",
         ],
     }
@@ -57,6 +70,10 @@ def ensure_ready(*, resolve_only: bool = False) -> None:
         raise RuntimeError(
             "Missing required local tools: " + ", ".join(missing) + ". Install them and rerun `version-lab doctor`."
         )
+    if not resolve_only and not status["supported_platform"]:
+        raise RuntimeError("Native benchmark execution is currently supported on Linux only")
+    if not resolve_only and not status["checks"]["tesseract_english"]:
+        raise RuntimeError("Tesseract English language data is missing; install it and rerun `version-lab doctor`")
 
 
 def create_paths(repository: Path, workspace_root: Path) -> LocalPaths:

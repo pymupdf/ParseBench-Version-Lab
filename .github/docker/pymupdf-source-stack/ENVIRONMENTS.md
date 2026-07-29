@@ -11,8 +11,17 @@ Lab` and the earlier workflows that built and validated it. The adjacent
 - Dockerfile: `.github/docker/pymupdf-source-stack/Dockerfile`
 
 Always use an immutable digest when reintroducing an image into the benchmark.
-The run-specific tags are also immutable by convention; the date-based version
-tag without `-r2` was overwritten by a later successful build.
+The run-specific tags are immutable by convention. Date/revision version tags
+are convenient aliases and may move when the same environment version is
+rebuilt; they must not be used by benchmark jobs.
+
+Container publication is restricted to the repository's default branch and
+serialized so two publishers cannot race to update a version tag. The publisher
+checks the system environment and RapidOCR import, but does not promote its
+digest into the benchmark workflow automatically. Before changing the pinned
+benchmark digest, run the all-latest 15-case benchmark against the candidate,
+verify exact MuPDF provenance and Layout/OCR compatibility, compare aggregate
+scores, and record the successful run below.
 
 ## Published images
 
