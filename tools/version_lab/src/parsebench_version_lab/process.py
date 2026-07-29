@@ -69,6 +69,8 @@ def runtime_environment(tool_source: Path, extra: Mapping[str, str] | None = Non
     env["PYTHONPATH"] = str(tool_source) if not existing else str(tool_source) + os.pathsep + existing
     if extra:
         env.update(extra)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
     return env
 

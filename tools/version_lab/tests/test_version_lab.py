@@ -16,7 +16,7 @@ sys.path.insert(0, str(VERSION_LAB_SRC))
 from parsebench_version_lab import cli, local  # noqa: E402
 from parsebench_version_lab.local import LocalRun, create_paths, ensure_ready, package_dir  # noqa: E402
 from parsebench_version_lab.model import DEFAULT_PIPELINE, PIPELINES, RunConfig  # noqa: E402
-from parsebench_version_lab.process import CommandRunner, venv_executable  # noqa: E402
+from parsebench_version_lab.process import CommandRunner, runtime_environment, venv_executable  # noqa: E402
 from parsebench_version_lab.sources import ResolvedSource, SourceManager, parse_branch_heads  # noqa: E402
 
 
@@ -264,6 +264,13 @@ def test_venv_python_path_is_platform_specific(tmp_path: Path) -> None:
     expected = tmp_path / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
     assert venv_executable(tmp_path, "python") == expected
+
+
+def test_runtime_environment_forces_utf8_for_cross_platform_documents(tmp_path: Path) -> None:
+    environment = runtime_environment(tmp_path, {"PYTHONUTF8": "0", "PYTHONIOENCODING": "ascii"})
+
+    assert environment["PYTHONUTF8"] == "1"
+    assert environment["PYTHONIOENCODING"] == "utf-8"
 
 
 @pytest.mark.parametrize("system", local.SUPPORTED_SYSTEMS)
