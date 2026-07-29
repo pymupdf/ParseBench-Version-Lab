@@ -15,8 +15,14 @@ sudo apt-get update
 sudo apt-get install build-essential git swig tesseract-ocr tesseract-ocr-eng unzip
 ```
 
-Private PyMuPDF Layout refs also require an existing Git credential helper. If
-GitHub CLI is already authenticated, configure it with `gh auth setup-git`.
+The standard PyMuPDF Layout `1.28.0` ref is fetched from the private
+`ArtifexSoftware/sce` repository. Developers using this ref must already have
+access to that repository and must configure a Git credential helper. If GitHub
+CLI is authenticated with an authorized account, run `gh auth setup-git`.
+
+Automatic latest modes use the public `ArtifexSoftware/pymupdf_layout`
+repository and do not require private-repository access. MuPDF, PyMuPDF, and
+PyMuPDF4LLM are also fetched from public repositories.
 
 Native benchmark execution is currently supported on Linux. Windows and macOS
 support is not claimed or tested yet.

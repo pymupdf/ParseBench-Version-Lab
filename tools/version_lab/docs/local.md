@@ -50,7 +50,8 @@ compatibility diagnostics, benchmark reports, and aggregate scores.
 The controller itself requires only Python 3.12 and uv. A complete native build
 also requires:
 
-- Git with credentials for any selected private Layout source;
+- Git, with credentials configured when using Layout sources from the private
+  `ArtifexSoftware/sce` repository;
 - SWIG;
 - `unzip`;
 - Tesseract and English language data;
@@ -61,6 +62,12 @@ checks for a C compiler, all required commands, and English Tesseract language
 data, but intentionally does not install or modify system packages. Windows and
 macOS execution is not currently claimed or tested.
 
-For private refs, configure the normal Git credential helper first. Developers
-who use GitHub CLI can run `gh auth setup-git`; Version Lab never writes an
-access token to its run manifest or command line.
+The standard PyMuPDF Layout `1.28.0` ref is fetched from the private
+`ArtifexSoftware/sce` repository. Developers using this ref must already have
+access to that repository and must configure a Git credential helper. If GitHub
+CLI is authenticated with an authorized account, run `gh auth setup-git`.
+
+Automatic latest modes use the public `ArtifexSoftware/pymupdf_layout`
+repository and do not require private-repository access. MuPDF, PyMuPDF, and
+PyMuPDF4LLM are also fetched from public repositories. Version Lab never writes
+an access token to its run manifest or command line.
