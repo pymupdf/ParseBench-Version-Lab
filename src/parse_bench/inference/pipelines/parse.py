@@ -531,7 +531,7 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             pipeline_name="pymupdf4llm_html_tables",
             provider_name="pymupdf4llm",
             product_type=ProductType.PARSE,
-            config={"table_output": "html"},
+            config={"table_output": "html", "ocr_dpi": 150},
         )
     )
 
