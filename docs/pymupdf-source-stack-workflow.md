@@ -4,6 +4,12 @@ The `ParseBench Version Lab` workflow benchmarks a selected Git ref
 from each component of the PyMuPDF parsing stack without changing the pinned
 `PyMuPDF4LLM ParseBench` workflow.
 
+Container construction and publication are intentionally separate from
+benchmark execution. The `Build ParseBench Version Lab Environment` workflow
+builds, smoke-tests, and publishes the GHCR environment image; `ParseBench
+Version Lab` only consumes its pinned immutable digest and never builds or
+publishes a container.
+
 The manual form keeps the repositories fixed and asks only for the ParseBench
 ref, four component refs, PyMuPDF4LLM pipeline, dataset size, and document
 category. Each component ref accepts a release tag, branch, or full commit SHA.

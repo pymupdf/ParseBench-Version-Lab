@@ -10,6 +10,9 @@ import pytest
 
 VERSION_LAB_SRC = Path(__file__).parents[1] / "src"
 WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-parsebench.yml"
+ENVIRONMENT_WORKFLOW = (
+    Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-environment.yml"
+)
 sys.path.insert(0, str(VERSION_LAB_SRC))
 
 from parsebench_version_lab import cli, local  # noqa: E402
@@ -80,6 +83,31 @@ def test_github_run_name_identifies_selected_benchmark_configuration() -> None:
     assert "sources@latest-any-branch" in run_name
     assert "sources@latest-default-branches" in run_name
     assert "workflow@{5}" in run_name
+
+
+def test_container_publisher_is_isolated_from_benchmark_workflow() -> None:
+    benchmark_workflow = WORKFLOW.read_text(encoding="utf-8")
+    environment_workflow = ENVIRONMENT_WORKFLOW.read_text(encoding="utf-8")
+
+    for publisher_detail in (
+        "rebuild_environment",
+        "build_environment:",
+        "docker/build-push-action@",
+        "docker/login-action@",
+        "ENVIRONMENT_VERSION_TAG",
+    ):
+        assert publisher_detail not in benchmark_workflow
+
+    for publisher_detail in (
+        "name: Build ParseBench Version Lab Environment",
+        "workflow_dispatch:",
+        "build_environment:",
+        "docker/build-push-action@",
+        "docker/login-action@",
+        "ENVIRONMENT_VERSION_TAG",
+        ".github/docker/pymupdf-source-stack/Dockerfile",
+    ):
+        assert publisher_detail in environment_workflow
 
 
 def test_run_config_marks_latest_any_branch_refs_as_dynamic() -> None:

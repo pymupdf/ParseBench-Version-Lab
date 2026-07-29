@@ -23,6 +23,10 @@ benchmark digest, run the all-latest 15-case benchmark against the candidate,
 verify exact MuPDF provenance and Layout/OCR compatibility, compare aggregate
 scores, and record the successful run below.
 
+Use the separate `Build ParseBench Version Lab Environment` workflow to build,
+smoke-test, and publish an image. The `ParseBench Version Lab` benchmark
+workflow has no container-build mode and only consumes a pinned digest.
+
 ## Published images
 
 | Publisher run | Source commit | Tags | Immutable digest | Notes |
