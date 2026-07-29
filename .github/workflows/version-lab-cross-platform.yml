@@ -86,4 +86,5 @@ jobs:
           path: |
             .version-lab/run-*/run.json
             .version-lab/run-*/output
+          include-hidden-files: true
           if-no-files-found: warn

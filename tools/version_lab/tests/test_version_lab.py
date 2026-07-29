@@ -204,10 +204,26 @@ def test_environment_creation_does_not_reuse_controller_virtualenv(
     assert isinstance(sync_environment, dict)
     assert "VIRTUAL_ENV" not in sync_environment
     assert sync_environment["UV_PROJECT_ENVIRONMENT"] == str(paths.environment)
-    assert local.SWIG_REQUIREMENT in runner.calls[2]["command"]
+    assert local.swig_requirement() in runner.calls[2]["command"]
 
 
-def test_stack_build_uses_one_pinned_swig_for_pymupdf_and_layout(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("system", "requirement"),
+    [
+        ("Darwin", local.MACOS_SWIG_REQUIREMENT),
+        ("Windows", local.DEFAULT_SWIG_REQUIREMENT),
+        ("Linux", local.DEFAULT_SWIG_REQUIREMENT),
+    ],
+)
+def test_swig_requirement_is_platform_appropriate(
+    system: str, requirement: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(local.platform, "system", lambda: system)
+
+    assert local.swig_requirement() == requirement
+
+
+def test_stack_build_uses_one_swig_for_pymupdf_and_layout(tmp_path: Path) -> None:
     class RecordingRunner:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
