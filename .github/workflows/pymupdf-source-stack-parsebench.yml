@@ -339,10 +339,12 @@ jobs:
         if: ${{ inputs.pipeline == 'pymupdf4llm_html_tables_rapidocr_v3' }}
         run: >-
           .venv/bin/python -c
-          "import inspect, pymupdf4llm; from pymupdf4llm.ocr.detect_rapidocr import detect_rapidocr_backend;
+          "import inspect, pymupdf4llm; from pymupdf4llm.helpers.pymupdf_rag import to_markdown as rag_to_markdown;
+          from pymupdf4llm.ocr.detect_rapidocr import detect_rapidocr_backend;
           backend = detect_rapidocr_backend(); assert backend == 'rapidocr',
           f'Expected modern rapidocr backend, received {backend!r}';
-          assert 'table_output' in inspect.signature(pymupdf4llm.to_markdown).parameters,
+          assert 'table_output' in inspect.signature(rag_to_markdown).parameters and
+          'table_output' in inspect.getsource(pymupdf4llm.to_markdown),
           'Selected PyMuPDF4LLM revision lacks native table_output support';
           print('modern RapidOCR and native HTML table output are available')"
 
