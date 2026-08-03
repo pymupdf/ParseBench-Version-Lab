@@ -51,6 +51,7 @@ on:
           - "pymupdf4llm_markdown_rapidocr"
           - "pymupdf4llm_markdown_no_ocr"
           - "pymupdf4llm_html_tables"
+          - "pymupdf4llm_html_tables_rapidocr_v3"
       dataset_version:
         description: "Dataset version: current, or a full 40-character Hugging Face commit SHA."
         required: true
@@ -289,8 +290,14 @@ jobs:
         run: python3 "$WORKFLOW_SCRIPTS/resolve_sources.py"
 
       - name: Install ParseBench dependencies without selected PyMuPDF packages
+        env:
+          MODERN_RAPIDOCR_PIPELINE: pymupdf4llm_html_tables_rapidocr_v3
         run: |
-          uv sync --locked --extra runners \
+          sync_args=(--locked --extra runners)
+          if [[ "$PIPELINE" == "$MODERN_RAPIDOCR_PIPELINE" ]]; then
+            sync_args+=(--extra rapidocr-modern)
+          fi
+          uv sync "${sync_args[@]}" \
             --no-install-package pymupdf \
             --no-install-package pymupdf-layout \
             --no-install-package pymupdf4llm
@@ -300,7 +307,15 @@ jobs:
         run: uv pip install --python .venv "psutil==7.2.2"
 
       - name: Verify RapidOCR native runtime
+        if: ${{ inputs.pipeline != 'pymupdf4llm_html_tables_rapidocr_v3' }}
         run: .venv/bin/python -c "from rapidocr_onnxruntime import RapidOCR; print(RapidOCR)"
+
+      - name: Verify modern RapidOCR native runtime
+        if: ${{ inputs.pipeline == 'pymupdf4llm_html_tables_rapidocr_v3' }}
+        run: >-
+          .venv/bin/python -c
+          "from importlib.metadata import version; from rapidocr import RapidOCR; import onnxruntime;
+          print(f'rapidocr={version(\"rapidocr\")} onnxruntime={onnxruntime.__version__} engine={RapidOCR}')"
 
       - name: Build and install selected PyMuPDF
         env:
@@ -319,6 +334,17 @@ jobs:
           PACKAGE_DIR: ${{ steps.sources.outputs.llm_dir }}
           PYMUPDF_SETUP_VERSION: "1"
         run: uv pip install --python .venv --reinstall --no-deps "$PACKAGE_DIR"
+
+      - name: Verify modern RapidOCR and native HTML capabilities
+        if: ${{ inputs.pipeline == 'pymupdf4llm_html_tables_rapidocr_v3' }}
+        run: >-
+          .venv/bin/python -c
+          "import inspect, pymupdf4llm; from pymupdf4llm.ocr.detect_rapidocr import detect_rapidocr_backend;
+          backend = detect_rapidocr_backend(); assert backend == 'rapidocr',
+          f'Expected modern rapidocr backend, received {backend!r}';
+          assert 'table_output' in inspect.signature(pymupdf4llm.to_markdown).parameters,
+          'Selected PyMuPDF4LLM revision lacks native table_output support';
+          print('modern RapidOCR and native HTML table output are available')"
 
       - name: Check source stack compatibility
         env:

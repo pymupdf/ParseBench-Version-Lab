@@ -21,6 +21,15 @@ to `pymupdf4llm_markdown_150dpi`, matching the workflow's previous fixed
 configuration. The selected name is recorded in the run title, summary,
 metadata, output directory, and score report.
 
+`pymupdf4llm_html_tables_rapidocr_v3` selects native HTML table output and the
+modern `rapidocr` package. The workflow installs its locked modern OCR extra
+only for that selection and verifies that the chosen PyMuPDF4LLM source exposes
+both the modern RapidOCR adapter and the native `table_output` option. The
+standard `1.28.0` PyMuPDF4LLM ref predates those capabilities, so select latest
+default-branch sources for exploratory runs or an explicit compatible commit
+for reproducible runs. The pipeline refuses to fall back to
+`rapidocr-onnxruntime`.
+
 Two optional checkboxes provide automatic source selection:
 
 - **Latest default-branch commits** selects the current `master` head for MuPDF

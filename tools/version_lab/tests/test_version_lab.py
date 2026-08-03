@@ -15,7 +15,12 @@ sys.path.insert(0, str(VERSION_LAB_SRC))
 
 from parsebench_version_lab import cli, local  # noqa: E402
 from parsebench_version_lab.local import LocalRun, create_paths, ensure_ready, package_dir  # noqa: E402
-from parsebench_version_lab.model import DEFAULT_PIPELINE, PIPELINES, RunConfig  # noqa: E402
+from parsebench_version_lab.model import (  # noqa: E402
+    DEFAULT_PIPELINE,
+    MODERN_RAPIDOCR_PIPELINE,
+    PIPELINES,
+    RunConfig,
+)
 from parsebench_version_lab.process import (  # noqa: E402
     CommandRunner,
     runtime_environment,
@@ -68,6 +73,17 @@ def test_github_workflow_pipeline_dropdown_matches_local_choices() -> None:
         == PIPELINES
     )
     assert "PIPELINE: ${{ inputs.pipeline }}" in workflow
+
+
+def test_github_workflow_installs_and_verifies_modern_rapidocr_only_for_its_pipeline() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert f"MODERN_RAPIDOCR_PIPELINE: {MODERN_RAPIDOCR_PIPELINE}" in workflow
+    assert "sync_args+=(--extra rapidocr-modern)" in workflow
+    assert f"inputs.pipeline == '{MODERN_RAPIDOCR_PIPELINE}'" in workflow
+    assert f"inputs.pipeline != '{MODERN_RAPIDOCR_PIPELINE}'" in workflow
+    assert "Expected modern rapidocr backend" in workflow
+    assert "lacks native table_output support" in workflow
 
 
 def test_github_run_name_identifies_selected_benchmark_configuration() -> None:
@@ -212,6 +228,29 @@ def test_environment_creation_does_not_reuse_controller_virtualenv(
     assert paths.repository / "tools" / "version_lab" in runner.calls[1]["command"]
     assert "--extra" not in runner.calls[1]["command"]
     assert local.swig_requirement() in runner.calls[2]["command"]
+
+
+def test_modern_rapidocr_pipeline_adds_only_its_locked_environment_extra(tmp_path: Path) -> None:
+    class RecordingRunner:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def run(self, command: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            self.calls.append({"command": command, **kwargs})
+            return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+    paths = create_paths(tmp_path, tmp_path / ".version-lab")
+    runner = RecordingRunner()
+
+    LocalRun(
+        RunConfig(pipeline=MODERN_RAPIDOCR_PIPELINE),
+        paths,
+        runner=runner,
+    ).create_environment()  # type: ignore[arg-type]
+
+    sync_command = runner.calls[1]["command"]
+    assert "--extra" in sync_command
+    assert "rapidocr-modern" in sync_command
 
 
 @pytest.mark.parametrize(

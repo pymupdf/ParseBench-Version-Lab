@@ -50,6 +50,7 @@ DATASET_REPOSITORY = "llamaindex/ParseBench"
 DATASET_BRANCHES = {"full": "main", "test": "test-data"}
 RUN_SCOPES = {"quick": "test", "full": "full"}
 GROUPS = ("all", "chart", "table", "layout", "text_content", "text_formatting")
+MODERN_RAPIDOCR_PIPELINE = "pymupdf4llm_html_tables_rapidocr_v3"
 PIPELINES = (
     "pymupdf4llm_markdown_150dpi",
     "pymupdf4llm_markdown",
@@ -57,6 +58,7 @@ PIPELINES = (
     "pymupdf4llm_markdown_rapidocr",
     "pymupdf4llm_markdown_no_ocr",
     "pymupdf4llm_html_tables",
+    MODERN_RAPIDOCR_PIPELINE,
 )
 DEFAULT_PIPELINE = PIPELINES[0]
 

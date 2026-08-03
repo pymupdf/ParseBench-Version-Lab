@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .dataset import DatasetRevision, resolve_dataset
-from .model import COMPONENT_SPECS, DATASET_REPOSITORY, RunConfig
+from .model import COMPONENT_SPECS, DATASET_REPOSITORY, MODERN_RAPIDOCR_PIPELINE, RunConfig
 from .process import (
     CommandRunner,
     executable,
@@ -187,20 +187,27 @@ class LocalRun:
             ["uv", "venv", "--python", self.config.python, self.paths.environment],
             cwd=self.paths.repository,
         )
-        self.runner.run(
-            [
-                "uv",
-                "sync",
-                "--project",
-                self.paths.repository / "tools" / "version_lab",
-                "--locked",
+        sync_command: list[str | Path] = [
+            "uv",
+            "sync",
+            "--project",
+            self.paths.repository / "tools" / "version_lab",
+            "--locked",
+        ]
+        if self.config.pipeline == MODERN_RAPIDOCR_PIPELINE:
+            sync_command.extend(("--extra", "rapidocr-modern"))
+        sync_command.extend(
+            (
                 "--no-install-package",
                 "pymupdf",
                 "--no-install-package",
                 "pymupdf-layout",
                 "--no-install-package",
                 "pymupdf4llm",
-            ],
+            )
+        )
+        self.runner.run(
+            sync_command,
             cwd=self.paths.repository,
             env=project_env,
         )

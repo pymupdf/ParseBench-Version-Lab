@@ -5,6 +5,7 @@ import types
 import pytest
 
 import parse_bench.inference.providers.parse.pymupdf4llm as pymupdf4llm_module
+from parse_bench.inference.pipelines import get_pipeline
 from parse_bench.inference.providers.base import ProviderConfigError
 from parse_bench.inference.providers.parse.pymupdf4llm import (
     _OCR_BACKEND_MODULES,
@@ -22,6 +23,17 @@ def _build_page(page_boxes: list[dict], *, raw_markdown: str):
         },
         raw_markdown=raw_markdown,
     )
+
+
+def test_modern_rapidocr_pipeline_preserves_native_html_options() -> None:
+    pipeline = get_pipeline("pymupdf4llm_html_tables_rapidocr_v3")
+
+    assert pipeline.provider_name == "pymupdf4llm"
+    assert pipeline.config == {
+        "table_output": "html",
+        "ocr_dpi": 150,
+        "ocr_backend": "rapidocr_modern",
+    }
 
 
 def test_build_layout_page_emits_raw_boxclass_labels() -> None:
@@ -162,7 +174,7 @@ def test_resolve_ocr_function_defers_to_library(config: dict[str, object]) -> No
     assert provider._resolve_ocr_function() is None
 
 
-@pytest.mark.parametrize("backend", sorted(_OCR_BACKEND_MODULES))
+@pytest.mark.parametrize("backend", sorted(set(_OCR_BACKEND_MODULES) - {"rapidocr_modern"}))
 def test_resolve_ocr_function_resolves_backend_internally(backend: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """The engine callable is resolved from the module map at call time."""
     imported: list[str] = []
@@ -183,6 +195,57 @@ def test_resolve_ocr_function_resolves_backend_internally(backend: str, monkeypa
 
     assert resolved is _sentinel_exec_ocr
     assert imported == [_OCR_BACKEND_MODULES[backend]]
+
+
+def test_resolve_modern_rapidocr_requires_and_selects_modern_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    imported: list[str] = []
+
+    def _sentinel_exec_ocr(*args: object, **kwargs: object) -> None:
+        return None
+
+    detector_module = types.SimpleNamespace(detect_rapidocr_backend=lambda: "rapidocr")
+    api_module = types.SimpleNamespace(exec_ocr=_sentinel_exec_ocr)
+
+    def _fake_import(name: str) -> object:
+        imported.append(name)
+        if name == "pymupdf4llm.ocr.detect_rapidocr":
+            return detector_module
+        if name == "pymupdf4llm.ocr.rapidocr_api":
+            return api_module
+        raise ImportError(name)
+
+    monkeypatch.setattr(pymupdf4llm_module.importlib, "import_module", _fake_import)
+
+    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "rapidocr_modern"})
+
+    assert provider._resolve_ocr_function() is _sentinel_exec_ocr
+    assert imported == ["pymupdf4llm.ocr.detect_rapidocr", "pymupdf4llm.ocr.rapidocr_api"]
+
+
+def test_resolve_modern_rapidocr_rejects_pymupdf4llm_without_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _missing_adapter(name: str) -> object:
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(pymupdf4llm_module.importlib, "import_module", _missing_adapter)
+    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "rapidocr_modern"})
+
+    with pytest.raises(ProviderConfigError, match="revision with modern RapidOCR support"):
+        provider._resolve_ocr_function()
+
+
+@pytest.mark.parametrize("detected_backend", [None, "rapidocr_onnxruntime"])
+def test_resolve_modern_rapidocr_refuses_legacy_fallback(
+    detected_backend: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detector_module = types.SimpleNamespace(detect_rapidocr_backend=lambda: detected_backend)
+    monkeypatch.setattr(pymupdf4llm_module.importlib, "import_module", lambda name: detector_module)
+    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "rapidocr_modern"})
+
+    with pytest.raises(ProviderConfigError, match="refusing to fall back"):
+        provider._resolve_ocr_function()
 
 
 def test_resolve_ocr_function_unavailable_backend_is_reactive() -> None:

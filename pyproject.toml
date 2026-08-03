@@ -58,6 +58,10 @@ runners = [
     "pymupdf4llm==1.28.0",
     "rapidocr-onnxruntime==1.2.3",
 ]
+rapidocr-modern = [
+    "onnxruntime>=1.20.0",
+    "rapidocr==3.9.2",
+]
 dev = [
     "pytest>=8.0.0",
     "ruff>=0.14.5",

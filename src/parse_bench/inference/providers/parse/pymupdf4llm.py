@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # `_resolve_ocr_function`) so it never enters a serialized options/config dict.
 _OCR_BACKEND_MODULES = {
     "rapidocr": "pymupdf4llm.ocr.rapidocr_api",
+    "rapidocr_modern": "pymupdf4llm.ocr.rapidocr_api",
     "tesseract": "pymupdf4llm.ocr.tesseract_api",
 }
 
@@ -132,9 +133,28 @@ class PyMuPDF4LLMProvider(Provider):
         raw_backend = self.base_config.get("ocr_backend")
         if not isinstance(raw_backend, str):
             return None
-        module_name = _OCR_BACKEND_MODULES.get(raw_backend.strip().lower())
+        backend = raw_backend.strip().lower()
+        module_name = _OCR_BACKEND_MODULES.get(backend)
         if module_name is None:
             return None
+
+        if backend == "rapidocr_modern":
+            try:
+                detector_module = importlib.import_module("pymupdf4llm.ocr.detect_rapidocr")
+                detect_rapidocr_backend = detector_module.detect_rapidocr_backend
+            except (ImportError, AttributeError) as e:
+                raise ProviderConfigError(
+                    "PyMuPDF4LLM OCR backend 'rapidocr_modern' requires a "
+                    "PyMuPDF4LLM revision with modern RapidOCR support"
+                ) from e
+
+            detected_backend = detect_rapidocr_backend()
+            if detected_backend != "rapidocr":
+                raise ProviderConfigError(
+                    "PyMuPDF4LLM OCR backend 'rapidocr_modern' requires the modern "
+                    "'rapidocr' package; refusing to fall back to 'rapidocr-onnxruntime'"
+                )
+
         try:
             ocr_module = importlib.import_module(module_name)
         except (ImportError, RuntimeError) as e:

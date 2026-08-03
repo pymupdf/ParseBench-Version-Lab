@@ -265,6 +265,7 @@ These run entirely locally with no external dependencies.
 | `pymupdf4llm_markdown_no_ocr` | PyMuPDF4LLM Markdown, OCR disabled | `pymupdf4llm` |
 | `pymupdf4llm_markdown_150dpi` | PyMuPDF4LLM Markdown, OCR at 150 DPI | `pymupdf4llm` |
 | `pymupdf4llm_html_tables` | PyMuPDF4LLM Markdown with HTML table output | `pymupdf4llm` |
+| `pymupdf4llm_html_tables_rapidocr_v3` | PyMuPDF4LLM Markdown with native HTML tables and modern RapidOCR; refuses legacy fallback | Newer `pymupdf4llm`, `rapidocr`, `onnxruntime` |
 | `tesseract_eng` | Tesseract OCR (English) | `tesseract` installed |
 | `tesseract_fast` | Tesseract OCR (fast) | `tesseract` installed |
 | `tesseract_high_quality` | Tesseract OCR (high quality) | `tesseract` installed |

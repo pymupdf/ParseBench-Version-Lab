@@ -42,9 +42,12 @@ def _source_metadata(args: argparse.Namespace) -> dict[str, dict[str, str]]:
 
 def _installed_versions() -> dict[str, str | None]:
     return {
+        "onnxruntime": _distribution_version("onnxruntime"),
         "pymupdf": _distribution_version("PyMuPDF"),
         "pymupdf_layout": _distribution_version("pymupdf-layout"),
         "pymupdf4llm": _distribution_version("pymupdf4llm"),
+        "rapidocr": _distribution_version("rapidocr"),
+        "rapidocr_onnxruntime": _distribution_version("rapidocr-onnxruntime"),
     }
 
 
