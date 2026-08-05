@@ -370,7 +370,7 @@ function DocumentExplorer({
   artifact: ArtifactState;
   caseMetrics: CaseMetric[];
 }) {
-  const [referenceSelectionFor, setReferenceSelectionFor] = useState<string | null>(null);
+  const [referenceSelectionFor, setReferenceSelectionFor] = useState<number | null>(null);
   const [markdownMode, setMarkdownMode] = useState<MarkdownMode>("preview");
   const visibleDocuments = documents.filter(
     (result) => result.primary_score != null && result.primary_score <= ceiling / 100,

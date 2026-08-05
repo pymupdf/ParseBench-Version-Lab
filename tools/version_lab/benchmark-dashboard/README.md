@@ -1,6 +1,6 @@
 # ParseBench Run Observatory
 
-A client-only benchmark analysis application for selecting GitHub Actions runs,
+A standard Next.js, client-only benchmark analysis application for selecting GitHub Actions runs,
 reviewing aggregate benchmark scores, finding low-scoring documents, and
 comparing source PDFs with PyMuPDF4LLM markdown and available reference
 markdown.
@@ -28,6 +28,12 @@ npm run dev
 
 The dashboard is available at `http://localhost:3000` and selects the latest
 indexed workflow run by default.
+
+## Deployment
+
+The application uses the standard Next.js runtime and can be deployed directly
+to Vercel. Configure `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` for Preview and Production.
 
 ## Validation
 
