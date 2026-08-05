@@ -15,16 +15,18 @@ test("defines the ParseBench application shell", async () => {
 });
 
 test("keeps the standard Next.js dashboard client-only and publishable-key based", async () => {
-  const [page, data, packageJson] = await Promise.all([
+  const [page, pdfPreview, data, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/pdf-preview.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/data.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(page, /^"use client";/);
   assert.match(page, /hasReference \? \(/);
   assert.doesNotMatch(page, /No reference markdown exists/);
-  assert.match(page, /URL\.createObjectURL/);
-  assert.doesNotMatch(page, /<iframe src=\{selectedPdf\}/);
+  assert.match(page, /dynamic\(\(\) => import\("\.\/pdf-preview"\)/);
+  assert.doesNotMatch(`${page}\n${pdfPreview}`, /URL\.createObjectURL|<iframe/);
+  assert.match(pdfPreview, /rangeChunkSize: 65_536/);
   assert.match(data, /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/);
   assert.doesNotMatch(data, /service_role|SUPABASE_SECRET_KEY/);
   assert.match(packageJson, /"next": "16\.3\.0"/);

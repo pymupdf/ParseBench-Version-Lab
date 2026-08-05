@@ -1096,15 +1096,27 @@ select:focus-visible {
 
 .pdf-stage {
   background: #dfe4e0;
+  overflow: auto;
   padding: 8px;
 }
 
-.pdf-stage iframe {
-  background: white;
-  border: 0;
-  box-shadow: 0 2px 10px rgba(23, 33, 29, 0.12);
-  height: 100%;
+.pdf-preview {
+  align-items: flex-start;
+  display: flex;
+  justify-content: center;
+  min-height: 100%;
   width: 100%;
+}
+
+.pdf-preview .react-pdf__Document,
+.pdf-preview .react-pdf__Page {
+  max-width: 100%;
+}
+
+.pdf-preview .react-pdf__Page__canvas {
+  box-shadow: 0 2px 10px rgba(23, 33, 29, 0.12);
+  height: auto !important;
+  max-width: 100%;
 }
 
 .output-toolbar {

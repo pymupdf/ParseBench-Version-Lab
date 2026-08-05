@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
@@ -36,6 +37,11 @@ type ArtifactState = {
   url: string | null;
   error: string | null;
 };
+
+const PdfPreview = dynamic(() => import("./pdf-preview"), {
+  ssr: false,
+  loading: () => <div className="artifact-loading">Loading PDF viewer…</div>,
+});
 
 const EMPTY_BUNDLE: RunBundle = {
   dimensions: [],
@@ -107,65 +113,6 @@ function StatusBadge({ value }: { value: string | null }) {
       <span className="status-dot" />
       {humanize(normalized)}
     </span>
-  );
-}
-
-function PdfPreview({
-  source,
-  page,
-  title,
-}: {
-  source: string;
-  page: number;
-  title: string;
-}) {
-  const [preview, setPreview] = useState<{
-    source: string | null;
-    url: string | null;
-    error: string | null;
-  }>({ source: null, url: null, error: null });
-  const current = preview.source === source ? preview : null;
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let objectUrl: string | null = null;
-
-    fetch(source, { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error(`PDF returned ${response.status}`);
-        return response.blob();
-      })
-      .then((blob) => {
-        const pdfBlob =
-          blob.type === "application/pdf"
-            ? blob
-            : new Blob([blob], { type: "application/pdf" });
-        objectUrl = URL.createObjectURL(pdfBlob);
-        setPreview({ source, url: objectUrl, error: null });
-      })
-      .catch((error: Error) => {
-        if (error.name !== "AbortError") {
-          setPreview({ source, url: null, error: error.message });
-        }
-      });
-
-    return () => {
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [source]);
-
-  if (current?.error) {
-    return <EmptyState title="PDF unavailable" body={current.error} />;
-  }
-  if (!current?.url) {
-    return <div className="artifact-loading">Loading PDF preview…</div>;
-  }
-  return (
-    <iframe
-      src={`${current.url}#page=${page}&view=FitH`}
-      title={title}
-    />
   );
 }
 

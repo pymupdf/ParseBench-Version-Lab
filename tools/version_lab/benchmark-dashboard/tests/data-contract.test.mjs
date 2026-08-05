@@ -76,10 +76,16 @@ test(
       .join("/");
     const pdfResponse = await fetch(
       `https://huggingface.co/datasets/${dataset.repository}/resolve/${dataset.resolved_sha}/${datasetPath}`,
-      { headers: { Origin: "https://parsebench-run-observatory.vercel.app" } },
+      {
+        headers: {
+          Origin: "https://parsebench-run-observatory.vercel.app",
+          Range: "bytes=0-65535",
+        },
+      },
     );
-    assert.equal(pdfResponse.status, 200);
+    assert.equal(pdfResponse.status, 206);
     assert.match(pdfResponse.headers.get("content-type") ?? "", /application\/pdf/);
+    assert.match(pdfResponse.headers.get("content-range") ?? "", /^bytes 0-65535\//);
     assert.equal(pdfResponse.headers.get("access-control-allow-origin"), "*");
     await pdfResponse.body?.cancel();
   },
