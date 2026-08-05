@@ -75,6 +75,16 @@ def test_github_workflow_pipeline_dropdown_matches_local_choices() -> None:
     assert "PIPELINE: ${{ inputs.pipeline }}" in workflow
 
 
+def test_github_workflow_indexes_every_completed_benchmark_run() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "index_results:" in workflow
+    assert "if: ${{ always() }}" in workflow
+    assert "PARSEBENCH_SUPABASE_SECRET_KEY" in workflow
+    assert "PARSEBENCH_SUPABASE_URL" in workflow
+    assert 'run: python3 "$WORKFLOW_SCRIPTS/index_results.py"' in workflow
+
+
 def test_github_workflow_installs_and_verifies_modern_rapidocr_only_for_its_pipeline() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 

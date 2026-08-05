@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
+from .benchmark_index import backfill_repository
 from .local import LocalRun, create_paths, doctor, ensure_ready
 from .model import COMPONENT_SPECS, GROUPS, PIPELINES, RUN_SCOPES, STANDARD_REF, RunConfig
 from .util import repository_root
@@ -117,6 +119,35 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Resolve and checkout exact source/dataset commits without building",
     )
+    backfill = subparsers.add_parser(
+        "backfill-index",
+        help="Index historical GitHub Actions and GCS benchmark runs in Supabase",
+        description=(
+            "Build a local GCS run inventory and idempotently upsert GitHub workflow metadata, "
+            "scores, document results, metrics, and errors into Supabase."
+        ),
+        formatter_class=HelpFormatter,
+    )
+    backfill.add_argument(
+        "--repository",
+        default="pymupdf/ParseBench-Version-Lab",
+        help="GitHub repository whose Actions runs should be indexed",
+    )
+    backfill.add_argument(
+        "--bucket",
+        required=True,
+        help="Google Cloud Storage bucket containing published ParseBench runs",
+    )
+    backfill.add_argument(
+        "--workflow",
+        default="pymupdf-source-stack-parsebench.yml",
+        help="Benchmark workflow file or numeric workflow ID",
+    )
+    backfill.add_argument(
+        "--workspace",
+        type=Path,
+        help="Ignored directory for the GCS inventory and backfill result",
+    )
     return parser
 
 
@@ -126,6 +157,25 @@ def main(arguments: list[str] | None = None) -> int:
         status = doctor()
         print(json.dumps(status, indent=2, sort_keys=True))
         return 0 if status["ready"] else 1
+    if args.command == "backfill-index":
+        repository = repository_root()
+        workspace = (args.workspace or repository / ".version-lab" / "benchmark-index-backfill").resolve()
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_secret_key = os.environ.get("SUPABASE_SECRET_KEY")
+        if not supabase_url or not supabase_secret_key:
+            print("SUPABASE_URL and SUPABASE_SECRET_KEY are required", file=sys.stderr)
+            return 2
+        result = backfill_repository(
+            github_repository=args.repository,
+            bucket=args.bucket,
+            workflow=args.workflow,
+            supabase_url=supabase_url,
+            supabase_secret_key=supabase_secret_key,
+            workspace=workspace,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        print(f"Backfill inventory: {workspace / 'gcs-run-inventory.json'}")
+        return 0 if result["runs_failed"] == 0 else 1
     config = config_from_args(args)
     if args.command == "plan":
         print(json.dumps(config.to_dict(), indent=2, sort_keys=True))

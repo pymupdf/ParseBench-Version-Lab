@@ -151,3 +151,40 @@ Each run is stored under `.version-lab/run-*`. The main outputs are:
 
 The dataset cache is stored under `.version-lab/cache/datasets/`. Use
 `--workspace PATH` to select another location.
+
+## Benchmark index backfill
+
+The historical indexer treats Supabase as an index, not artifact storage. PDFs
+and ground truth remain in the immutable Hugging Face dataset revision, while
+raw parser outputs and evaluation reports remain in Google Cloud Storage.
+
+Authenticate `gh` and `gcloud`, set server-side Supabase credentials, and run:
+
+```shell
+export SUPABASE_URL=https://PROJECT_REF.supabase.co
+export SUPABASE_SECRET_KEY=SERVER_SIDE_SECRET_KEY
+uv run --project tools/version_lab version-lab backfill-index \
+  --repository pymupdf/ParseBench-Version-Lab \
+  --bucket parsebench-pymupdf-results-457820
+```
+
+The command paginates GCS without printing object names. It saves its complete
+manifest and final checkpoint under the ignored directory
+`.version-lab/benchmark-index-backfill/`, then idempotently upserts runs,
+document-level scores, metrics, artifact locators, and errors into Supabase.
+Re-running it safely refreshes existing rows.
+
+## Run Observatory
+
+The client-only dashboard lives in `tools/version_lab/benchmark-dashboard`.
+It reads the public Supabase index, GCS result artifacts, and immutable Hugging
+Face dataset files without exposing the workflow write credential.
+
+```shell
+cd tools/version_lab/benchmark-dashboard
+npm install
+npm run dev
+```
+
+It opens at `http://localhost:3000`, selects the newest indexed workflow run,
+and provides separate run-overview and low-score document-inspection views.
