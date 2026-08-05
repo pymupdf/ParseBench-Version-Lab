@@ -23,6 +23,8 @@ test("keeps the standard Next.js dashboard client-only and publishable-key based
   assert.match(page, /^"use client";/);
   assert.match(page, /hasReference \? \(/);
   assert.doesNotMatch(page, /No reference markdown exists/);
+  assert.match(page, /URL\.createObjectURL/);
+  assert.doesNotMatch(page, /<iframe src=\{selectedPdf\}/);
   assert.match(data, /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/);
   assert.doesNotMatch(data, /service_role|SUPABASE_SECRET_KEY/);
   assert.match(packageJson, /"next": "16\.3\.0"/);

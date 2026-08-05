@@ -68,5 +68,19 @@ test(
     assert.equal(artifactResponse.headers.get("access-control-allow-origin"), "*");
     const artifact = await artifactResponse.json();
     assert.equal(typeof artifact?.output?.markdown, "string");
+
+    const dataset = result.benchmark_cases.dataset_versions;
+    const datasetPath = result.benchmark_cases.pdf_relative_path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/");
+    const pdfResponse = await fetch(
+      `https://huggingface.co/datasets/${dataset.repository}/resolve/${dataset.resolved_sha}/${datasetPath}`,
+      { headers: { Origin: "https://parsebench-run-observatory.vercel.app" } },
+    );
+    assert.equal(pdfResponse.status, 200);
+    assert.match(pdfResponse.headers.get("content-type") ?? "", /application\/pdf/);
+    assert.equal(pdfResponse.headers.get("access-control-allow-origin"), "*");
+    await pdfResponse.body?.cancel();
   },
 );

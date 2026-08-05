@@ -110,6 +110,65 @@ function StatusBadge({ value }: { value: string | null }) {
   );
 }
 
+function PdfPreview({
+  source,
+  page,
+  title,
+}: {
+  source: string;
+  page: number;
+  title: string;
+}) {
+  const [preview, setPreview] = useState<{
+    source: string | null;
+    url: string | null;
+    error: string | null;
+  }>({ source: null, url: null, error: null });
+  const current = preview.source === source ? preview : null;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    fetch(source, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`PDF returned ${response.status}`);
+        return response.blob();
+      })
+      .then((blob) => {
+        const pdfBlob =
+          blob.type === "application/pdf"
+            ? blob
+            : new Blob([blob], { type: "application/pdf" });
+        objectUrl = URL.createObjectURL(pdfBlob);
+        setPreview({ source, url: objectUrl, error: null });
+      })
+      .catch((error: Error) => {
+        if (error.name !== "AbortError") {
+          setPreview({ source, url: null, error: error.message });
+        }
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [source]);
+
+  if (current?.error) {
+    return <EmptyState title="PDF unavailable" body={current.error} />;
+  }
+  if (!current?.url) {
+    return <div className="artifact-loading">Loading PDF preview…</div>;
+  }
+  return (
+    <iframe
+      src={`${current.url}#page=${page}&view=FitH`}
+      title={title}
+    />
+  );
+}
+
 function ScoreBar({ score }: { score: number | null | undefined }) {
   return (
     <div className="score-track" aria-label={`Score ${scorePercent(score)}`}>
@@ -489,15 +548,14 @@ function DocumentExplorer({
                     <span className="viewer-kicker">Source document</span>
                     <strong>PDF preview</strong>
                   </div>
-                  {selectedPdf && (
-                    <a href={selectedPdf} target="_blank" rel="noreferrer" className="simple-link" aria-label="Open PDF in a new tab">
-                      Open PDF ↗
-                    </a>
-                  )}
                 </div>
                 <div className="pdf-stage">
                   {selectedPdf ? (
-                    <iframe src={selectedPdf} title={`PDF preview for ${selected.benchmark_cases.test_id}`} />
+                    <PdfPreview
+                      source={selectedPdf}
+                      page={selected.benchmark_cases.page_number ?? 1}
+                      title={`PDF preview for ${selected.benchmark_cases.test_id}`}
+                    />
                   ) : (
                     <EmptyState title="PDF unavailable" body="This case does not include a dataset PDF locator." />
                   )}
