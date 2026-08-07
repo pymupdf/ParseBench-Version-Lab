@@ -7,10 +7,11 @@ test("defines the ParseBench application shell", async () => {
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(layout, /ParseBench Run Observatory/);
+  assert.match(layout, /ParseBench Workflow Benchmark Observatory/);
   assert.match(page, /ParseBench/);
   assert.match(page, /Run Observatory/);
   assert.match(page, /Workflow run ID/);
+  assert.match(page, /Search ID, commit, branch, pipeline, name/);
   assert.doesNotMatch(`${layout}\n${page}`, /codex-preview|react-loading-skeleton/i);
 });
 

@@ -153,7 +153,7 @@ export function loadRuns(signal?: AbortSignal) {
       select:
         "id,github_run_id,github_run_attempt,github_run_url,run_name,event,status,conclusion,artifact_state,pipeline_name,pipeline_config,run_scope,selected_group,gcs_bucket,gcs_prefix,head_branch,head_sha,source_created_at,completed_at,summary,dataset_versions(repository,resolved_sha)",
       order: "source_created_at.desc.nullslast,id.desc",
-      limit: "150",
+      limit: "500",
     }),
     signal,
   );
@@ -212,7 +212,13 @@ export async function loadRunBundle(
 
 export function loadDocuments(
   runId: number,
-  options: { dimension?: string; search?: string; limit?: number } = {},
+  options: {
+    dimension?: string;
+    search?: string;
+    ceiling?: number;
+    limit?: number;
+    offset?: number;
+  } = {},
   signal?: AbortSignal,
 ) {
   const params = new URLSearchParams({
@@ -220,18 +226,48 @@ export function loadDocuments(
       "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,stats,tags,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,pdf_relative_path,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))",
     "run_dimensions.run_id": `eq.${runId}`,
     order: "primary_score.asc.nullslast,id.asc",
-    limit: String(options.limit ?? 240),
+    limit: String(options.limit ?? 120),
+    offset: String(options.offset ?? 0),
   });
   if (options.dimension && options.dimension !== "all") {
     params.set("run_dimensions.dimension", `eq.${options.dimension}`);
   }
+  if (options.ceiling != null) {
+    params.set("primary_score", `lte.${Math.max(0, Math.min(1, options.ceiling))}`);
+  }
   if (options.search?.trim()) {
+    const escapedSearch = options.search
+      .trim()
+      .replaceAll("\\", "\\\\")
+      .replaceAll("%", "\\%")
+      .replaceAll("_", "\\_")
+      .replaceAll("*", "\\*");
     params.set(
       "benchmark_cases.test_id",
-      `ilike.*${options.search.trim().replaceAll("*", "")}*`,
+      `ilike.*${escapedSearch}*`,
     );
   }
-  return apiFetch<CaseResult[]>("case_results", params, signal);
+  configurationError();
+  return fetch(
+    `${SUPABASE_URL}/rest/v1/case_results?${params.toString()}`,
+    {
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY!,
+        Prefer: "count=exact",
+      },
+      signal,
+    },
+  ).then(async (response) => {
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Could not load case_results (${response.status}): ${detail}`);
+    }
+    const contentRange = response.headers.get("content-range");
+    const totalValue = contentRange?.split("/").at(-1);
+    const documents = (await response.json()) as CaseResult[];
+    const total = totalValue && totalValue !== "*" ? Number(totalValue) : documents.length;
+    return { documents, total: Number.isFinite(total) ? total : documents.length };
+  });
 }
 
 export function loadCaseMetrics(caseResultId: number, signal?: AbortSignal) {

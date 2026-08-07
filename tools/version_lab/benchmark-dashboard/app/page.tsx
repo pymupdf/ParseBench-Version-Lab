@@ -28,8 +28,9 @@ import {
   RunDimension,
 } from "./lib/data";
 
-type View = "overview" | "documents";
+type View = "runs" | "overview" | "documents";
 type MarkdownMode = "preview" | "source";
+type RunSort = "newest" | "oldest" | "largest" | "fastest";
 type ArtifactState = {
   loading: boolean;
   markdown: string;
@@ -48,6 +49,14 @@ const EMPTY_BUNDLE: RunBundle = {
   metrics: [],
   components: [],
   errors: [],
+};
+
+const EMPTY_ARTIFACT: ArtifactState = {
+  loading: false,
+  markdown: "",
+  reference: null,
+  url: null,
+  error: null,
 };
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -71,17 +80,72 @@ function scoreTone(value: number | null | undefined) {
 
 function formatDate(value: string | null) {
   if (!value) return "Unknown time";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
   return new Intl.DateTimeFormat("en", {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  }).format(new Date(value));
+  }).format(date);
+}
+
+function formatShortDate(value: string | null) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function shortSha(value: string | null | undefined) {
   return value ? value.slice(0, 8) : "unknown";
+}
+
+function summaryNumber(run: BenchmarkRun, key: string) {
+  const value = run.summary?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatCompact(value: number | null | undefined) {
+  if (value == null) return "—";
+  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatLatency(value: number | null | undefined) {
+  if (value == null) return "—";
+  if (value < 1_000) return `${Math.round(value)} ms`;
+  return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)} s`;
+}
+
+function durationMinutes(run: BenchmarkRun) {
+  if (!run.source_created_at || !run.completed_at) return null;
+  const started = new Date(run.source_created_at).getTime();
+  const completed = new Date(run.completed_at).getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return null;
+  return Math.round((completed - started) / 60_000);
+}
+
+function formatDuration(minutes: number | null) {
+  if (minutes == null) return "—";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function uniqueValues(runs: BenchmarkRun[], field: keyof BenchmarkRun) {
+  return [...new Set(runs.map((run) => run[field]).filter((value): value is string => typeof value === "string" && Boolean(value)))];
 }
 
 function countDocuments(bundle: RunBundle) {
@@ -187,13 +251,287 @@ function DimensionCard({
   );
 }
 
+function WorkflowBrowser({
+  runs,
+  loading,
+  selectedRunId,
+  onSelect,
+}: {
+  runs: BenchmarkRun[];
+  loading: boolean;
+  selectedRunId: number | null;
+  onSelect: (run: BenchmarkRun) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [pipeline, setPipeline] = useState("all");
+  const [branch, setBranch] = useState("all");
+  const [commit, setCommit] = useState("all");
+  const [conclusion, setConclusion] = useState("all");
+  const [artifactState, setArtifactState] = useState("all");
+  const [scope, setScope] = useState("all");
+  const [group, setGroup] = useState("all");
+  const [period, setPeriod] = useState("all");
+  const [sort, setSort] = useState<RunSort>("newest");
+  const [page, setPage] = useState(0);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [jumpValue, setJumpValue] = useState("");
+  const [jumpError, setJumpError] = useState<string | null>(null);
+  const pageSize = 12;
+
+  const pipelines = useMemo(() => uniqueValues(runs, "pipeline_name").sort(), [runs]);
+  const branches = useMemo(() => uniqueValues(runs, "head_branch").sort(), [runs]);
+  const conclusions = useMemo(() => uniqueValues(runs, "conclusion").sort(), [runs]);
+  const artifactStates = useMemo(() => uniqueValues(runs, "artifact_state").sort(), [runs]);
+  const scopes = useMemo(() => uniqueValues(runs, "run_scope").sort(), [runs]);
+  const groups = useMemo(() => uniqueValues(runs, "selected_group").sort(), [runs]);
+  const commits = useMemo(() => {
+    const seen = new Set<string>();
+    return runs.filter((run) => {
+      if (!run.head_sha || seen.has(run.head_sha)) return false;
+      seen.add(run.head_sha);
+      return true;
+    });
+  }, [runs]);
+
+  const filteredRuns = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const newestIndexedTime = runs.reduce((latest, run) => {
+      const created = run.source_created_at ? new Date(run.source_created_at).getTime() : 0;
+      return Math.max(latest, created);
+    }, 0);
+    const periodMs: Record<string, number> = {
+      "24h": 24 * 60 * 60 * 1_000,
+      "7d": 7 * 24 * 60 * 60 * 1_000,
+      "30d": 30 * 24 * 60 * 60 * 1_000,
+    };
+    const filtered = runs.filter((run) => {
+      const searchable = [
+        run.github_run_id,
+        run.run_name,
+        run.pipeline_name,
+        run.head_branch,
+        run.head_sha,
+        run.run_scope,
+        run.selected_group,
+        JSON.stringify(run.pipeline_config ?? {}),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (normalizedQuery && !searchable.includes(normalizedQuery)) return false;
+      if (pipeline !== "all" && run.pipeline_name !== pipeline) return false;
+      if (branch !== "all" && run.head_branch !== branch) return false;
+      if (commit !== "all" && run.head_sha !== commit) return false;
+      if (conclusion !== "all" && run.conclusion !== conclusion) return false;
+      if (artifactState !== "all" && run.artifact_state !== artifactState) return false;
+      if (scope !== "all" && run.run_scope !== scope) return false;
+      if (group !== "all" && run.selected_group !== group) return false;
+      if (period !== "all") {
+        const created = run.source_created_at ? new Date(run.source_created_at).getTime() : 0;
+        if (!created || newestIndexedTime - created > periodMs[period]) return false;
+      }
+      return true;
+    });
+    return filtered.sort((a, b) => {
+      if (sort === "oldest") {
+        return new Date(a.source_created_at ?? 0).getTime() - new Date(b.source_created_at ?? 0).getTime();
+      }
+      if (sort === "largest") {
+        return (summaryNumber(b, "total") ?? -1) - (summaryNumber(a, "total") ?? -1);
+      }
+      if (sort === "fastest") {
+        return (summaryNumber(a, "avg_latency_ms") ?? Number.POSITIVE_INFINITY) -
+          (summaryNumber(b, "avg_latency_ms") ?? Number.POSITIVE_INFINITY);
+      }
+      return new Date(b.source_created_at ?? 0).getTime() - new Date(a.source_created_at ?? 0).getTime();
+    });
+  }, [artifactState, branch, commit, conclusion, group, period, pipeline, query, runs, scope, sort]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredRuns.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const visibleRuns = filteredRuns.slice(safePage * pageSize, safePage * pageSize + pageSize);
+  const hasFilters = Boolean(
+    query || pipeline !== "all" || branch !== "all" || commit !== "all" ||
+    conclusion !== "all" || artifactState !== "all" || scope !== "all" ||
+    group !== "all" || period !== "all",
+  );
+
+  function clearFilters() {
+    setQuery("");
+    setPipeline("all");
+    setBranch("all");
+    setCommit("all");
+    setConclusion("all");
+    setArtifactState("all");
+    setScope("all");
+    setGroup("all");
+    setPeriod("all");
+    setPage(0);
+  }
+
+  function jumpToRun(event: FormEvent) {
+    event.preventDefault();
+    const candidate = jumpValue.trim().replace(/^#/, "").toLowerCase();
+    const match = runs.find((run) =>
+      String(run.github_run_id) === candidate ||
+      Boolean(run.head_sha?.toLowerCase().startsWith(candidate)),
+    );
+    if (!candidate || !match) {
+      setJumpError("No indexed run or commit matches that value.");
+      return;
+    }
+    setJumpError(null);
+    onSelect(match);
+  }
+
+  return (
+    <main className="content-shell runs-shell">
+      <section className="catalog-hero">
+        <div>
+          <span className="eyebrow">Workflow catalog</span>
+          <h1>Find the benchmark run you need</h1>
+          <p>Search across workflow names, commits, branches, pipelines, configurations, and run IDs.</p>
+        </div>
+        <form className="jump-form" onSubmit={jumpToRun}>
+          <label htmlFor="jump-run">Workflow run ID or commit</label>
+          <div>
+            <input
+              id="jump-run"
+              value={jumpValue}
+              onChange={(event) => setJumpValue(event.target.value)}
+              placeholder="Run ID or commit SHA"
+              spellCheck={false}
+            />
+            <button type="submit">Open</button>
+          </div>
+          <span className={jumpError ? "field-error" : "field-help"}>
+            {jumpError ?? "A short commit prefix opens its newest indexed run."}
+          </span>
+        </form>
+      </section>
+
+      <section className="catalog-stats" aria-label="Workflow catalog summary">
+        <div><strong>{runs.length}</strong><span>Indexed runs</span></div>
+        <div><strong>{commits.length}</strong><span>Commits</span></div>
+        <div><strong>{branches.length}</strong><span>Branches</span></div>
+        <div><strong>{pipelines.length}</strong><span>Pipelines</span></div>
+      </section>
+
+      <section className="catalog-panel">
+        <div className="catalog-toolbar">
+          <label className="catalog-search">
+            <span>Search workflows</span>
+            <input
+              value={query}
+              onChange={(event) => { setQuery(event.target.value); setPage(0); }}
+              placeholder="Search ID, commit, branch, pipeline, name…"
+              type="search"
+            />
+          </label>
+          <label className="sort-control">
+            <span>Sort by</span>
+            <select value={sort} onChange={(event) => { setSort(event.target.value as RunSort); setPage(0); }}>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="largest">Largest run</option>
+              <option value="fastest">Lowest latency</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="catalog-filter-disclosure">
+          <button className="catalog-filter-toggle" type="button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((current) => !current)}>
+            <span>Filters</span><small>8 filter options</small>
+          </button>
+          <div className={`catalog-filters ${filtersOpen ? "catalog-filters-open" : ""}`}>
+            <label><span>Pipeline</span><select value={pipeline} onChange={(event) => { setPipeline(event.target.value); setPage(0); }}><option value="all">All pipelines</option>{pipelines.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
+            <label><span>Branch</span><select value={branch} onChange={(event) => { setBranch(event.target.value); setPage(0); }}><option value="all">All branches</option>{branches.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
+            <label><span>Commit</span><select value={commit} onChange={(event) => { setCommit(event.target.value); setPage(0); }}><option value="all">All commits</option>{commits.map((run) => <option value={run.head_sha ?? ""} key={run.head_sha}>{shortSha(run.head_sha)} · {run.head_branch ?? "unknown"}</option>)}</select></label>
+            <label><span>Result</span><select value={conclusion} onChange={(event) => { setConclusion(event.target.value); setPage(0); }}><option value="all">All results</option>{conclusions.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
+            <label><span>Artifacts</span><select value={artifactState} onChange={(event) => { setArtifactState(event.target.value); setPage(0); }}><option value="all">Any artifact state</option>{artifactStates.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
+            <label><span>Scope</span><select value={scope} onChange={(event) => { setScope(event.target.value); setPage(0); }}><option value="all">Any scope</option>{scopes.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
+            <label><span>Group</span><select value={group} onChange={(event) => { setGroup(event.target.value); setPage(0); }}><option value="all">Any group</option>{groups.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
+            <label><span>Created</span><select value={period} onChange={(event) => { setPeriod(event.target.value); setPage(0); }}><option value="all">Any time</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
+          </div>
+        </div>
+
+        <div className="catalog-results-bar">
+          <p><strong>{filteredRuns.length}</strong> matching {filteredRuns.length === 1 ? "workflow" : "workflows"}</p>
+          {hasFilters && <button type="button" className="text-button" onClick={clearFilters}>Clear all filters</button>}
+        </div>
+
+        {loading ? (
+          <div className="loading-panel">Loading workflow catalog…</div>
+        ) : visibleRuns.length ? (
+          <div className="workflow-table">
+            <div className="workflow-table-head" aria-hidden="true">
+              <span>Workflow</span><span>Source</span><span>Configuration</span><span>Results</span><span>Created</span><span />
+            </div>
+            {visibleRuns.map((run) => (
+              <button
+                type="button"
+                className={`workflow-row ${selectedRunId === run.id ? "workflow-row-selected" : ""}`}
+                key={run.id}
+                onClick={() => onSelect(run)}
+                aria-label={`Open workflow run ${run.github_run_id}`}
+              >
+                <span className="workflow-identity">
+                  <span className="workflow-title-line">
+                    <strong>#{run.github_run_id}</strong>
+                    {selectedRunId === run.id && <em>Viewing</em>}
+                    {run.github_run_attempt > 1 && <em>Attempt {run.github_run_attempt}</em>}
+                  </span>
+                  <small>{run.run_name ?? run.pipeline_name ?? "Unnamed workflow"}</small>
+                </span>
+                <span className="workflow-source">
+                  <strong>{run.head_branch ?? "Unknown branch"}</strong>
+                  <code>{shortSha(run.head_sha)}</code>
+                </span>
+                <span className="workflow-config">
+                  <strong>{humanize(run.pipeline_name)}</strong>
+                  <small>{humanize(run.run_scope)} · {humanize(run.selected_group)}</small>
+                </span>
+                <span className="workflow-results">
+                  <span className={`status-badge status-${run.conclusion ?? run.status ?? "unknown"}`}><span className="status-dot" />{humanize(run.conclusion ?? run.status)}</span>
+                  <small>{formatCompact(summaryNumber(run, "total"))} docs · {formatLatency(summaryNumber(run, "avg_latency_ms"))} · {humanize(run.artifact_state)}</small>
+                </span>
+                <span className="workflow-created">
+                  <strong>{formatShortDate(run.source_created_at)}</strong>
+                  <small>{formatDuration(durationMinutes(run))} duration</small>
+                </span>
+                <span className="workflow-open" aria-hidden="true">→</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="catalog-empty">
+            <strong>No workflows match these filters</strong>
+            <p>Try a broader search or clear the active filters.</p>
+            <button type="button" onClick={clearFilters}>Clear filters</button>
+          </div>
+        )}
+
+        {filteredRuns.length > pageSize && (
+          <div className="pagination" aria-label="Workflow pages">
+            <button type="button" disabled={safePage === 0} onClick={() => setPage(Math.max(0, safePage - 1))}>Previous</button>
+            <span>Page {safePage + 1} of {pageCount}</span>
+            <button type="button" disabled={safePage >= pageCount - 1} onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}>Next</button>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function Overview({
+  run,
   bundle,
   documents,
   loading,
   inspectDimension,
   inspectDocument,
 }: {
+  run: BenchmarkRun;
   bundle: RunBundle;
   documents: CaseResult[];
   loading: boolean;
@@ -201,10 +539,14 @@ function Overview({
   inspectDocument: (result: CaseResult) => void;
 }) {
   const overall = overallScore(bundle);
-  const failed = bundle.dimensions.reduce(
+  const failedFromDimensions = bundle.dimensions.reduce(
     (total, dimension) => total + (dimension.failed ?? 0),
     0,
   );
+  const failed = summaryNumber(run, "failed") ?? failedFromDimensions;
+  const total = summaryNumber(run, "total") ?? countDocuments(bundle);
+  const successRate = summaryNumber(run, "success_rate");
+  const latency = summaryNumber(run, "avg_latency_ms");
 
   return (
     <main className="content-shell overview-shell">
@@ -215,20 +557,31 @@ function Overview({
           <p>Mean of available headline dimension scores</p>
         </article>
         <article className="headline-card">
-          <div className="headline-label">Evaluations</div>
-          <strong>{countDocuments(bundle).toLocaleString()}</strong>
-          <p>Document-dimension records in this run</p>
+          <div className="headline-label">Documents</div>
+          <strong>{total.toLocaleString()}</strong>
+          <p>Benchmark documents processed in this workflow</p>
         </article>
         <article className="headline-card">
-          <div className="headline-label">Failed cases</div>
-          <strong>{failed.toLocaleString()}</strong>
-          <p>Cases that did not complete evaluation</p>
+          <div className="headline-label">Success rate</div>
+          <strong>{successRate == null ? (failed ? "—" : "100%") : `${Math.round(successRate)}%`}</strong>
+          <p>{failed.toLocaleString()} failed {failed === 1 ? "case" : "cases"} recorded</p>
         </article>
         <article className="headline-card">
-          <div className="headline-label">Recorded errors</div>
-          <strong>{bundle.errors.length.toLocaleString()}</strong>
-          <p>Workflow and inference errors retained in the index</p>
+          <div className="headline-label">Average latency</div>
+          <strong>{formatLatency(latency)}</strong>
+          <p>Mean parser time per processed document</p>
         </article>
+      </section>
+
+      <section className="run-facts" aria-label="Selected run details">
+        <div><span>Pipeline</span><strong>{humanize(run.pipeline_name)}</strong></div>
+        <div><span>Scope</span><strong>{humanize(run.run_scope)}</strong></div>
+        <div><span>Evaluation group</span><strong>{humanize(run.selected_group)}</strong></div>
+        <div><span>Trigger</span><strong>{humanize(run.event)}</strong></div>
+        <div><span>Attempt</span><strong>#{run.github_run_attempt}</strong></div>
+        {Object.entries(run.pipeline_config ?? {}).slice(0, 4).map(([key, value]) => (
+          <div key={key}><span>{humanize(key)}</span><strong>{String(value)}</strong></div>
+        ))}
       </section>
 
       <section className="section-block">
@@ -350,6 +703,9 @@ function Overview({
 function DocumentExplorer({
   bundle,
   documents,
+  documentTotal,
+  documentPage,
+  setDocumentPage,
   documentsLoading,
   selected,
   selectDocument,
@@ -364,6 +720,9 @@ function DocumentExplorer({
 }: {
   bundle: RunBundle;
   documents: CaseResult[];
+  documentTotal: number;
+  documentPage: number;
+  setDocumentPage: (page: number) => void;
   documentsLoading: boolean;
   selected: CaseResult | null;
   selectDocument: (result: CaseResult) => void;
@@ -378,23 +737,23 @@ function DocumentExplorer({
 }) {
   const [referenceSelectionFor, setReferenceSelectionFor] = useState<number | null>(null);
   const [markdownMode, setMarkdownMode] = useState<MarkdownMode>("preview");
-  const visibleDocuments = documents.filter(
-    (result) => result.primary_score != null && result.primary_score <= ceiling / 100,
-  );
+  const [mobileInspecting, setMobileInspecting] = useState(false);
+  const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
+  const pageCount = Math.max(1, Math.ceil(documentTotal / 120));
   const selectedPdf = selected ? pdfUrl(selected) : null;
   const hasReference = Boolean(artifact.reference?.trim());
   const showingReference = hasReference && referenceSelectionFor === selected?.id;
   const shownMarkdown = showingReference ? artifact.reference ?? "" : artifact.markdown;
 
   return (
-    <main className="explorer-shell">
+    <main className={`explorer-shell ${mobileInspecting ? "mobile-inspecting" : ""}`}>
       <aside className="document-browser">
         <div className="browser-heading">
           <div>
             <span className="eyebrow">Low-score finder</span>
             <h2>Documents</h2>
           </div>
-          <span className="result-count">{visibleDocuments.length}</span>
+          <span className="result-count" title={`${documentTotal.toLocaleString()} matching documents`}>{formatCompact(documentTotal)}</span>
         </div>
         <label className="search-field compact-search">
           <input
@@ -428,16 +787,17 @@ function DocumentExplorer({
             />
           </label>
         </div>
-        <div className="document-list">
+        <div className="document-list" aria-live="polite">
           {documentsLoading ? (
-            <div className="loading-list">Finding low scores…</div>
-          ) : visibleDocuments.length ? (
-            visibleDocuments.map((result) => (
+            <div className="loading-list" role="status">Finding low scores…</div>
+          ) : documents.length ? (
+            documents.map((result) => (
               <button
                 type="button"
                 key={result.id}
                 className={`document-row ${selected?.id === result.id ? "document-row-selected" : ""}`}
-                onClick={() => selectDocument(result)}
+                aria-pressed={selected?.id === result.id}
+                onClick={() => { selectDocument(result); setMobileViewer("source"); setMobileInspecting(true); }}
               >
                 <div className="document-row-main">
                   <div>
@@ -457,11 +817,19 @@ function DocumentExplorer({
             />
           )}
         </div>
+        {documentTotal > 120 && (
+          <div className="document-pagination" aria-label="Document result pages">
+            <button type="button" disabled={documentPage === 0} onClick={() => setDocumentPage(Math.max(0, documentPage - 1))} aria-label="Previous document page">←</button>
+            <span>{documentPage + 1} / {pageCount}</span>
+            <button type="button" disabled={documentPage >= pageCount - 1} onClick={() => setDocumentPage(Math.min(pageCount - 1, documentPage + 1))} aria-label="Next document page">→</button>
+          </div>
+        )}
       </aside>
 
       <section className="inspection-workspace">
         {selected ? (
           <>
+            <button className="mobile-back-button" type="button" onClick={() => setMobileInspecting(false)}>← Back to documents</button>
             <header className="inspection-header">
               <div className="inspection-title">
                 <div className="breadcrumb">
@@ -488,13 +856,19 @@ function DocumentExplorer({
               </div>
             </header>
 
-            <div className="comparison-grid">
+            <div className="mobile-viewer-tabs" aria-label="Document comparison panels">
+              <button type="button" aria-pressed={mobileViewer === "source"} className={mobileViewer === "source" ? "mobile-viewer-active" : ""} onClick={() => setMobileViewer("source")}>Source PDF</button>
+              <button type="button" aria-pressed={mobileViewer === "output"} className={mobileViewer === "output" ? "mobile-viewer-active" : ""} onClick={() => setMobileViewer("output")}>Parsed output</button>
+            </div>
+
+            <div className={`comparison-grid mobile-view-${mobileViewer}`}>
               <article className="viewer-card pdf-card">
                 <div className="viewer-toolbar">
                   <div>
                     <span className="viewer-kicker">Source document</span>
                     <strong>PDF preview</strong>
                   </div>
+                  {selectedPdf && <a className="simple-link" href={selectedPdf} target="_blank" rel="noreferrer">Open PDF ↗</a>}
                 </div>
                 <div className="pdf-stage">
                   {selectedPdf ? (
@@ -514,8 +888,10 @@ function DocumentExplorer({
                   {hasReference ? (
                     <div className="content-tabs" role="tablist" aria-label="Output comparison">
                       <button
+                        id="rendered-output-tab"
                         role="tab"
                         aria-selected={!showingReference}
+                        aria-controls="output-panel"
                         className={!showingReference ? "content-tab-active" : ""}
                         onClick={() => setReferenceSelectionFor(null)}
                         type="button"
@@ -523,8 +899,10 @@ function DocumentExplorer({
                         Rendered output
                       </button>
                       <button
+                        id="ground-truth-tab"
                         role="tab"
                         aria-selected={showingReference}
+                        aria-controls="output-panel"
                         className={showingReference ? "content-tab-active" : ""}
                         onClick={() => setReferenceSelectionFor(selected.id)}
                         type="button"
@@ -541,6 +919,7 @@ function DocumentExplorer({
                   <div className="viewer-actions">
                     <div className="mode-toggle" aria-label="Markdown display mode">
                       <button
+                        aria-pressed={markdownMode === "preview"}
                         className={markdownMode === "preview" ? "mode-active" : ""}
                         onClick={() => setMarkdownMode("preview")}
                         type="button"
@@ -548,6 +927,7 @@ function DocumentExplorer({
                         Preview
                       </button>
                       <button
+                        aria-pressed={markdownMode === "source"}
                         className={markdownMode === "source" ? "mode-active" : ""}
                         onClick={() => setMarkdownMode("source")}
                         type="button"
@@ -562,7 +942,12 @@ function DocumentExplorer({
                     )}
                   </div>
                 </div>
-                <div className="markdown-stage">
+                <div
+                  className="markdown-stage"
+                  id="output-panel"
+                  role={hasReference ? "tabpanel" : undefined}
+                  aria-labelledby={hasReference ? (showingReference ? "ground-truth-tab" : "rendered-output-tab") : undefined}
+                >
                   {artifact.loading ? (
                     <div className="artifact-loading">Loading rendered artifact…</div>
                   ) : artifact.error ? (
@@ -593,24 +978,19 @@ export default function Home() {
   const [runsLoading, setRunsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
-  const [runInput, setRunInput] = useState("");
   const [view, setView] = useState<View>("overview");
   const [bundle, setBundle] = useState<RunBundle>(EMPTY_BUNDLE);
   const [bundleLoading, setBundleLoading] = useState(false);
   const [documents, setDocuments] = useState<CaseResult[]>([]);
+  const [documentTotal, setDocumentTotal] = useState(0);
+  const [documentPage, setDocumentPage] = useState(0);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<CaseResult | null>(null);
   const [dimension, setDimension] = useState("all");
   const [search, setSearch] = useState("");
   const [ceiling, setCeiling] = useState(65);
   const [caseMetrics, setCaseMetrics] = useState<CaseMetric[]>([]);
-  const [artifact, setArtifact] = useState<ArtifactState>({
-    loading: false,
-    markdown: "",
-    reference: null,
-    url: null,
-    error: null,
-  });
+  const [artifact, setArtifact] = useState<ArtifactState>(EMPTY_ARTIFACT);
 
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? null;
 
@@ -620,17 +1000,29 @@ export default function Home() {
       .then((loadedRuns) => {
         setRuns(loadedRuns);
         const params = new URLSearchParams(window.location.search);
-        const requestedId = Number(params.get("run"));
-        const requested = loadedRuns.find((run) => run.github_run_id === requestedId);
-        const initial = requested ?? loadedRuns[0] ?? null;
+        const requestedValue = params.get("run");
+        const requestedId = requestedValue ? Number(requestedValue) : null;
+        const requested = requestedId == null
+          ? null
+          : loadedRuns.find((run) => run.github_run_id === requestedId) ?? null;
+        const initial = requestedValue ? requested : loadedRuns[0] ?? null;
         if (initial) {
           setSelectedRunId(initial.id);
-          setRunInput(String(initial.github_run_id));
+        } else if (requestedValue) {
+          setLoadError(`Workflow run #${requestedValue} is not in the benchmark index.`);
+          setView("runs");
         }
-        if (params.get("view") === "documents") setView("documents");
+        const requestedView = params.get("view");
+        if (initial && (requestedView === "runs" || requestedView === "overview" || requestedView === "documents")) {
+          setView(requestedView);
+        }
       })
-      .catch((error: Error) => setLoadError(error.message))
-      .finally(() => setRunsLoading(false));
+      .catch((error: Error) => {
+        if (error.name !== "AbortError") setLoadError(error.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRunsLoading(false);
+      });
     return () => controller.abort();
   }, []);
 
@@ -646,7 +1038,9 @@ export default function Home() {
       .catch((error: Error) => {
         if (error.name !== "AbortError") setLoadError(error.message);
       })
-      .finally(() => setBundleLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) setBundleLoading(false);
+      });
     return () => controller.abort();
   }, [selectedRun]);
 
@@ -657,11 +1051,18 @@ export default function Home() {
       setDocumentsLoading(true);
       loadDocuments(
         selectedRun.id,
-        { dimension, search, limit: 240 },
+        {
+          dimension,
+          search,
+          ceiling: ceiling / 100,
+          limit: 120,
+          offset: documentPage * 120,
+        },
         controller.signal,
       )
-        .then((loadedDocuments) => {
+        .then(({ documents: loadedDocuments, total }) => {
           setDocuments(loadedDocuments);
+          setDocumentTotal(total);
           setSelectedDocument((current) =>
             loadedDocuments.find((document) => document.id === current?.id) ??
             loadedDocuments.find((document) => document.primary_score != null) ??
@@ -671,13 +1072,15 @@ export default function Home() {
         .catch((error: Error) => {
           if (error.name !== "AbortError") setLoadError(error.message);
         })
-        .finally(() => setDocumentsLoading(false));
+        .finally(() => {
+          if (!controller.signal.aborted) setDocumentsLoading(false);
+        });
     }, search ? 280 : 0);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [selectedRun, dimension, search]);
+  }, [ceiling, documentPage, selectedRun, dimension, search]);
 
   useEffect(() => {
     if (!selectedRun || !selectedDocument) {
@@ -686,6 +1089,7 @@ export default function Home() {
     const controller = new AbortController();
     // This reset intentionally belongs to the selected-document synchronization.
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCaseMetrics([]);
     setArtifact({
       loading: true,
       markdown: "",
@@ -693,17 +1097,13 @@ export default function Home() {
       url: artifactUrl(selectedRun, selectedDocument.result_relative_path),
       error: null,
     });
-    Promise.all([
-      loadArtifact(selectedRun, selectedDocument, controller.signal),
-      loadCaseMetrics(selectedDocument.id, controller.signal),
-      loadGroundTruth(selectedDocument),
-    ])
-      .then(([loadedArtifact, metrics, reference]) => {
-        setCaseMetrics(metrics);
+    loadArtifact(selectedRun, selectedDocument, controller.signal)
+      .then((loadedArtifact) => {
+        if (controller.signal.aborted) return;
         setArtifact({
           loading: false,
           markdown: loadedArtifact.markdown,
-          reference,
+          reference: null,
           url: loadedArtifact.url,
           error: null,
         });
@@ -713,6 +1113,18 @@ export default function Home() {
           setArtifact((current) => ({ ...current, loading: false, error: error.message }));
         }
       });
+    loadCaseMetrics(selectedDocument.id, controller.signal)
+      .then((metrics) => {
+        if (!controller.signal.aborted) setCaseMetrics(metrics);
+      })
+      .catch(() => undefined);
+    loadGroundTruth(selectedDocument)
+      .then((reference) => {
+        if (!controller.signal.aborted && reference) {
+          setArtifact((current) => ({ ...current, reference }));
+        }
+      })
+      .catch(() => undefined);
     return () => controller.abort();
   }, [selectedRun, selectedDocument]);
 
@@ -724,44 +1136,41 @@ export default function Home() {
     window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
   }, [selectedRun, view]);
 
-  const runOptions = useMemo(
-    () =>
-      runs.map((run) => ({
-        value: String(run.github_run_id),
-        label: `#${run.github_run_id} · ${run.pipeline_name ?? "No pipeline"} · ${formatDate(run.source_created_at)}`,
-      })),
-    [runs],
-  );
-
-  function selectRun(event: FormEvent) {
-    event.preventDefault();
-    const candidate = runs.find(
-      (run) => String(run.github_run_id) === runInput.trim().replace(/^#/, ""),
-    );
-    if (!candidate) {
-      setLoadError(`Workflow run ${runInput || "ID"} is not in the benchmark index.`);
-      return;
-    }
+  function selectWorkflow(candidate: BenchmarkRun) {
     setLoadError(null);
+    setBundle(EMPTY_BUNDLE);
+    setDocuments([]);
+    setDocumentTotal(0);
+    setDocumentPage(0);
+    setSelectedDocument(null);
+    setCaseMetrics([]);
+    setArtifact(EMPTY_ARTIFACT);
     setSelectedRunId(candidate.id);
-    setRunInput(String(candidate.github_run_id));
     setDimension("all");
     setSearch("");
-    setSelectedDocument(null);
+    setCeiling(65);
+    setView("overview");
   }
 
   function showView(nextView: View) {
+    if (nextView === "overview") {
+      setDimension("all");
+      setSearch("");
+      setDocumentPage(0);
+    }
     setView(nextView);
   }
 
   function inspectDimension(nextDimension: string) {
     setDimension(nextDimension);
     setSearch("");
+    setDocumentPage(0);
     setView("documents");
   }
 
   function inspectDocument(result: CaseResult) {
     setDimension(result.run_dimensions.dimension);
+    setDocumentPage(0);
     setSelectedDocument(result);
     setView("documents");
   }
@@ -773,71 +1182,68 @@ export default function Home() {
           <span><strong>ParseBench</strong><small>Run Observatory</small></span>
         </Link>
         <nav className="view-nav" aria-label="Dashboard sections">
-          <button type="button" className={view === "overview" ? "view-nav-active" : ""} onClick={() => showView("overview")}>
+          <button type="button" aria-pressed={view === "runs"} className={view === "runs" ? "view-nav-active" : ""} onClick={() => showView("runs")}>
+            Workflows
+          </button>
+          <button type="button" aria-pressed={view === "overview"} className={view === "overview" ? "view-nav-active" : ""} onClick={() => showView("overview")} disabled={!selectedRun}>
             Overview
           </button>
-          <button type="button" className={view === "documents" ? "view-nav-active" : ""} onClick={() => showView("documents")}>
-            Document explorer
+          <button type="button" aria-pressed={view === "documents"} className={view === "documents" ? "view-nav-active" : ""} onClick={() => showView("documents")} disabled={!selectedRun}>
+            Documents
           </button>
         </nav>
-        <div className="data-source"><span>Live benchmark index</span></div>
+        <div className="data-source"><span>{runsLoading ? "Syncing index" : `${runs.length} indexed runs`}</span></div>
       </header>
 
-      <section className="run-command-bar">
-        <div className="run-context">
-          <span className="eyebrow">Selected workflow run</span>
-          {selectedRun ? (
-            <div className="run-title-row">
-              <h1>Run #{selectedRun.github_run_id}</h1>
-              <StatusBadge value={selectedRun.conclusion} />
-              <span className="artifact-badge">{humanize(selectedRun.artifact_state)} artifacts</span>
-            </div>
-          ) : (
-            <h1>{runsLoading ? "Loading latest run…" : "No benchmark run selected"}</h1>
-          )}
-          {selectedRun && (
-            <div className="run-meta">
-              <span>{formatDate(selectedRun.source_created_at)}</span>
-              <span>{selectedRun.pipeline_name ?? "No pipeline"}</span>
-              <span>{selectedRun.head_branch ?? "Unknown branch"} · {shortSha(selectedRun.head_sha)}</span>
-              {selectedRun.github_run_url && (
-                <a href={selectedRun.github_run_url} target="_blank" rel="noreferrer">Open in GitHub ↗</a>
-              )}
-            </div>
-          )}
-        </div>
-        <form className="run-selector" onSubmit={selectRun}>
-          <label htmlFor="run-id">Workflow run ID</label>
-          <div className="run-selector-controls">
-            <div className="run-input-wrap">
-              <input
-                id="run-id"
-                list="run-options"
-                inputMode="numeric"
-                value={runInput}
-                onChange={(event) => setRunInput(event.target.value)}
-                placeholder="Enter a GitHub run ID"
-              />
-              <datalist id="run-options">
-                {runOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-              </datalist>
-            </div>
-            <button type="submit" disabled={runsLoading}>Load run</button>
+      {view !== "runs" && (
+        <section className="run-command-bar">
+          <div className="run-context">
+            <span className="eyebrow">Selected workflow · #{selectedRun?.github_run_id ?? "—"}</span>
+            {selectedRun ? (
+              <>
+                <div className="run-title-row">
+                  <h1>{humanize(selectedRun.pipeline_name ?? selectedRun.run_name)}</h1>
+                  <StatusBadge value={selectedRun.conclusion ?? selectedRun.status} />
+                  <span className={`artifact-badge artifact-${selectedRun.artifact_state}`}>{humanize(selectedRun.artifact_state)} artifacts</span>
+                </div>
+                <div className="run-meta">
+                  <span>{formatDate(selectedRun.source_created_at)}</span>
+                  <span>{selectedRun.head_branch ?? "Unknown branch"} · <code>{shortSha(selectedRun.head_sha)}</code></span>
+                  <span>{humanize(selectedRun.run_scope)} · {humanize(selectedRun.selected_group)}</span>
+                  <span>Attempt #{selectedRun.github_run_attempt}</span>
+                </div>
+              </>
+            ) : (
+              <h1>{runsLoading ? "Loading latest workflow…" : "No workflow selected"}</h1>
+            )}
           </div>
-          <span>{runs.length} indexed workflow runs · latest selected by default</span>
-        </form>
-      </section>
+          <div className="run-toolbar-actions">
+            <button type="button" className="primary-action" onClick={() => showView("runs")}>Browse workflows</button>
+            {selectedRun?.github_run_url && (
+              <a href={selectedRun.github_run_url} target="_blank" rel="noreferrer" className="secondary-action">Open in GitHub ↗</a>
+            )}
+          </div>
+        </section>
+      )}
 
       {loadError && (
         <div className="global-alert" role="alert">
           <span>{loadError}</span>
-          <button type="button" onClick={() => window.location.reload()}>Retry</button>
+          <button type="button" onClick={() => setLoadError(null)}>Dismiss</button>
         </div>
       )}
 
-      {selectedRun ? (
+      {view === "runs" ? (
+        <WorkflowBrowser
+          runs={runs}
+          loading={runsLoading}
+          selectedRunId={selectedRunId}
+          onSelect={selectWorkflow}
+        />
+      ) : selectedRun ? (
         view === "overview" ? (
           <Overview
+            run={selectedRun}
             bundle={bundle}
             documents={documents}
             loading={bundleLoading}
@@ -848,22 +1254,25 @@ export default function Home() {
           <DocumentExplorer
             bundle={bundle}
             documents={documents}
+            documentTotal={documentTotal}
+            documentPage={documentPage}
+            setDocumentPage={setDocumentPage}
             documentsLoading={documentsLoading}
             selected={selectedDocument}
             selectDocument={setSelectedDocument}
             dimension={dimension}
-            setDimension={setDimension}
+            setDimension={(nextDimension) => { setDimension(nextDimension); setDocumentPage(0); }}
             search={search}
-            setSearch={setSearch}
+            setSearch={(nextSearch) => { setSearch(nextSearch); setDocumentPage(0); }}
             ceiling={ceiling}
-            setCeiling={setCeiling}
+            setCeiling={(nextCeiling) => { setCeiling(nextCeiling); setDocumentPage(0); }}
             artifact={artifact}
             caseMetrics={caseMetrics}
           />
         )
       ) : (
         <main className="content-shell">
-          <EmptyState title="Connecting to the benchmark index" body="The newest indexed workflow run will appear automatically." />
+          <EmptyState title="Choose a workflow" body="Open the workflow catalog to select an indexed benchmark run." />
         </main>
       )}
     </div>
