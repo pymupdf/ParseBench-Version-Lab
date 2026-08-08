@@ -1138,14 +1138,16 @@ export default function Home() {
 
   function selectWorkflow(candidate: BenchmarkRun) {
     setLoadError(null);
-    setBundle(EMPTY_BUNDLE);
-    setDocuments([]);
-    setDocumentTotal(0);
+    if (candidate.id !== selectedRunId) {
+      setBundle(EMPTY_BUNDLE);
+      setDocuments([]);
+      setDocumentTotal(0);
+      setSelectedDocument(null);
+      setCaseMetrics([]);
+      setArtifact(EMPTY_ARTIFACT);
+      setSelectedRunId(candidate.id);
+    }
     setDocumentPage(0);
-    setSelectedDocument(null);
-    setCaseMetrics([]);
-    setArtifact(EMPTY_ARTIFACT);
-    setSelectedRunId(candidate.id);
     setDimension("all");
     setSearch("");
     setCeiling(65);

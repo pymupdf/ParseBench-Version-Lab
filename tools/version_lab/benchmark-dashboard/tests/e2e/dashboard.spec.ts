@@ -14,6 +14,23 @@ test("finds workflows by commit and opens a selected run", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /Pymupdf4llm/i }).first()).toBeVisible();
 });
 
+test("reopening the selected workflow preserves its evaluation data", async ({ page }) => {
+  await page.goto(`/?run=${RUN_ID}&view=overview`);
+
+  await expect(page.locator(".dimension-grid")).toBeVisible();
+  const evaluationCount = await page.locator(".dimension-grid > *").count();
+  expect(evaluationCount).toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: "Workflows", exact: true }).click();
+  const selectedWorkflow = page.locator(".workflow-row-selected");
+  await expect(selectedWorkflow).toContainText(`#${RUN_ID}`);
+  await selectedWorkflow.click();
+
+  await expect(page).toHaveURL(/view=overview/);
+  await expect(page.locator(".dimension-grid > *")).toHaveCount(evaluationCount);
+  await expect(page.getByText("No evaluation reports")).toHaveCount(0);
+});
+
 test("mobile document browsing uses a focused list-to-detail flow", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/?run=${RUN_ID}&view=documents`);
