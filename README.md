@@ -58,6 +58,7 @@ uv run parse-bench serve llamaparse_agentic
 To benchmark selected Git branches, tags, or commits of PyMuPDF, PyMuPDF
 Layout, and PyMuPDF4LLM together, see the
 [source-stack workflow guide](docs/pymupdf-source-stack-workflow.md).
+Indexed source-stack runs can be explored in the [ParseBench dashboard](https://parsebench-dashboard.vercel.app).
 
 ## Available Pipelines
 
