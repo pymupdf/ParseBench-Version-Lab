@@ -390,7 +390,7 @@ function WorkflowBrowser({
         <div>
           <span className="eyebrow">Workflow catalog</span>
           <h1>Find the benchmark run you need</h1>
-          <p>Search across workflow names, commits, branches, pipelines, configurations, and run IDs.</p>
+          <p>Search across workflow names, commits, branches, pipelines, configurations, and run IDs—all in one place.</p>
         </div>
         <form className="jump-form" onSubmit={jumpToRun}>
           <label htmlFor="jump-run">Workflow run ID or commit</label>
