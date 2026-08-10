@@ -19,10 +19,37 @@ ground truth, raw parser output, or evaluation reports.
 - `metric_definitions`: UI labels, defaults, and score direction.
 - `ingestion_jobs`: backfill checkpoint and failure summary.
 
+The reconciliation job persists its last processed GitHub run in
+`ingestion_jobs.checkpoint`. Each scheduled pass scans every newer run, keeps a
+bounded recent-run repair window, and separately retries older incomplete
+ingestion jobs.
+
 Rows use natural unique constraints so both the historical backfill and the
-GitHub workflow can be retried without creating duplicates. RLS is enabled and
-there are no client policies yet; only the server-side `service_role` is
-granted access until the internal web application's access model is defined.
+GitHub workflow can be retried without creating duplicates. RLS is enabled on
+every indexed table. The browser-facing tables intentionally grant SELECT to
+the `anon` role with public-read policies; writes remain restricted to the
+server-side secret used by the indexing workflow.
+
+## Continuous ingestion
+
+`.github/workflows/pymupdf-source-stack-index.yml` is independent from the
+benchmark workflow. Each completed benchmark run triggers a separate Actions
+run that downloads the source run's artifact, transforms it, and upserts this
+schema. Its conclusion cannot change the benchmark conclusion.
+
+The separate `.github/workflows/pymupdf-source-stack-reconcile.yml` workflow
+runs hourly and examines every run newer than its cursor plus the latest 100
+workflow runs. It retries missing, metadata-only, or incomplete ingestion jobs,
+preferring an unexpired GitHub artifact and falling back to the durable copy in
+GCS. The full historical backfill remains available for initial history outside
+that bounded repair window.
+
+Configure these repository settings before enabling continuous ingestion:
+
+- Variable `PARSEBENCH_SUPABASE_URL`
+- Secret `PARSEBENCH_SUPABASE_SECRET_KEY`
+- Variable `PARSEBENCH_GCS_BUCKET`
+- Secret `GCP_SA_KEY`
 
 Apply migrations with:
 

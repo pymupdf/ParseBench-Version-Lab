@@ -1,0 +1,83 @@
+name: Index ParseBench Version Lab runs
+
+on:
+  workflow_run:
+    workflows:
+      - ParseBench Version Lab
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "GitHub Actions benchmark run ID to index"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: parsebench-supabase-index-${{ github.event.workflow_run.id || inputs.run_id }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_WORKFLOW: pymupdf-source-stack-parsebench.yml
+  WORKFLOW_SCRIPTS: .workflow-support/.github/scripts/pymupdf_source_stack
+
+jobs:
+  index_completed_run:
+    name: Index completed benchmark run
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Resolve source run
+        id: source
+        env:
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          MANUAL_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          source_run_id="${EVENT_RUN_ID:-$MANUAL_RUN_ID}"
+          if [[ ! "$source_run_id" =~ ^[0-9]+$ ]]; then
+            echo "A numeric source workflow run ID is required" >&2
+            exit 2
+          fi
+          echo "run_id=$source_run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted indexing code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: .workflow-support
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts/pymupdf_source_stack
+            tools/version_lab/src
+
+      - name: Download source-run artifact
+        id: artifact
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          merge-multiple: true
+          path: parsebench-output
+
+      - name: Upsert benchmark index
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OUTPUT_DIR: parsebench-output
+          SOURCE_GITHUB_RUN_ID: ${{ steps.source.outputs.run_id }}
+          SUPABASE_SECRET_KEY: ${{ secrets.PARSEBENCH_SUPABASE_SECRET_KEY }}
+          SUPABASE_URL: ${{ vars.PARSEBENCH_SUPABASE_URL }}
+        run: python3 "$WORKFLOW_SCRIPTS/index_results.py"
+
+      - name: Report missing source artifact
+        if: ${{ steps.artifact.outcome != 'success' }}
+        run: |
+          echo "The run metadata was indexed, but its GitHub artifact could not be downloaded." >&2
+          echo "The scheduled reconciliation will retry from GitHub and then GCS." >&2
+          exit 1

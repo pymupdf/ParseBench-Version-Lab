@@ -1,0 +1,54 @@
+name: Reconcile ParseBench Version Lab index
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: parsebench-supabase-reconcile
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: pypi-download-analysis-457820
+  SOURCE_WORKFLOW: pymupdf-source-stack-parsebench.yml
+  WORKFLOW_SCRIPTS: .workflow-support/.github/scripts/pymupdf_source_stack
+
+jobs:
+  reconcile_recent_runs:
+    name: Reconcile recent benchmark runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout trusted reconciliation code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: .workflow-support
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts/pymupdf_source_stack
+            tools/version_lab/src
+
+      - name: Authenticate to Google Cloud for fallback reads
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Reconcile missing index rows
+        env:
+          GCS_BUCKET: ${{ vars.PARSEBENCH_GCS_BUCKET }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RECONCILIATION_LOOKBACK: "100"
+          SUPABASE_SECRET_KEY: ${{ secrets.PARSEBENCH_SUPABASE_SECRET_KEY }}
+          SUPABASE_URL: ${{ vars.PARSEBENCH_SUPABASE_URL }}
+        run: python3 "$WORKFLOW_SCRIPTS/reconcile_results.py"

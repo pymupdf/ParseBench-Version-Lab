@@ -470,52 +470,10 @@ jobs:
           OUTPUT_DIR: parsebench-output
         run: python3 "$WORKFLOW_SCRIPTS/publish.py"
 
-  index_results:
-    name: Index benchmark run and errors
-    needs:
-      - benchmark
-      - publish
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      actions: read
-      contents: read
-
-    steps:
-      - name: Checkout indexing helper
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: .workflow-support
-          persist-credentials: false
-          sparse-checkout: |
-            .github/scripts/pymupdf_source_stack
-            tools/version_lab/src
-
-      - name: Download benchmark artifact when available
-        if: ${{ needs.benchmark.outputs.artifact_name != '' }}
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.benchmark.outputs.artifact_name }}
-          path: parsebench-output
-
-      - name: Upsert benchmark index
-        env:
-          BENCHMARK_RESULT: ${{ needs.benchmark.result }}
-          GITHUB_TOKEN: ${{ github.token }}
-          OUTPUT_DIR: parsebench-output
-          PUBLISH_RESULT: ${{ needs.publish.result }}
-          SUPABASE_SECRET_KEY: ${{ secrets.PARSEBENCH_SUPABASE_SECRET_KEY }}
-          SUPABASE_URL: ${{ vars.PARSEBENCH_SUPABASE_URL }}
-        run: python3 "$WORKFLOW_SCRIPTS/index_results.py"
-
   report_outcome:
     name: Report final outcome
     needs:
       - benchmark
-      - index_results
       - publish
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -536,22 +494,13 @@ jobs:
             tools/version_lab/src
 
       - name: Report successful completion
-        if: >-
-          ${{
-            needs.benchmark.result == 'success' &&
-            needs.publish.result == 'success' &&
-            needs.index_results.result == 'success'
-          }}
+        if: ${{ needs.benchmark.result == 'success' && needs.publish.result == 'success' }}
         run: python3 "$WORKFLOW_SCRIPTS/write_outcome.py" success
 
       - name: Download diagnostic artifact
         if: >-
           ${{
-            (
-              needs.benchmark.result == 'failure' ||
-              needs.publish.result == 'failure' ||
-              needs.index_results.result == 'failure'
-            ) &&
+            (needs.benchmark.result == 'failure' || needs.publish.result == 'failure') &&
             needs.benchmark.outputs.artifact_name != ''
           }}
         continue-on-error: true
@@ -561,12 +510,7 @@ jobs:
           path: failure-diagnostics
 
       - name: Add error details to workflow summary
-        if: >-
-          ${{
-            needs.benchmark.result == 'failure' ||
-            needs.publish.result == 'failure' ||
-            needs.index_results.result == 'failure'
-          }}
+        if: ${{ needs.benchmark.result == 'failure' || needs.publish.result == 'failure' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -574,23 +518,16 @@ jobs:
             --diagnostics failure-diagnostics \
             --output "$GITHUB_STEP_SUMMARY" \
             --benchmark-result "${{ needs.benchmark.result }}" \
-            --publish-result "${{ needs.publish.result }}" \
-            --index-result "${{ needs.index_results.result }}"
+            --publish-result "${{ needs.publish.result }}"
 
       - name: Report incomplete workflow
         if: >-
           ${{
             needs.benchmark.result != 'failure' &&
             needs.publish.result != 'failure' &&
-            needs.index_results.result != 'failure' &&
-            (
-              needs.benchmark.result != 'success' ||
-              needs.publish.result != 'success' ||
-              needs.index_results.result != 'success'
-            )
+            (needs.benchmark.result != 'success' || needs.publish.result != 'success')
           }}
         run: |
           python3 "$WORKFLOW_SCRIPTS/write_outcome.py" incomplete \
             --benchmark-result "${{ needs.benchmark.result }}" \
-            --publish-result "${{ needs.publish.result }}" \
-            --index-result "${{ needs.index_results.result }}"
+            --publish-result "${{ needs.publish.result }}"

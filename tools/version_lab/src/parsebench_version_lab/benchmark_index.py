@@ -7,6 +7,7 @@ import json
 import math
 import os
 import subprocess
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -185,6 +186,9 @@ class GithubClient:
     def run(self, run_id: int) -> dict[str, Any]:
         return self._get(f"actions/runs/{run_id}")
 
+    def run_attempt(self, run_id: int, attempt: int) -> dict[str, Any]:
+        return self._get(f"actions/runs/{run_id}/attempts/{attempt}")
+
     def runs(self, workflow: str = DEFAULT_WORKFLOW) -> Iterator[dict[str, Any]]:
         page = 1
         workflow_id = urllib.parse.quote(workflow, safe="")
@@ -290,6 +294,9 @@ class SupabaseRestClient:
         if len(rows) != 1:
             raise RuntimeError(f"Expected one returned {table} row, received {len(rows)}")
         return rows[0]
+
+    def select(self, table: str, query: Mapping[str, str]) -> list[dict[str, Any]]:
+        return self._request("GET", table, query=query)
 
     def upsert_many(self, table: str, rows: Iterable[Mapping[str, Any]], conflict: str) -> list[dict[str, Any]]:
         values = [dict(row) for row in rows]
@@ -654,6 +661,361 @@ def gh_access_token() -> str:
     if configured:
         return configured
     return subprocess.check_output(["gh", "auth", "token"], text=True).strip()
+
+
+def validate_workflow_run(run: Mapping[str, Any], workflow: str) -> None:
+    expected_path = workflow if workflow.startswith(".github/") else f".github/workflows/{workflow}"
+    if run.get("path") != expected_path:
+        raise ValueError(
+            f"GitHub run {run.get('id')} belongs to {run.get('path')!r}, expected {expected_path!r}"
+        )
+    if run.get("status") != "completed":
+        raise ValueError(f"GitHub run {run.get('id')} is {run.get('status')!r}, expected 'completed'")
+
+
+def parse_ingestion_source_key(value: Any) -> tuple[str, int, int] | None:
+    if not isinstance(value, str):
+        return None
+    parts = value.rsplit(":", 2)
+    if len(parts) != 3:
+        return None
+    repository, run_id, run_attempt = parts
+    parsed_run_id = _coerce_integer(run_id)
+    parsed_attempt = _coerce_integer(run_attempt)
+    if parsed_run_id is None or parsed_attempt is None:
+        return None
+    return repository, parsed_run_id, parsed_attempt
+
+
+def _run_key(run: Mapping[str, Any]) -> tuple[int, int] | None:
+    run_id = _coerce_integer(run.get("id"))
+    if run_id is None:
+        return None
+    return run_id, _coerce_integer(run.get("run_attempt")) or 1
+
+
+@dataclass(frozen=True)
+class IngestionJob:
+    database: SupabaseRestClient
+    source_key: str
+    started_at: str
+
+    @classmethod
+    def start(
+        cls,
+        database: SupabaseRestClient,
+        repository: str,
+        run: Mapping[str, Any],
+    ) -> IngestionJob:
+        key = _run_key(run)
+        if key is None:
+            raise ValueError("GitHub run payload is missing a numeric id")
+        job = cls(database, f"{repository}:{key[0]}:{key[1]}", _now_expression_payload())
+        job._record("running")
+        return job
+
+    def finish(self, *, imported: bool, error: str | None = None) -> None:
+        self._record("complete" if imported else "partial", imported=imported, error=error)
+
+    def _record(
+        self,
+        status: str,
+        *,
+        imported: bool = False,
+        error: str | None = None,
+    ) -> None:
+        completed_at = _now_expression_payload() if status != "running" else None
+        self.database.upsert_one(
+            "ingestion_jobs",
+            {
+                "source": "github_run",
+                "source_key": self.source_key,
+                "status": status,
+                "runs_seen": 1,
+                "runs_imported": int(imported),
+                "runs_failed": int(error is not None),
+                "error_summary": [] if error is None else [{"error": error}],
+                "started_at": self.started_at,
+                "completed_at": completed_at,
+                "updated_at": completed_at or self.started_at,
+            },
+            "source,source_key",
+        )
+
+    def try_record_failure(self, error: Exception) -> None:
+        try:
+            self.finish(imported=False, error=str(error))
+        except Exception:
+            pass
+
+
+@dataclass(frozen=True)
+class ReconciliationState:
+    cursor: tuple[int, int] | None
+    indexed_artifacts: dict[tuple[int, int], str]
+    incomplete_runs: set[tuple[int, int]]
+
+    def needs_indexing(self, key: tuple[int, int]) -> bool:
+        return (
+            key not in self.indexed_artifacts
+            or self.indexed_artifacts[key] == "missing"
+            or key in self.incomplete_runs
+        )
+
+
+def _load_reconciliation_state(
+    database: SupabaseRestClient,
+    repository: str,
+    source_key: str,
+    lookback: int,
+) -> ReconciliationState:
+    checkpoint_rows = database.select(
+        "ingestion_jobs",
+        {
+            "select": "checkpoint",
+            "source": "eq.github_reconciliation",
+            "source_key": f"eq.{source_key}",
+            "limit": "1",
+        },
+    )
+    checkpoint = _object(checkpoint_rows[0].get("checkpoint")) if checkpoint_rows else {}
+    indexed_rows = database.select(
+        "benchmark_runs",
+        {
+            "select": "github_run_id,github_run_attempt,artifact_state",
+            "github_repository": f"eq.{repository}",
+            "order": "github_run_id.desc",
+            "limit": str(lookback),
+        },
+    )
+    indexed_artifacts: dict[tuple[int, int], str] = {}
+    for row in indexed_rows:
+        key = _run_key(
+            {"id": row.get("github_run_id"), "run_attempt": row.get("github_run_attempt")}
+        )
+        if key is not None:
+            indexed_artifacts[key] = str(row.get("artifact_state") or "")
+    incomplete_rows = database.select(
+        "ingestion_jobs",
+        {
+            "select": "source_key",
+            "source": "eq.github_run",
+            "source_key": f"like.{repository}:*",
+            "status": "neq.complete",
+            "order": "updated_at.desc",
+            "limit": str(lookback),
+        },
+    )
+    incomplete_runs = {
+        (parsed[1], parsed[2])
+        for row in incomplete_rows
+        if (parsed := parse_ingestion_source_key(row.get("source_key"))) is not None
+        and parsed[0] == repository
+    }
+    cursor_run_id = _coerce_integer(checkpoint.get("github_run_id"))
+    return ReconciliationState(
+        cursor=(
+            (cursor_run_id, _coerce_integer(checkpoint.get("github_run_attempt")) or 1)
+            if cursor_run_id is not None
+            else None
+        ),
+        indexed_artifacts=indexed_artifacts,
+        incomplete_runs=incomplete_runs,
+    )
+
+
+def _workflow_runs_to_reconcile(
+    github: GithubClient,
+    workflow: str,
+    cursor_run_id: int | None,
+    lookback: int,
+) -> tuple[dict[tuple[int, int], dict[str, Any]], tuple[int, int] | None]:
+    runs: dict[tuple[int, int], dict[str, Any]] = {}
+    newest: tuple[int, int] | None = None
+    completed_seen = 0
+    for run in github.runs(workflow):
+        key = _run_key(run)
+        if key is None:
+            continue
+        run_id, _attempt = key
+        if cursor_run_id is not None and run_id <= cursor_run_id and completed_seen >= lookback:
+            break
+        if run.get("status") != "completed":
+            continue
+        validate_workflow_run(run, workflow)
+        newest = newest or key
+        if completed_seen < lookback or cursor_run_id is None or run_id > cursor_run_id:
+            runs[key] = run
+        completed_seen += 1
+        if cursor_run_id is None and completed_seen >= lookback:
+            break
+    return runs, newest
+
+
+def download_github_artifact(
+    *,
+    repository: str,
+    github_token: str,
+    run_id: int,
+    attempt: int,
+    destination: Path,
+) -> tuple[LocalArtifactReader | None, str | None]:
+    artifact_name = f"pymupdf-source-stack-{run_id}-{attempt}"
+    environment = os.environ.copy()
+    environment["GH_TOKEN"] = github_token
+    result = subprocess.run(
+        [
+            "gh",
+            "run",
+            "download",
+            str(run_id),
+            "--repo",
+            repository,
+            "--name",
+            artifact_name,
+            "--dir",
+            str(destination),
+        ],
+        capture_output=True,
+        env=environment,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        return None, detail or f"gh run download exited {result.returncode}"
+    if not destination.is_dir() or not any(path.is_file() for path in destination.rglob("*")):
+        return None, f"GitHub artifact {artifact_name} was empty"
+    return LocalArtifactReader(destination), None
+
+
+def gcs_reader_for_run(
+    client: GcsClient,
+    bucket: str,
+    run_id: int,
+    attempt: int,
+) -> GcsArtifactReader | None:
+    manifest_suffix = f"run-{run_id}-attempt-{attempt}/parsebench-output/_github_run.json"
+    manifests = sorted(client.list_objects(bucket, suffix=manifest_suffix))
+    if not manifests:
+        return None
+    if len(manifests) > 1:
+        raise RuntimeError(
+            f"Found multiple GCS manifests for GitHub run {run_id} attempt {attempt}: {len(manifests)}"
+        )
+    prefix = manifests[0].removesuffix("/_github_run.json")
+    return GcsArtifactReader(client, bucket, prefix)
+
+
+def reconcile_repository(
+    *,
+    github_repository: str,
+    bucket: str,
+    supabase_url: str,
+    supabase_secret_key: str,
+    github_token: str | None = None,
+    gcs_access_token: str | None = None,
+    workflow: str = DEFAULT_WORKFLOW,
+    lookback: int = 100,
+) -> dict[str, Any]:
+    """Re-index recent missing runs, preferring GitHub artifacts over GCS.
+
+    A durable per-workflow cursor makes the forward scan incremental. A bounded
+    lookback still catches recent reruns, while incomplete ingestion jobs are
+    retried independently even after they fall outside that window.
+    """
+    token = github_token or gh_access_token()
+    github = GithubClient(github_repository, token)
+    database = SupabaseRestClient(supabase_url, supabase_secret_key)
+    reconciliation_started = _now_expression_payload()
+    reconciliation_key = f"{github_repository}:{workflow}"
+    state = _load_reconciliation_state(database, github_repository, reconciliation_key, lookback)
+    runs_by_key, newest = _workflow_runs_to_reconcile(
+        github, workflow, state.cursor[0] if state.cursor else None, lookback
+    )
+
+    failures: list[dict[str, Any]] = []
+    for run_id, attempt in state.incomplete_runs:
+        key = (run_id, attempt)
+        if key in runs_by_key:
+            continue
+        try:
+            run = github.run_attempt(run_id, attempt)
+            validate_workflow_run(run, workflow)
+            runs_by_key[key] = run
+        except Exception as error:
+            failures.append({"github_run_id": run_id, "attempt": attempt, "error": str(error)})
+
+    candidates = [
+        (run, *key) for key, run in runs_by_key.items() if state.needs_indexing(key)
+    ]
+
+    imported = 0
+    storage: GcsClient | None = None
+    indexer = BenchmarkIndexer(database, github)
+    for run, run_id, attempt in reversed(candidates):
+        ingestion = IngestionJob.start(database, github_repository, run)
+        try:
+            with tempfile.TemporaryDirectory(prefix="parsebench-index-") as temporary:
+                reader, artifact_error = download_github_artifact(
+                    repository=github_repository,
+                    github_token=token,
+                    run_id=run_id,
+                    attempt=attempt,
+                    destination=Path(temporary),
+                )
+                source = "github_artifact"
+                if reader is None:
+                    if storage is None:
+                        storage = GcsClient(gcs_access_token or gcloud_access_token())
+                    reader = gcs_reader_for_run(storage, bucket, run_id, attempt)
+                    source = "gcs"
+                missing_error = artifact_error or "No GitHub artifact or GCS manifest was available"
+                indexer.index_run(run, reader)
+            if reader is None:
+                ingestion.finish(imported=False, error=missing_error)
+                failures.append({"github_run_id": run_id, "attempt": attempt, "error": missing_error})
+                continue
+            imported += 1
+            ingestion.finish(imported=True)
+            print(f"Indexed GitHub run {run_id} attempt {attempt} from {source}")
+        except Exception as error:
+            message = str(error)
+            ingestion.try_record_failure(error)
+            failures.append({"github_run_id": run_id, "attempt": attempt, "error": message})
+            print(f"Failed to reconcile GitHub run {run_id} attempt {attempt}: {message}")
+
+    cursor = newest or state.cursor
+    completed_at = _now_expression_payload()
+    database.upsert_one(
+        "ingestion_jobs",
+        {
+            "source": "github_reconciliation",
+            "source_key": reconciliation_key,
+            "status": "partial" if failures else "complete",
+            "runs_seen": len(runs_by_key),
+            "runs_imported": imported,
+            "runs_failed": len(failures),
+            "error_summary": failures,
+            "checkpoint": (
+                {}
+                if cursor is None
+                else {"github_run_id": cursor[0], "github_run_attempt": cursor[1]}
+            ),
+            "started_at": reconciliation_started,
+            "completed_at": completed_at,
+            "updated_at": completed_at,
+        },
+        "source,source_key",
+    )
+    return {
+        "cursor_github_run_id": cursor[0] if cursor else None,
+        "runs_examined": len(runs_by_key),
+        "runs_selected": len(candidates),
+        "runs_imported": imported,
+        "runs_failed": len(failures),
+        "failures": failures,
+    }
 
 
 def discover_gcs_readers(

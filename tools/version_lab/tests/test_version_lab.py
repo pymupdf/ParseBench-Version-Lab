@@ -10,6 +10,10 @@ import pytest
 
 VERSION_LAB_SRC = Path(__file__).parents[1] / "src"
 WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-parsebench.yml"
+INDEX_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-index.yml"
+RECONCILE_WORKFLOW = (
+    Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-reconcile.yml"
+)
 ENVIRONMENT_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-environment.yml"
 sys.path.insert(0, str(VERSION_LAB_SRC))
 
@@ -75,14 +79,31 @@ def test_github_workflow_pipeline_dropdown_matches_local_choices() -> None:
     assert "PIPELINE: ${{ inputs.pipeline }}" in workflow
 
 
-def test_github_workflow_indexes_every_completed_benchmark_run() -> None:
-    workflow = WORKFLOW.read_text(encoding="utf-8")
+def test_github_indexing_is_independent_from_the_benchmark_outcome() -> None:
+    benchmark_workflow = WORKFLOW.read_text(encoding="utf-8")
+    index_workflow = INDEX_WORKFLOW.read_text(encoding="utf-8")
+    reconcile_workflow = RECONCILE_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "index_results:" in workflow
-    assert "if: ${{ always() }}" in workflow
-    assert "PARSEBENCH_SUPABASE_SECRET_KEY" in workflow
-    assert "PARSEBENCH_SUPABASE_URL" in workflow
-    assert 'run: python3 "$WORKFLOW_SCRIPTS/index_results.py"' in workflow
+    assert "PARSEBENCH_SUPABASE_SECRET_KEY" not in benchmark_workflow
+    assert "index_results:" not in benchmark_workflow
+    assert "workflow_run:" in index_workflow
+    assert "- ParseBench Version Lab" in index_workflow
+    assert "- completed" in index_workflow
+    assert "workflow_dispatch:" in index_workflow
+    assert "SOURCE_WORKFLOW: pymupdf-source-stack-parsebench.yml" in index_workflow
+    assert "PARSEBENCH_SUPABASE_SECRET_KEY" in index_workflow
+    assert 'run: python3 "$WORKFLOW_SCRIPTS/index_results.py"' in index_workflow
+    assert "github-token: ${{ github.token }}" in index_workflow
+    assert "The scheduled reconciliation will retry from GitHub and then GCS." in index_workflow
+    assert "schedule:" not in index_workflow
+    assert "GCP_SA_KEY" not in index_workflow
+
+    assert "workflow_run:" not in reconcile_workflow
+    assert "schedule:" in reconcile_workflow
+    assert "workflow_dispatch:" in reconcile_workflow
+    assert "PARSEBENCH_SUPABASE_SECRET_KEY" in reconcile_workflow
+    assert "GCP_SA_KEY" in reconcile_workflow
+    assert 'run: python3 "$WORKFLOW_SCRIPTS/reconcile_results.py"' in reconcile_workflow
 
 
 def test_github_workflow_installs_and_verifies_modern_rapidocr_only_for_its_pipeline() -> None:

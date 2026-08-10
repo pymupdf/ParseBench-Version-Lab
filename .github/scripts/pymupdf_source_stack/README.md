@@ -1,12 +1,14 @@
 # PyMuPDF source-stack workflow helpers
 
-These scripts are GitHub Actions adapters for
-`../../workflows/pymupdf-source-stack-parsebench.yml`. The workflow YAML keeps
-inputs, permissions, jobs, third-party actions, and user-facing step names
-visible. Portable configuration, build provenance, compatibility, benchmark,
-and result logic lives in `../../../tools/version_lab/`; the adapters in this
-directory translate GitHub environment variables and output files to that
-shared core. GitHub-only publishing and failure-summary behavior remains here.
+These scripts are GitHub Actions adapters for the PyMuPDF source-stack
+benchmark, index, and reconciliation workflows in `../../workflows/`. The
+workflow YAML keeps inputs, triggers, permissions, jobs, third-party actions,
+credentials, and user-facing step names visible. Portable configuration, build
+provenance, compatibility, benchmark, artifact parsing, transformation,
+cursor, and Supabase indexing logic lives in `../../../tools/version_lab/`;
+the adapters in this directory translate GitHub environment variables and
+output files to that shared core. GitHub-only publishing and failure-summary
+behavior remains here.
 
 MuPDF is an independently selected source component. The workflow resolves its
 requested branch, tag, or commit to the checkout's full SHA, then gives

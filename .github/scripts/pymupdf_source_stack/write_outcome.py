@@ -13,7 +13,6 @@ def main() -> int:
     parser.add_argument("status", choices=("success", "incomplete"))
     parser.add_argument("--benchmark-result", default="success")
     parser.add_argument("--publish-result", default="success")
-    parser.add_argument("--index-result", default="success")
     args = parser.parse_args()
 
     if args.status == "success":
@@ -22,7 +21,6 @@ def main() -> int:
             "",
             "- Benchmark: **successful**",
             "- Results publishing: **successful**",
-            "- Supabase indexing: **successful**",
         ]
     else:
         lines = [
@@ -30,7 +28,6 @@ def main() -> int:
             "",
             f"- Benchmark job: **{args.benchmark_result}**",
             f"- Publishing job: **{args.publish_result}**",
-            f"- Supabase indexing job: **{args.index_result}**",
         ]
     append_summary(lines)
     return 0

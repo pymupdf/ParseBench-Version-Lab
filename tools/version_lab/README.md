@@ -152,6 +152,29 @@ Each run is stored under `.version-lab/run-*`. The main outputs are:
 The dataset cache is stored under `.version-lab/cache/datasets/`. Use
 `--workspace PATH` to select another location.
 
+## Continuous benchmark indexing
+
+The existing benchmark workflow remains responsible only for benchmarking,
+publishing, and its own final outcome. The independent
+`.github/workflows/pymupdf-source-stack-index.yml` workflow listens for its
+`workflow_run: completed` event, downloads the completed run's full artifact,
+and idempotently indexes it in Supabase.
+
+Indexing failures appear on that separate Actions run and do not turn a
+successful benchmark red. It can also be started manually for a specific
+source run ID. The separate
+`.github/workflows/pymupdf-source-stack-reconcile.yml` workflow runs hourly or
+on manual request and reconciles every run newer than its durable cursor plus
+the latest 100 runs. Reconciliation prefers GitHub artifacts while they are
+available and falls back to the durable GCS copy after expiration or download
+failure.
+
+Both workflows keep their triggers, permissions, and credentials explicit in
+YAML. Their GitHub adapters live in
+`.github/scripts/pymupdf_source_stack/` and share the artifact parsing,
+transformation, cursor, and Supabase indexing implementation in
+`tools/version_lab/src/parsebench_version_lab/benchmark_index.py`.
+
 ## Benchmark index backfill
 
 The historical indexer treats Supabase as an index, not artifact storage. PDFs

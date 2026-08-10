@@ -163,7 +163,6 @@ def build_summary(
     run_url: str,
     benchmark_result: str,
     publish_result: str,
-    index_result: str = "success",
 ) -> str:
     """Build the Markdown shown on the GitHub Actions run summary page."""
     failed_jobs = [job for job in jobs if job.get("conclusion") == "failure"]
@@ -178,7 +177,6 @@ def build_summary(
             if benchmark_result == "success"
             else f"- Publishing failure diagnostics: **{publish_result}**"
         ),
-        f"- Supabase indexing: **{index_result}**",
     ]
 
     for failure in _structured_failures(diagnostics):
@@ -239,7 +237,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--benchmark-result", required=True)
     parser.add_argument("--publish-result", required=True)
-    parser.add_argument("--index-result", default="success")
     return parser.parse_args()
 
 
@@ -278,7 +275,6 @@ def main() -> int:
         run_url=run_url,
         benchmark_result=args.benchmark_result,
         publish_result=args.publish_result,
-        index_result=args.index_result,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("a", encoding="utf-8") as output:
