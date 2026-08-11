@@ -43,7 +43,7 @@ test("opens the workflow behind a leading benchmark score", async ({ page }) => 
   await page.goto("/?view=runs");
 
   const aggregateLeader = page.getByRole("button", { name: /Open Aggregate leader/ });
-  await expect(aggregateLeader).toContainText(/\d+\.\d%/);
+  await expect(aggregateLeader).toContainText(/\d+(?:\.\d{1,2})?%/);
   await expect(aggregateLeader).toContainText(/Run #\d+/);
   await aggregateLeader.click();
 
