@@ -58,24 +58,24 @@ on:
         default: current
         type: string
       mupdf_ref:
-        description: "MuPDF version, branch or full 40-character commit SHA. Standard: 1.28.0. Ignored by either automatic latest mode."
+        description: "MuPDF version, branch or full 40-character commit SHA. Standard: 1.28.2. Ignored by either automatic latest mode."
         required: true
-        default: "1.28.0"
+        default: "1.28.2"
         type: string
       pymupdf_ref:
-        description: "PyMuPDF version, branch or full 40-character commit SHA. Standard: 1.28.0. Ignored by either automatic latest mode."
+        description: "PyMuPDF version, branch or full 40-character commit SHA. Standard: 1.28.2. Ignored by either automatic latest mode."
         required: true
-        default: "1.28.0"
+        default: "1.28.2"
         type: string
       pymupdf_layout_ref:
-        description: "PyMuPDF Layout version, branch or commit. Standard: 1.28.0. Ignored by either automatic latest mode."
+        description: "PyMuPDF Layout version, branch or commit. Standard: 1.28.2. Ignored by either automatic latest mode."
         required: true
-        default: "1.28.0"
+        default: "1.28.2"
         type: string
       pymupdf4llm_ref:
-        description: "PyMuPDF4LLM version, branch or commit. Standard: 1.28.0. Ignored by either automatic latest mode."
+        description: "PyMuPDF4LLM version, branch or commit. Standard: 1.28.2. Ignored by either automatic latest mode."
         required: true
-        default: "1.28.0"
+        default: "1.28.2"
         type: string
       run_scope:
         description: "How much data should be tested?"
