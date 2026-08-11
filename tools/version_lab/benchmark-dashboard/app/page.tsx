@@ -21,11 +21,13 @@ import {
   loadDocuments,
   loadGroundTruth,
   loadRunBundle,
+  loadRunScores,
   loadRuns,
   pdfUrl,
   primaryMetricForDimension,
   RunBundle,
   RunDimension,
+  RunScoreIndex,
 } from "./lib/data";
 
 type View = "runs" | "overview" | "documents";
@@ -67,8 +69,28 @@ const DIMENSION_LABELS: Record<string, string> = {
   text_formatting: "Formatting",
 };
 
+const DIMENSION_ORDER = [
+  "chart",
+  "layout",
+  "table",
+  "text_content",
+  "text_formatting",
+] as const;
+
+const DIMENSION_SHORT_LABELS: Record<(typeof DIMENSION_ORDER)[number], string> = {
+  chart: "Chart",
+  layout: "Layout",
+  table: "Table",
+  text_content: "Text",
+  text_formatting: "Format",
+};
+
 function scorePercent(value: number | null | undefined) {
   return value == null ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function preciseScorePercent(value: number | null | undefined) {
+  return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
 
 function scoreTone(value: number | null | undefined) {
@@ -253,12 +275,16 @@ function DimensionCard({
 
 function WorkflowBrowser({
   runs,
+  scores,
   loading,
+  scoresLoading,
   selectedRunId,
   onSelect,
 }: {
   runs: BenchmarkRun[];
+  scores: RunScoreIndex;
   loading: boolean;
+  scoresLoading: boolean;
   selectedRunId: number | null;
   onSelect: (run: BenchmarkRun) => void;
 }) {
@@ -274,6 +300,7 @@ function WorkflowBrowser({
   const [sort, setSort] = useState<RunSort>("newest");
   const [page, setPage] = useState(0);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [showIds, setShowIds] = useState(false);
   const [jumpValue, setJumpValue] = useState("");
   const [jumpError, setJumpError] = useState<string | null>(null);
   const pageSize = 12;
@@ -292,6 +319,34 @@ function WorkflowBrowser({
       return true;
     });
   }, [runs]);
+
+  const scoreLeaders = useMemo(() => {
+    const comparableRuns = runs.filter(
+      (run) => run.run_scope === "full" && run.selected_group === "all",
+    );
+    const metrics: Array<{ key: "aggregate" | (typeof DIMENSION_ORDER)[number]; label: string }> = [
+      { key: "aggregate", label: "Aggregate" },
+      ...DIMENSION_ORDER.map((dimension) => ({
+        key: dimension,
+        label: DIMENSION_LABELS[dimension],
+      })),
+    ];
+    return metrics.map((metric) => {
+      let leader: BenchmarkRun | null = null;
+      let bestScore: number | null = null;
+      for (const run of comparableRuns) {
+        const runScores = scores[run.id];
+        const candidate = metric.key === "aggregate"
+          ? runScores?.aggregate
+          : runScores?.dimensions[metric.key];
+        if (candidate != null && (bestScore == null || candidate > bestScore)) {
+          leader = run;
+          bestScore = candidate;
+        }
+      }
+      return { ...metric, run: leader, score: bestScore };
+    });
+  }, [runs, scores]);
 
   const filteredRuns = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -410,11 +465,39 @@ function WorkflowBrowser({
         </form>
       </section>
 
-      <section className="catalog-stats" aria-label="Workflow catalog summary">
-        <div><strong>{runs.length}</strong><span>Indexed runs</span></div>
-        <div><strong>{commits.length}</strong><span>Commits</span></div>
-        <div><strong>{branches.length}</strong><span>Branches</span></div>
-        <div><strong>{pipelines.length}</strong><span>Pipelines</span></div>
+      <section className="score-leaders" aria-label="Highest workflow scores">
+        <div className="score-leaders-heading">
+          <div>
+            <span className="eyebrow">Full benchmark leaders</span>
+            <h2>Highest scores by benchmark dimension</h2>
+          </div>
+          <p>Only full runs across all document groups are eligible.</p>
+        </div>
+        <div className="score-leader-grid">
+          {scoreLeaders.map((leader) => (
+            <button
+              className={`score-leader-card ${leader.key === "aggregate" ? "score-leader-primary" : ""}`}
+              disabled={!leader.run}
+              key={leader.key}
+              onClick={() => leader.run && onSelect(leader.run)}
+              type="button"
+              aria-label={leader.run ? `Open ${leader.label} leader, workflow run ${leader.run.github_run_id}` : `${leader.label} score unavailable`}
+            >
+              <span>{leader.label}</span>
+              <strong className={`score-${scoreTone(leader.score)}`}>
+                {scoresLoading ? "…" : preciseScorePercent(leader.score)}
+              </strong>
+              <small>
+                {scoresLoading
+                  ? "Loading scores"
+                  : leader.run
+                    ? `${humanize(leader.run.pipeline_name)} · Run #${leader.run.github_run_id}`
+                    : "No scored workflow"}
+              </small>
+              <em aria-hidden="true">Open →</em>
+            </button>
+          ))}
+        </div>
       </section>
 
       <section className="catalog-panel">
@@ -457,7 +540,12 @@ function WorkflowBrowser({
 
         <div className="catalog-results-bar">
           <p><strong>{filteredRuns.length}</strong> matching {filteredRuns.length === 1 ? "workflow" : "workflows"}</p>
-          {hasFilters && <button type="button" className="text-button" onClick={clearFilters}>Clear all filters</button>}
+          <div className="catalog-results-actions">
+            <button type="button" className="id-toggle" aria-pressed={showIds} onClick={() => setShowIds((current) => !current)}>
+              {showIds ? "Hide run IDs" : "Show run IDs"}
+            </button>
+            {hasFilters && <button type="button" className="text-button" onClick={clearFilters}>Clear all filters</button>}
+          </div>
         </div>
 
         {loading ? (
@@ -465,43 +553,57 @@ function WorkflowBrowser({
         ) : visibleRuns.length ? (
           <div className="workflow-table">
             <div className="workflow-table-head" aria-hidden="true">
-              <span>Workflow</span><span>Source</span><span>Configuration</span><span>Results</span><span>Created</span><span />
+              <span>Workflow</span><span>Aggregate</span><span>Dimension scores</span><span>Source</span><span>Configuration</span><span>Created</span><span />
             </div>
-            {visibleRuns.map((run) => (
-              <button
-                type="button"
-                className={`workflow-row ${selectedRunId === run.id ? "workflow-row-selected" : ""}`}
-                key={run.id}
-                onClick={() => onSelect(run)}
-                aria-label={`Open workflow run ${run.github_run_id}`}
-              >
-                <span className="workflow-identity">
-                  <span className="workflow-title-line">
-                    <strong>#{run.github_run_id}</strong>
-                    {selectedRunId === run.id && <em>Viewing</em>}
-                    {run.github_run_attempt > 1 && <em>Attempt {run.github_run_attempt}</em>}
+            {visibleRuns.map((run) => {
+              const runScores = scores[run.id];
+              return (
+                <button
+                  type="button"
+                  className={`workflow-row ${selectedRunId === run.id ? "workflow-row-selected" : ""}`}
+                  key={run.id}
+                  onClick={() => onSelect(run)}
+                  aria-label={`Open workflow run ${run.github_run_id}`}
+                >
+                  <span className="workflow-identity">
+                    <span className="workflow-title-line">
+                      <strong>{humanize(run.pipeline_name ?? run.run_name)}</strong>
+                      {showIds && <code className="workflow-run-id">#{run.github_run_id}</code>}
+                      {selectedRunId === run.id && <em>Viewing</em>}
+                      {run.github_run_attempt > 1 && <em>Attempt {run.github_run_attempt}</em>}
+                    </span>
+                    <small>{run.run_name ?? "Unnamed workflow"}</small>
                   </span>
-                  <small>{run.run_name ?? run.pipeline_name ?? "Unnamed workflow"}</small>
-                </span>
-                <span className="workflow-source">
-                  <strong>{run.head_branch ?? "Unknown branch"}</strong>
-                  <code>{shortSha(run.head_sha)}</code>
-                </span>
-                <span className="workflow-config">
-                  <strong>{humanize(run.pipeline_name)}</strong>
-                  <small>{humanize(run.run_scope)} · {humanize(run.selected_group)}</small>
-                </span>
-                <span className="workflow-results">
-                  <span className={`status-badge status-${run.conclusion ?? run.status ?? "unknown"}`}><span className="status-dot" />{humanize(run.conclusion ?? run.status)}</span>
-                  <small>{formatCompact(summaryNumber(run, "total"))} docs · {formatLatency(summaryNumber(run, "avg_latency_ms"))} · {humanize(run.artifact_state)}</small>
-                </span>
-                <span className="workflow-created">
-                  <strong>{formatShortDate(run.source_created_at)}</strong>
-                  <small>{formatDuration(durationMinutes(run))} duration</small>
-                </span>
-                <span className="workflow-open" aria-hidden="true">→</span>
-              </button>
-            ))}
+                  <span className="workflow-aggregate">
+                    <strong className={`score-${scoreTone(runScores?.aggregate)}`}>{scoresLoading ? "…" : preciseScorePercent(runScores?.aggregate)}</strong>
+                    <small>{humanize(run.conclusion ?? run.status)} · {humanize(run.artifact_state)} artifacts</small>
+                  </span>
+                  <span className="workflow-dimension-scores" aria-label="Dimension scores">
+                    {DIMENSION_ORDER.map((dimension) => (
+                      <span key={dimension} title={`${DIMENSION_LABELS[dimension]}: ${preciseScorePercent(runScores?.dimensions[dimension])}`}>
+                        <small>{DIMENSION_SHORT_LABELS[dimension]}</small>
+                        <strong className={`score-${scoreTone(runScores?.dimensions[dimension])}`}>
+                          {scoresLoading ? "…" : preciseScorePercent(runScores?.dimensions[dimension])}
+                        </strong>
+                      </span>
+                    ))}
+                  </span>
+                  <span className="workflow-source">
+                    <strong>{run.head_branch ?? "Unknown branch"}</strong>
+                    <code>{shortSha(run.head_sha)}</code>
+                  </span>
+                  <span className="workflow-config">
+                    <strong>{humanize(run.run_scope)}</strong>
+                    <small>{humanize(run.selected_group)} · {formatCompact(summaryNumber(run, "total"))} docs · {formatLatency(summaryNumber(run, "avg_latency_ms"))}</small>
+                  </span>
+                  <span className="workflow-created">
+                    <strong>{formatShortDate(run.source_created_at)}</strong>
+                    <small>{formatDuration(durationMinutes(run))} duration</small>
+                  </span>
+                  <span className="workflow-open" aria-hidden="true">→</span>
+                </button>
+              );
+            })}
           </div>
         ) : (
           <div className="catalog-empty">
@@ -976,6 +1078,8 @@ function DocumentExplorer({
 export default function Home() {
   const [runs, setRuns] = useState<BenchmarkRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(true);
+  const [runScores, setRunScores] = useState<RunScoreIndex>({});
+  const [runScoresLoading, setRunScoresLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [view, setView] = useState<View>("overview");
@@ -1025,6 +1129,23 @@ export default function Home() {
       });
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (!runs.length) return;
+    const controller = new AbortController();
+    // This loading state follows the catalog score request lifecycle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRunScoresLoading(true);
+    loadRunScores(runs.map((run) => run.id), controller.signal)
+      .then(setRunScores)
+      .catch((error: Error) => {
+        if (error.name !== "AbortError") setLoadError(error.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRunScoresLoading(false);
+      });
+    return () => controller.abort();
+  }, [runs]);
 
   useEffect(() => {
     if (!selectedRun) return;
@@ -1194,7 +1315,6 @@ export default function Home() {
             Documents
           </button>
         </nav>
-        <div className="data-source"><span>{runsLoading ? "Syncing index" : `${runs.length} indexed runs`}</span></div>
       </header>
 
       {view !== "runs" && (
@@ -1238,7 +1358,9 @@ export default function Home() {
       {view === "runs" ? (
         <WorkflowBrowser
           runs={runs}
+          scores={runScores}
           loading={runsLoading}
+          scoresLoading={runScoresLoading}
           selectedRunId={selectedRunId}
           onSelect={selectWorkflow}
         />

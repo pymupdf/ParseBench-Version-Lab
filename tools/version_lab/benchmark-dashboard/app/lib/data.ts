@@ -2,13 +2,15 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-const PRIMARY_METRICS = [
-  "avg_rule_pass_rate",
-  "avg_layout_element_rule_pass_rate",
-  "avg_grits_trm_composite",
-  "avg_content_faithfulness",
-  "avg_semantic_formatting",
-];
+const PRIMARY_METRIC_BY_DIMENSION: Record<string, string> = {
+  chart: "avg_rule_pass_rate",
+  layout: "avg_layout_element_rule_pass_rate",
+  table: "avg_grits_trm_composite",
+  text_content: "avg_content_faithfulness",
+  text_formatting: "avg_semantic_formatting",
+};
+
+const PRIMARY_METRICS = [...new Set(Object.values(PRIMARY_METRIC_BY_DIMENSION))];
 
 export type DatasetVersion = {
   repository: string;
@@ -116,6 +118,13 @@ export type RunBundle = {
   errors: RunError[];
 };
 
+export type RunScoreSummary = {
+  aggregate: number | null;
+  dimensions: Record<string, number>;
+};
+
+export type RunScoreIndex = Record<number, RunScoreSummary>;
+
 function configurationError() {
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
     throw new Error(
@@ -157,6 +166,63 @@ export function loadRuns(signal?: AbortSignal) {
     }),
     signal,
   );
+}
+
+export async function loadRunScores(
+  runIds: number[],
+  signal?: AbortSignal,
+): Promise<RunScoreIndex> {
+  if (!runIds.length) return {};
+
+  type ScoredDimension = {
+    run_id: number;
+    dimension: string;
+    run_dimension_metrics: Array<Pick<DimensionMetric, "metric_name" | "metric_value">>;
+  };
+
+  const batchSize = 100;
+  const batches: number[][] = [];
+  for (let index = 0; index < runIds.length; index += batchSize) {
+    batches.push(runIds.slice(index, index + batchSize));
+  }
+
+  const rows = (
+    await Promise.all(
+      batches.map((batch) =>
+        apiFetch<ScoredDimension[]>(
+          "run_dimensions",
+          new URLSearchParams({
+            select:
+              "run_id,dimension,run_dimension_metrics(metric_name,metric_value)",
+            run_id: `in.(${batch.join(",")})`,
+            "run_dimension_metrics.metric_name": `in.(${PRIMARY_METRICS.join(",")})`,
+            limit: String(batch.length * Object.keys(PRIMARY_METRIC_BY_DIMENSION).length),
+          }),
+          signal,
+        ),
+      ),
+    )
+  ).flat();
+
+  const scoreIndex: RunScoreIndex = Object.fromEntries(
+    runIds.map((runId) => [runId, { aggregate: null, dimensions: {} }]),
+  );
+  for (const row of rows) {
+    const metricName = PRIMARY_METRIC_BY_DIMENSION[row.dimension];
+    const metric = row.run_dimension_metrics.find(
+      (candidate) => candidate.metric_name === metricName,
+    );
+    if (metric && Number.isFinite(metric.metric_value)) {
+      scoreIndex[row.run_id].dimensions[row.dimension] = metric.metric_value;
+    }
+  }
+  for (const summary of Object.values(scoreIndex)) {
+    const values = Object.values(summary.dimensions);
+    summary.aggregate = values.length
+      ? values.reduce((total, value) => total + value, 0) / values.length
+      : null;
+  }
+  return scoreIndex;
 }
 
 export async function loadRunBundle(
@@ -383,17 +449,10 @@ export function primaryMetricForDimension(
   dimension: RunDimension,
   metrics: DimensionMetric[],
 ) {
-  const preferred: Record<string, string> = {
-    chart: "avg_rule_pass_rate",
-    layout: "avg_layout_element_rule_pass_rate",
-    table: "avg_grits_trm_composite",
-    text_content: "avg_content_faithfulness",
-    text_formatting: "avg_semantic_formatting",
-  };
   return metrics.find(
     (metric) =>
       metric.run_dimension_id === dimension.id &&
-      metric.metric_name === preferred[dimension.dimension],
+      metric.metric_name === PRIMARY_METRIC_BY_DIMENSION[dimension.dimension],
   );
 }
 

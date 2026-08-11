@@ -12,6 +12,11 @@ test("defines the ParseBench application shell", async () => {
   assert.match(page, /Run Observatory/);
   assert.match(page, /Workflow run ID/);
   assert.match(page, /Search ID, commit, branch, pipeline, name/);
+  assert.match(page, /Highest scores by benchmark dimension/);
+  assert.match(page, /run\.run_scope === "full" && run\.selected_group === "all"/);
+  assert.match(page, /Show run IDs/);
+  assert.match(page, /workflow-dimension-scores/);
+  assert.doesNotMatch(page, /Indexed runs<\/span>|Commits<\/span>|Branches<\/span>|Pipelines<\/span>/);
   assert.doesNotMatch(`${layout}\n${page}`, /codex-preview|react-loading-skeleton/i);
 });
 
