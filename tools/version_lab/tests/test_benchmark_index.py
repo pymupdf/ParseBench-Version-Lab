@@ -372,3 +372,63 @@ def test_indexer_extracts_document_scores_and_artifact_locators(tmp_path: Path) 
         "pymupdf4llm_markdown/table/invoice.result.json"
     )
     assert database.rows["case_metrics"][0]["passed_count"] == 3
+
+
+def test_indexer_discovers_single_group_report_at_pipeline_root(tmp_path: Path) -> None:
+    pipeline = "pymupdf4llm_html_tables"
+    write_json(
+        tmp_path / "_github_run.json",
+        {
+            "pipeline": pipeline,
+            "requested_scope": "full",
+            "requested_group": "table",
+            "dataset": {
+                "repository": "owner/dataset",
+                "resolved_sha": "a" * 40,
+                "profile": "full",
+                "profile_source": "canonical_branch_head",
+                "manifest": {
+                    "document_count": 10,
+                    "dimension_counts": {
+                        "chart": 2,
+                        "layout": 2,
+                        "table": 1,
+                        "text_content": 3,
+                        "text_formatting": 2,
+                    },
+                },
+            },
+        },
+    )
+    write_json(tmp_path / pipeline / "_metadata.json", {"summary": {"total": 1, "errors": []}})
+    write_json(
+        tmp_path / pipeline / "_evaluation_report.json",
+        {
+            "total_examples": 1,
+            "successful": 1,
+            "failed": 0,
+            "skipped": 0,
+            "aggregate_metrics": {"avg_grits_trm_composite": 0.8},
+            "per_example_results": [],
+        },
+    )
+    database = FakeDatabase()
+
+    BenchmarkIndexer(database, FakeGithub()).index_run(  # type: ignore[arg-type]
+        {
+            "id": 123,
+            "run_attempt": 1,
+            "repository": {"full_name": "owner/repository"},
+            "status": "completed",
+            "conclusion": "success",
+        },
+        LocalArtifactReader(tmp_path),
+    )
+
+    assert database.rows["run_dimensions"][0]["dimension"] == "table"
+    assert database.rows["run_dimensions"][0]["report_relative_path"] == (
+        "pymupdf4llm_html_tables/_evaluation_report.json"
+    )
+    assert database.rows["benchmark_runs"][0]["effective_group"] == "table"
+    assert database.rows["benchmark_runs"][0]["coverage_status"] == "complete"
+    assert database.rows["benchmark_runs"][0]["leaderboard_eligible"] is False

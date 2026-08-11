@@ -52,8 +52,7 @@ class DatasetBranchResolutionError(RuntimeError):
         exit_description = "Git did not start" if self.exit_code is None else str(self.exit_code)
         return "\n".join(
             [
-                f"The workflow ran `git ls-remote --exit-code {self.remote} {self.ref}` "
-                f"{self.attempts} times.",
+                f"The workflow ran `git ls-remote --exit-code {self.remote} {self.ref}` {self.attempts} times.",
                 "",
                 "````text",
                 f"Exit code: {exit_description}",
@@ -103,12 +102,7 @@ def resolve_branch(repository: str, branch: str) -> str:
             )
         else:
             fields = result.stdout.split()
-            if (
-                result.returncode == 0
-                and len(fields) == 2
-                and fields[1] == ref
-                and FULL_SHA.fullmatch(fields[0])
-            ):
+            if result.returncode == 0 and len(fields) == 2 and fields[1] == ref and FULL_SHA.fullmatch(fields[0]):
                 return fields[0]
             reason = (
                 "Git could not read the remote ref"
@@ -128,10 +122,7 @@ def resolve_branch(repository: str, branch: str) -> str:
             )
 
         if attempt < RESOLUTION_ATTEMPTS:
-            print(
-                f"Dataset branch resolution attempt {attempt}/{RESOLUTION_ATTEMPTS} failed: {failure}. "
-                "Retrying..."
-            )
+            print(f"Dataset branch resolution attempt {attempt}/{RESOLUTION_ATTEMPTS} failed: {failure}. Retrying...")
             time.sleep(2 ** (attempt - 1))
 
     assert failure is not None
@@ -156,13 +147,29 @@ def validate_commit(repository: str, sha: str) -> str:
     return sha
 
 
+def classify_commit(repository: str, sha: str) -> tuple[str, str | None, dict[str, str]]:
+    """Classify an explicit revision from canonical branch heads, never UI scope."""
+    heads: dict[str, str] = {}
+    for profile, branch in DATASET_BRANCHES.items():
+        try:
+            heads[profile] = resolve_branch(repository, branch)
+        except DatasetBranchResolutionError as error:
+            print(f"Could not compare dataset revision with {branch}: {error}")
+    matches = [profile for profile, head_sha in heads.items() if head_sha == sha]
+    if len(matches) != 1:
+        return "custom", None, heads
+    profile = matches[0]
+    return profile, DATASET_BRANCHES[profile], heads
+
+
 def main() -> int:
     repository = DATASET_REPOSITORY
-    branch = branch_for_scope(env("RUN_SCOPE"))
+    requested_scope = env("RUN_SCOPE")
+    requested_branch = branch_for_scope(requested_scope)
     requested_ref = env("DATASET_REF").strip().lower()
     if requested_ref == CURRENT:
         try:
-            sha = resolve_branch(repository, branch)
+            sha = resolve_branch(repository, requested_branch)
         except DatasetBranchResolutionError as error:
             write_json(
                 Path(env("OUTPUT_DIR")) / "_failure.json",
@@ -171,7 +178,7 @@ def main() -> int:
                     "error": str(error),
                     "component": "Hugging Face dataset Git hosting",
                     "repository": repository,
-                    "requested_ref": branch,
+                    "requested_ref": requested_branch,
                     "git_exit_code": error.exit_code,
                     "git_stderr": error.stderr,
                     "git_stdout": error.stdout,
@@ -180,8 +187,14 @@ def main() -> int:
                 },
             )
             raise SystemExit(str(error)) from error
+        profile = requested_scope
+        branch: str | None = requested_branch
+        profile_source = "selected_current_branch"
+        branch_heads = {profile: sha}
     elif FULL_SHA.fullmatch(requested_ref):
         sha = validate_commit(repository, requested_ref)
+        profile, branch, branch_heads = classify_commit(repository, sha)
+        profile_source = "canonical_branch_head" if branch is not None else "unmatched_explicit_revision"
     else:
         raise SystemExit(
             f"Unsupported dataset version {requested_ref!r}. Use {CURRENT!r} or a full 40-character commit SHA."
@@ -190,16 +203,21 @@ def main() -> int:
 
     dataset = {
         "branch": branch,
+        "branch_heads": branch_heads,
         "commit_url": commit_url,
+        "profile": profile,
+        "profile_source": profile_source,
         "repository": repository,
         "requested_ref": requested_ref,
+        "requested_scope": requested_scope,
         "resolved_sha": sha,
     }
     write_json(Path(env("OUTPUT_DIR")) / "_dataset.json", dataset)
     write_github_outputs(
         {
-            "branch": branch,
+            "branch": branch or "",
             "commit_url": commit_url,
+            "profile": profile,
             "repository": repository,
             "requested_ref": requested_ref,
             "sha": sha,

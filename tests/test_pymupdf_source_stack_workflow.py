@@ -165,9 +165,7 @@ def test_configure_latest_any_branch_uses_resolver_placeholders(
     assert "pymupdf-latest-any-branch" in outputs["destination"]
 
 
-def test_configure_rejects_both_automatic_latest_modes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_configure_rejects_both_automatic_latest_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALL_LATEST", "true")
     monkeypatch.setenv("LATEST_ANY_BRANCH", "true")
     monkeypatch.setenv("BENCHMARK_REF", "main")
@@ -193,9 +191,7 @@ def test_parse_branch_heads_selects_newest_commit_with_deterministic_tie() -> No
     )
 
 
-def test_resolve_latest_branches_records_pinned_shas(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_latest_branches_records_pinned_shas(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     github_output = tmp_path / "github-output"
     output_dir = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(github_output))
@@ -205,9 +201,7 @@ def test_resolve_latest_branches_records_pinned_shas(
     heads = {
         "ArtifexSoftware/mupdf": resolve_latest_branches.BranchHead("feature/native", "d" * 40, 40),
         "pymupdf/PyMuPDF": resolve_latest_branches.BranchHead("feature/core", "a" * 40, 10),
-        "ArtifexSoftware/pymupdf_layout": resolve_latest_branches.BranchHead(
-            "feature/layout", "b" * 40, 20
-        ),
+        "ArtifexSoftware/pymupdf_layout": resolve_latest_branches.BranchHead("feature/layout", "b" * 40, 20),
         "pymupdf/pymupdf4llm": resolve_latest_branches.BranchHead("feature/llm", "c" * 40, 30),
     }
     monkeypatch.setattr(
@@ -267,9 +261,7 @@ def test_layout_resolution_prefers_legacy_repository(tmp_path: Path, monkeypatch
     }
 
 
-def test_layout_resolution_falls_back_to_current_repository(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_layout_resolution_falls_back_to_current_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output_dir = _layout_resolution_environment(tmp_path, monkeypatch)
     sha = "b" * 40
 
@@ -329,9 +321,7 @@ def test_layout_resolution_reports_missing_ref(tmp_path: Path, monkeypatch: pyte
     assert failure["title"] == "Cannot resolve PyMuPDF Layout source"
 
 
-def test_layout_resolution_records_github_service_outage(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_layout_resolution_records_github_service_outage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output_dir = _layout_resolution_environment(tmp_path, monkeypatch)
 
     def unavailable(repository: str, ref: str, token: str) -> None:
@@ -418,9 +408,7 @@ def test_mupdf_build_provenance_accepts_selected_source() -> None:
     source = f"git:--sha {sha} https://github.com/ArtifexSoftware/mupdf.git"
     pymupdf = SimpleNamespace(mupdf_location=source, mupdf_version="1.28.0")
 
-    assert check_compatibility.verify_mupdf_build_source(
-        pymupdf, "ArtifexSoftware/mupdf", sha
-    ) == {
+    assert check_compatibility.verify_mupdf_build_source(pymupdf, "ArtifexSoftware/mupdf", sha) == {
         "expected_build_source": source,
         "installed_build_source": source,
         "mupdf_version": "1.28.0",
@@ -433,9 +421,7 @@ def test_mupdf_build_provenance_rejects_missing_or_fixed_source(reported_source:
     pymupdf = SimpleNamespace(mupdf_location=reported_source, mupdf_version="1.28.0")
 
     with pytest.raises(RuntimeError, match="fixed default MuPDF"):
-        check_compatibility.verify_mupdf_build_source(
-            pymupdf, "ArtifexSoftware/mupdf", "d" * 40
-        )
+        check_compatibility.verify_mupdf_build_source(pymupdf, "ArtifexSoftware/mupdf", "d" * 40)
 
 
 def test_evaluation_groups_expands_text_categories(tmp_path: Path) -> None:
@@ -478,9 +464,7 @@ def test_resolve_dataset_records_immutable_revision(tmp_path: Path, monkeypatch:
     assert dataset["resolved_sha"] == sha
 
 
-def test_resolve_dataset_retries_and_records_git_stderr(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_dataset_retries_and_records_git_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output_dir = tmp_path / "output"
     calls: list[list[str]] = []
     sleeps: list[int] = []
@@ -534,7 +518,9 @@ def test_resolve_dataset_retry_can_recover(monkeypatch: pytest.MonkeyPatch) -> N
     assert sleeps == [1]
 
 
-def test_resolve_dataset_accepts_existing_full_commit_sha(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_dataset_classifies_explicit_sha_independently_of_requested_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     github_output = tmp_path / "github-output"
     sha = "d" * 40
     monkeypatch.setenv("DATASET_REF", sha.upper())
@@ -545,7 +531,7 @@ def test_resolve_dataset_accepts_existing_full_commit_sha(tmp_path: Path, monkey
     monkeypatch.setattr(
         resolve_dataset,
         "resolve_branch",
-        lambda repository, branch: pytest.fail("Explicit SHA must not resolve the current branch"),
+        lambda repository, branch: sha if branch == "test-data" else "e" * 40,
     )
 
     assert resolve_dataset.main() == 0
@@ -553,6 +539,10 @@ def test_resolve_dataset_accepts_existing_full_commit_sha(tmp_path: Path, monkey
     outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
     assert outputs["requested_ref"] == sha
     assert outputs["sha"] == sha
+    assert outputs["profile"] == "test"
+    dataset = json.loads((tmp_path / "output" / "_dataset.json").read_text())
+    assert dataset["branch"] == "test-data"
+    assert dataset["requested_scope"] == "full"
 
 
 def test_resolve_dataset_rejects_ambiguous_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

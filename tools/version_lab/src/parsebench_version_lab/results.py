@@ -16,6 +16,13 @@ DEFAULT_METRICS = {
     "text_formatting": "semantic_formatting",
     "form": "rule_form_field_pass_rate",
 }
+REPORT_DIMENSION_METRICS = {
+    "chart": "avg_rule_pass_rate",
+    "layout": "avg_layout_element_rule_pass_rate",
+    "table": "avg_grits_trm_composite",
+    "text_content": "avg_content_faithfulness",
+    "text_formatting": "avg_semantic_formatting",
+}
 
 
 @dataclass(frozen=True)
@@ -64,6 +71,16 @@ def category_score(category: str, report: dict[str, Any]) -> CategoryScore:
     return CategoryScore(category, metric, score, evaluated_cases)
 
 
+def report_dimension(report: dict[str, Any], fallback: str | None = None) -> str | None:
+    """Infer a report dimension from its aggregate metrics."""
+    aggregate_metrics = report.get("aggregate_metrics", {})
+    if isinstance(aggregate_metrics, dict):
+        matches = [dimension for dimension, metric in REPORT_DIMENSION_METRICS.items() if metric in aggregate_metrics]
+        if len(matches) == 1:
+            return matches[0]
+    return fallback
+
+
 def discover_reports(pipeline_output_dir: Path, selected_group: str) -> list[tuple[str, Path]]:
     category_reports = [
         (path.parent.name, path) for path in sorted(pipeline_output_dir.glob("*/_evaluation_report.json"))
@@ -72,7 +89,13 @@ def discover_reports(pipeline_output_dir: Path, selected_group: str) -> list[tup
         return category_reports
     report = pipeline_output_dir / "_evaluation_report.json"
     if report.is_file():
-        return [(selected_group, report)]
+        payload = json.loads(report.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError(f"Expected a JSON object in {report}")
+        dimension = report_dimension(payload, selected_group)
+        if dimension is None:
+            raise ValueError(f"Could not identify the evaluation dimension in {report}")
+        return [(dimension, report)]
     raise FileNotFoundError(f"No evaluation reports found in {pipeline_output_dir}")
 
 

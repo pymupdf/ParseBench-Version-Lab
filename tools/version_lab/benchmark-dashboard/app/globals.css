@@ -997,6 +997,25 @@ code {
   overflow-wrap: anywhere;
 }
 
+.execution-notice {
+  background: #fff8e7;
+  border: 1px solid #efd391;
+  border-radius: 11px;
+  color: #604710;
+  margin-top: 12px;
+  padding: 14px 16px;
+}
+
+.execution-notice strong {
+  font-size: 12px;
+}
+
+.execution-notice p {
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 5px 0 0;
+}
+
 .section-block {
   background: var(--surface);
   border: 1px solid var(--line);

@@ -377,6 +377,7 @@ jobs:
           DATA_DIR: ${{ steps.config.outputs.data_dir }}
           DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
           DATASET_SHA: ${{ steps.dataset.outputs.sha }}
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
         run: .venv/bin/python "$WORKFLOW_SCRIPTS/benchmark.py" download
 
       - name: Write run metadata
@@ -419,6 +420,7 @@ jobs:
         env:
           GROUP: ${{ steps.config.outputs.group }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+          RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
         run: .venv/bin/python "$WORKFLOW_SCRIPTS/write_results_summary.py"
 
       - name: Upload source-stack GitHub artifact

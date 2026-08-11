@@ -17,10 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
-from .results import DEFAULT_METRICS
+from .coverage import execution_coverage
+from .results import DEFAULT_METRICS, report_dimension
 
 KNOWN_DIMENSIONS = ("chart", "table", "layout", "text_content", "text_formatting")
-INGESTION_SCHEMA_VERSION = 2
+INGESTION_SCHEMA_VERSION = 3
 DEFAULT_BATCH_SIZE = 250
 DEFAULT_WORKFLOW = "pymupdf-source-stack-parsebench.yml"
 SOURCE_MEDIA_TYPES = {
@@ -350,6 +351,7 @@ class SupabaseRestClient:
             )
         return returned
 
+
 def _artifact_json(reader: JsonArtifactReader | None, path: str) -> dict[str, Any]:
     if reader is None:
         return {}
@@ -370,17 +372,38 @@ def _dataset_row(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
     resolved_sha = dataset.get("resolved_sha")
     if not isinstance(repository, str) or not isinstance(resolved_sha, str):
         return None
-    return {
+    manifest = _object(dataset.get("manifest"))
+    row = {
         "repository": repository,
         "resolved_sha": resolved_sha,
-        "requested_ref": dataset.get("requested_ref"),
-        "branch": dataset.get("branch"),
         "commit_url": dataset.get("commit_url"),
         "pdf_root_uri": f"hf://datasets/{repository}@{resolved_sha}",
         "ground_truth_root_uri": f"hf://datasets/{repository}@{resolved_sha}",
-        "metadata": dataset,
         "updated_at": _now_expression_payload(),
     }
+    profile = dataset.get("profile")
+    if profile in {"test", "full", "custom"}:
+        row["profile"] = profile
+        row["branch"] = dataset.get("branch")
+        row["metadata"] = {
+            "profile": profile,
+            "profile_source": dataset.get("profile_source"),
+            "manifest": manifest,
+        }
+        row["provenance"] = {
+            "method": dataset.get("profile_source") or "artifact_dataset_metadata",
+            "branch": dataset.get("branch"),
+        }
+    document_count = _integer(manifest.get("document_count"))
+    if document_count is not None:
+        row["document_count"] = document_count
+    dimension_counts = _object(manifest.get("dimension_counts"))
+    if dimension_counts:
+        row["dimension_counts"] = dimension_counts
+    manifest_sha256 = manifest.get("manifest_sha256")
+    if isinstance(manifest_sha256, str):
+        row["manifest_sha256"] = manifest_sha256
+    return row
 
 
 def _primary_metric(dimension: str, metrics: list[dict[str, Any]]) -> tuple[str | None, float | None]:
@@ -476,16 +499,38 @@ class BenchmarkIndexer:
         if run_id_value is None:
             raise ValueError("GitHub run payload is missing a numeric id")
         run_attempt = _coerce_integer(github_run.get("run_attempt")) or 1
+        github_repository = str(github_run.get("repository", {}).get("full_name") or self.github.repository)
         run_metadata = _artifact_json(reader, "_github_run.json")
         pipeline_name = run_metadata.get("pipeline") or _pipeline_from_run_name(github_run)
         pipeline_metadata = _artifact_json(reader, f"{pipeline_name}/_metadata.json") if pipeline_name else {}
         dataset = _dataset_row(run_metadata)
         dataset_id: int | None = None
+        dataset_record: dict[str, Any] = {}
         if dataset is not None:
-            dataset_record = self.database.upsert_one(
-                "dataset_versions", dataset, "repository,resolved_sha"
-            )
+            dataset_record = self.database.upsert_one("dataset_versions", dataset, "repository,resolved_sha")
             dataset_id = int(dataset_record["id"])
+        else:
+            try:
+                existing_runs = self.database.select(
+                    "benchmark_runs",
+                    {
+                        "select": "dataset_version_id,execution_metadata",
+                        "github_repository": f"eq.{github_repository}",
+                        "github_run_id": f"eq.{run_id_value}",
+                        "github_run_attempt": f"eq.{run_attempt}",
+                        "limit": "1",
+                    },
+                )
+            except AttributeError:
+                existing_runs = []
+            if existing_runs:
+                dataset_id = _coerce_integer(existing_runs[0].get("dataset_version_id"))
+                if dataset_id is not None:
+                    dataset_rows = self.database.select(
+                        "dataset_versions",
+                        {"select": "*", "id": f"eq.{dataset_id}", "limit": "1"},
+                    )
+                    dataset_record = dataset_rows[0] if dataset_rows else {}
 
         summary = _object(pipeline_metadata.get("summary"))
         inference_errors = _array(summary.get("errors"))
@@ -493,11 +538,42 @@ class BenchmarkIndexer:
         artifact_state = "missing"
         if reader is not None:
             artifact_state = "complete" if github_run.get("conclusion") == "success" else "partial"
+        requested = _object(run_metadata.get("requested"))
+        requested_scope = requested.get("scope") or run_metadata.get("requested_scope") or run_metadata.get("run_scope")
+        requested_group = requested.get("group") or run_metadata.get("requested_group") or run_metadata.get("group")
+        reports = (
+            self._artifact_reports(pipeline_name, reader, requested_group)
+            if reader is not None and isinstance(pipeline_name, str)
+            else []
+        )
+        execution = _artifact_json(reader, "_execution.json")
+        if not execution:
+            execution = _object(run_metadata.get("execution"))
+        if not execution:
+            dataset_manifest = {
+                "document_count": dataset_record.get("document_count"),
+                "dimension_counts": _object(dataset_record.get("dimension_counts")),
+            }
+            execution = execution_coverage(
+                requested_scope=str(requested_scope) if requested_scope is not None else None,
+                requested_group=str(requested_group) if requested_group is not None else None,
+                dataset_profile=(
+                    str(dataset_record.get("profile")) if dataset_record.get("profile") is not None else None
+                ),
+                dataset_manifest=dataset_manifest,
+                summary=summary,
+                categories=[
+                    {"category": dimension, "evaluated_cases": _integer(report.get("total_examples"))}
+                    for dimension, _path, report in reports
+                ],
+                conclusion=str(github_run.get("conclusion") or "unknown"),
+                artifact_state=artifact_state,
+            )
         gcs_bucket = run_metadata.get("gcs_bucket")
         gcs_destination = run_metadata.get("gcs_destination")
         gcs_prefix = f"{gcs_destination}/parsebench-output" if isinstance(gcs_destination, str) else None
         run_row = {
-            "github_repository": str(github_run.get("repository", {}).get("full_name") or self.github.repository),
+            "github_repository": github_repository,
             "github_workflow_id": github_run.get("workflow_id"),
             "github_workflow_name": github_run.get("name"),
             "github_run_id": run_id_value,
@@ -510,8 +586,18 @@ class BenchmarkIndexer:
             "artifact_state": artifact_state,
             "pipeline_name": pipeline_name,
             "pipeline_config": _object(_object(pipeline_metadata.get("pipeline")).get("config")),
-            "run_scope": run_metadata.get("run_scope"),
-            "selected_group": run_metadata.get("group"),
+            "run_scope": execution.get("effective_scope") or run_metadata.get("run_scope"),
+            "selected_group": execution.get("effective_group") or run_metadata.get("group"),
+            "requested_scope": requested_scope,
+            "requested_group": requested_group,
+            "effective_scope": execution.get("effective_scope"),
+            "effective_group": execution.get("effective_group"),
+            "observed_document_count": _integer(execution.get("observed_document_count")),
+            "observed_dimension_counts": _object(execution.get("observed_dimension_counts")),
+            "coverage_status": execution.get("coverage_status") or "unknown",
+            "leaderboard_eligible": bool(execution.get("leaderboard_eligible")),
+            "eligibility_reasons": [str(value) for value in _array(execution.get("eligibility_reasons"))],
+            "execution_metadata": execution,
             "dataset_version_id": dataset_id,
             "gcs_bucket": gcs_bucket,
             "gcs_prefix": gcs_prefix,
@@ -523,7 +609,11 @@ class BenchmarkIndexer:
             "completed_at": github_run.get("updated_at") if github_run.get("status") == "completed" else None,
             "summary": summary,
             "error_summary": inference_errors + github_failures,
-            "source_metadata": {"github": dict(github_run), "artifact": run_metadata},
+            "source_metadata": {
+                "github": dict(github_run),
+                "artifact": run_metadata,
+                "execution": execution,
+            },
             "ingestion_schema_version": INGESTION_SCHEMA_VERSION,
             "indexed_at": _now_expression_payload(),
             "updated_at": _now_expression_payload(),
@@ -534,9 +624,36 @@ class BenchmarkIndexer:
         database_run_id = int(run_record["id"])
         self._index_components(database_run_id, run_metadata)
         self._index_errors(database_run_id, inference_errors, github_failures)
-        if reader is not None and dataset_id is not None and isinstance(pipeline_name, str):
-            self._index_reports(database_run_id, dataset_id, dataset, pipeline_name, reader)
+        if reader is not None and isinstance(pipeline_name, str):
+            self._index_reports(
+                database_run_id,
+                dataset_id,
+                dataset_record or dataset or {},
+                pipeline_name,
+                reports,
+            )
         return database_run_id
+
+    def _artifact_reports(
+        self,
+        pipeline_name: str,
+        reader: JsonArtifactReader,
+        requested_group: Any,
+    ) -> list[tuple[str, str, dict[str, Any]]]:
+        reports: list[tuple[str, str, dict[str, Any]]] = []
+        for dimension in KNOWN_DIMENSIONS:
+            relative_path = f"{pipeline_name}/{dimension}/_evaluation_report.json"
+            report = _object(reader.read_json(relative_path))
+            if report:
+                reports.append((dimension, relative_path, report))
+        root_path = f"{pipeline_name}/_evaluation_report.json"
+        root_report = _object(reader.read_json(root_path))
+        if root_report:
+            fallback = str(requested_group) if requested_group in KNOWN_DIMENSIONS else None
+            dimension = report_dimension(root_report, fallback)
+            if dimension in KNOWN_DIMENSIONS and not any(value[0] == dimension for value in reports):
+                reports.append((dimension, root_path, root_report))
+        return reports
 
     def _index_components(self, run_id: int, metadata: Mapping[str, Any]) -> None:
         source_stack = _object(metadata.get("source_stack"))
@@ -560,9 +677,7 @@ class BenchmarkIndexer:
         if rows:
             self.database.upsert_many("run_components", rows, "run_id,component")
 
-    def _index_errors(
-        self, run_id: int, inference_errors: list[Any], github_failures: list[dict[str, Any]]
-    ) -> None:
+    def _index_errors(self, run_id: int, inference_errors: list[Any], github_failures: list[dict[str, Any]]) -> None:
         errors: list[dict[str, Any]] = list(github_failures)
         for value in inference_errors:
             error = _object(value)
@@ -596,16 +711,12 @@ class BenchmarkIndexer:
     def _index_reports(
         self,
         run_id: int,
-        dataset_id: int,
+        dataset_id: int | None,
         dataset: Mapping[str, Any],
         pipeline_name: str,
-        reader: JsonArtifactReader,
+        reports: list[tuple[str, str, dict[str, Any]]],
     ) -> None:
-        for dimension in KNOWN_DIMENSIONS:
-            relative_path = f"{pipeline_name}/{dimension}/_evaluation_report.json"
-            report = _object(reader.read_json(relative_path))
-            if not report:
-                continue
+        for dimension, relative_path, report in reports:
             self._index_report(
                 run_id,
                 dataset_id,
@@ -619,7 +730,7 @@ class BenchmarkIndexer:
     def _index_report(
         self,
         run_id: int,
-        dataset_id: int,
+        dataset_id: int | None,
         dataset: Mapping[str, Any],
         pipeline_name: str,
         dimension: str,
@@ -640,9 +751,7 @@ class BenchmarkIndexer:
             "error_summary": [],
             "updated_at": _now_expression_payload(),
         }
-        dimension_record = self.database.upsert_one(
-            "run_dimensions", dimension_row, "run_id,dimension"
-        )
+        dimension_record = self.database.upsert_one("run_dimensions", dimension_row, "run_id,dimension")
         run_dimension_id = int(dimension_record["id"])
         aggregate_rows = []
         for name, value in _object(report.get("aggregate_metrics")).items():
@@ -656,9 +765,10 @@ class BenchmarkIndexer:
                     }
                 )
         if aggregate_rows:
-            self.database.upsert_many(
-                "run_dimension_metrics", aggregate_rows, "run_dimension_id,metric_name"
-            )
+            self.database.upsert_many("run_dimension_metrics", aggregate_rows, "run_dimension_id,metric_name")
+
+        if dataset_id is None:
+            return
 
         example_rows = [_object(value) for value in _array(report.get("per_example_results"))]
         legacy_assets: dict[str, str] | None = None
@@ -692,9 +802,7 @@ class BenchmarkIndexer:
                     "updated_at": _now_expression_payload(),
                 }
             )
-        case_records = self.database.upsert_many(
-            "benchmark_cases", case_rows, "dataset_version_id,test_id"
-        )
+        case_records = self.database.upsert_many("benchmark_cases", case_rows, "dataset_version_id,test_id")
         case_ids = {str(row["test_id"]): int(row["id"]) for row in case_records}
 
         result_rows: list[dict[str, Any]] = []
@@ -729,9 +837,7 @@ class BenchmarkIndexer:
                 }
             )
             metrics_by_case_id[case_id] = metrics
-        result_records = self.database.upsert_many(
-            "case_results", result_rows, "run_dimension_id,benchmark_case_id"
-        )
+        result_records = self.database.upsert_many("case_results", result_rows, "run_dimension_id,benchmark_case_id")
         metric_rows: list[dict[str, Any]] = []
         for result in result_records:
             case_id = int(result["benchmark_case_id"])
@@ -770,9 +876,7 @@ def gh_access_token() -> str:
 def validate_workflow_run(run: Mapping[str, Any], workflow: str) -> None:
     expected_path = workflow if workflow.startswith(".github/") else f".github/workflows/{workflow}"
     if run.get("path") != expected_path:
-        raise ValueError(
-            f"GitHub run {run.get('id')} belongs to {run.get('path')!r}, expected {expected_path!r}"
-        )
+        raise ValueError(f"GitHub run {run.get('id')} belongs to {run.get('path')!r}, expected {expected_path!r}")
     if run.get("status") != "completed":
         raise ValueError(f"GitHub run {run.get('id')} is {run.get('status')!r}, expected 'completed'")
 
@@ -861,9 +965,7 @@ class ReconciliationState:
 
     def needs_indexing(self, key: tuple[int, int]) -> bool:
         return (
-            key not in self.indexed_artifacts
-            or self.indexed_artifacts[key] == "missing"
-            or key in self.incomplete_runs
+            key not in self.indexed_artifacts or self.indexed_artifacts[key] == "missing" or key in self.incomplete_runs
         )
 
 
@@ -894,9 +996,7 @@ def _load_reconciliation_state(
     )
     indexed_artifacts: dict[tuple[int, int], str] = {}
     for row in indexed_rows:
-        key = _run_key(
-            {"id": row.get("github_run_id"), "run_attempt": row.get("github_run_attempt")}
-        )
+        key = _run_key({"id": row.get("github_run_id"), "run_attempt": row.get("github_run_attempt")})
         if key is not None:
             indexed_artifacts[key] = str(row.get("artifact_state") or "")
     incomplete_rows = database.select(
@@ -913,8 +1013,7 @@ def _load_reconciliation_state(
     incomplete_runs = {
         (parsed[1], parsed[2])
         for row in incomplete_rows
-        if (parsed := parse_ingestion_source_key(row.get("source_key"))) is not None
-        and parsed[0] == repository
+        if (parsed := parse_ingestion_source_key(row.get("source_key"))) is not None and parsed[0] == repository
     }
     cursor_run_id = _coerce_integer(checkpoint.get("github_run_id"))
     return ReconciliationState(
@@ -1004,9 +1103,7 @@ def gcs_reader_for_run(
     if not manifests:
         return None
     if len(manifests) > 1:
-        raise RuntimeError(
-            f"Found multiple GCS manifests for GitHub run {run_id} attempt {attempt}: {len(manifests)}"
-        )
+        raise RuntimeError(f"Found multiple GCS manifests for GitHub run {run_id} attempt {attempt}: {len(manifests)}")
     prefix = manifests[0].removesuffix("/_github_run.json")
     return GcsArtifactReader(client, bucket, prefix)
 
@@ -1050,9 +1147,7 @@ def reconcile_repository(
         except Exception as error:
             failures.append({"github_run_id": run_id, "attempt": attempt, "error": str(error)})
 
-    candidates = [
-        (run, *key) for key, run in runs_by_key.items() if state.needs_indexing(key)
-    ]
+    candidates = [(run, *key) for key, run in runs_by_key.items() if state.needs_indexing(key)]
 
     imported = 0
     storage: GcsClient | None = None
@@ -1101,11 +1196,7 @@ def reconcile_repository(
             "runs_imported": imported,
             "runs_failed": len(failures),
             "error_summary": failures,
-            "checkpoint": (
-                {}
-                if cursor is None
-                else {"github_run_id": cursor[0], "github_run_attempt": cursor[1]}
-            ),
+            "checkpoint": ({} if cursor is None else {"github_run_id": cursor[0], "github_run_attempt": cursor[1]}),
             "started_at": reconciliation_started,
             "completed_at": completed_at,
             "updated_at": completed_at,
@@ -1177,9 +1268,7 @@ def index_current_run(
 ) -> int:
     github = GithubClient(github_repository, github_token)
     database = SupabaseRestClient(supabase_url, supabase_secret_key)
-    return BenchmarkIndexer(database, github).index_run(
-        github.run(github_run_id), LocalArtifactReader(output_dir)
-    )
+    return BenchmarkIndexer(database, github).index_run(github.run(github_run_id), LocalArtifactReader(output_dir))
 
 
 def backfill_repository(

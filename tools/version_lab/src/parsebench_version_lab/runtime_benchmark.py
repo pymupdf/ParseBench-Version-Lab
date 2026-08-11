@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from .coverage import inspect_dataset
 from .util import required_env
 
 DATASET_MARKER = ".parsebench-dataset-revision.json"
@@ -37,21 +39,29 @@ def download() -> None:
         marker = None
     if marker == expected_marker and is_dataset_ready(data_dir):
         print(f"Reusing cached immutable dataset snapshot: {repository}@{revision}")
-        return
-    if data_dir.exists():
-        print("Cached dataset is absent, incomplete, or for a different revision; downloading it again.")
-        shutil.rmtree(data_dir)
-    print(f"Downloading immutable dataset snapshot: {repository}@{revision}")
-    snapshot_download(
-        repo_id=repository,
-        repo_type="dataset",
-        local_dir=str(data_dir),
-        revision=revision,
-        force_download=True,
-    )
-    if not is_dataset_ready(data_dir):
-        raise SystemExit(f"Dataset snapshot {repository}@{revision} is incomplete at {data_dir}")
-    marker_path.write_text(json.dumps(expected_marker, indent=2) + "\n", encoding="utf-8")
+    else:
+        if data_dir.exists():
+            print("Cached dataset is absent, incomplete, or for a different revision; downloading it again.")
+            shutil.rmtree(data_dir)
+        print(f"Downloading immutable dataset snapshot: {repository}@{revision}")
+        snapshot_download(
+            repo_id=repository,
+            repo_type="dataset",
+            local_dir=str(data_dir),
+            revision=revision,
+            force_download=True,
+        )
+        if not is_dataset_ready(data_dir):
+            raise SystemExit(f"Dataset snapshot {repository}@{revision} is incomplete at {data_dir}")
+        marker_path.write_text(json.dumps(expected_marker, indent=2) + "\n", encoding="utf-8")
+
+    output_dir = os.environ.get("OUTPUT_DIR")
+    if output_dir:
+        dataset_path = Path(output_dir) / "_dataset.json"
+        if dataset_path.is_file():
+            dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
+            dataset["manifest"] = inspect_dataset(data_dir)
+            dataset_path.write_text(json.dumps(dataset, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def inference() -> None:

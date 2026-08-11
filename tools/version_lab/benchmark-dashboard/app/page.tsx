@@ -88,11 +88,11 @@ const DIMENSION_SHORT_LABELS: Record<(typeof DIMENSION_ORDER)[number], string> =
 };
 
 function scorePercent(value: number | null | undefined) {
-  return value == null ? "—" : `${Math.round(value * 100)}%`;
-}
-
-function preciseScorePercent(value: number | null | undefined) {
-  return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
+  if (value == null) return "—";
+  return new Intl.NumberFormat("en", {
+    style: "percent",
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function scoreTone(value: number | null | undefined) {
@@ -311,8 +311,8 @@ function WorkflowBrowser({
   const branches = useMemo(() => uniqueValues(runs, "head_branch").sort(), [runs]);
   const conclusions = useMemo(() => uniqueValues(runs, "conclusion").sort(), [runs]);
   const artifactStates = useMemo(() => uniqueValues(runs, "artifact_state").sort(), [runs]);
-  const scopes = useMemo(() => uniqueValues(runs, "run_scope").sort(), [runs]);
-  const groups = useMemo(() => uniqueValues(runs, "selected_group").sort(), [runs]);
+  const scopes = useMemo(() => uniqueValues(runs, "effective_scope").sort(), [runs]);
+  const groups = useMemo(() => uniqueValues(runs, "effective_group").sort(), [runs]);
   const commits = useMemo(() => {
     const seen = new Set<string>();
     return runs.filter((run) => {
@@ -323,9 +323,7 @@ function WorkflowBrowser({
   }, [runs]);
 
   const scoreLeaders = useMemo(() => {
-    const comparableRuns = runs.filter(
-      (run) => run.run_scope === "full" && run.selected_group === "all",
-    );
+    const comparableRuns = runs.filter((run) => run.leaderboard_eligible);
     const metrics: Array<{ key: "aggregate" | (typeof DIMENSION_ORDER)[number]; label: string }> = [
       { key: "aggregate", label: "Aggregate" },
       ...DIMENSION_ORDER.map((dimension) => ({
@@ -368,8 +366,11 @@ function WorkflowBrowser({
         run.pipeline_name,
         run.head_branch,
         run.head_sha,
-        run.run_scope,
-        run.selected_group,
+        run.requested_scope,
+        run.requested_group,
+        run.effective_scope,
+        run.effective_group,
+        run.coverage_status,
         JSON.stringify(run.pipeline_config ?? {}),
       ]
         .filter(Boolean)
@@ -381,8 +382,8 @@ function WorkflowBrowser({
       if (commit !== "all" && run.head_sha !== commit) return false;
       if (conclusion !== "all" && run.conclusion !== conclusion) return false;
       if (artifactState !== "all" && run.artifact_state !== artifactState) return false;
-      if (scope !== "all" && run.run_scope !== scope) return false;
-      if (group !== "all" && run.selected_group !== group) return false;
+      if (scope !== "all" && run.effective_scope !== scope) return false;
+      if (group !== "all" && run.effective_group !== group) return false;
       if (period !== "all") {
         const created = run.source_created_at ? new Date(run.source_created_at).getTime() : 0;
         if (!created || newestIndexedTime - created > periodMs[period]) return false;
@@ -473,7 +474,7 @@ function WorkflowBrowser({
             <span className="eyebrow">Full benchmark leaders</span>
             <h2>Highest scores by benchmark dimension</h2>
           </div>
-          <p>Only full runs across all document groups are eligible.</p>
+          <p>Only artifact-verified full datasets with complete observed dimension coverage are eligible.</p>
         </div>
         <div className="score-leader-grid">
           {scoreLeaders.map((leader) => (
@@ -487,7 +488,7 @@ function WorkflowBrowser({
             >
               <span>{leader.label}</span>
               <strong className={`score-${scoreTone(leader.score)}`}>
-                {scoresLoading ? "…" : preciseScorePercent(leader.score)}
+                {scoresLoading ? "…" : scorePercent(leader.score)}
               </strong>
               <small>
                 {scoresLoading
@@ -577,15 +578,15 @@ function WorkflowBrowser({
                     <small>{run.run_name ?? "Unnamed workflow"}</small>
                   </span>
                   <span className="workflow-aggregate">
-                    <strong className={`score-${scoreTone(runScores?.aggregate)}`}>{scoresLoading ? "…" : preciseScorePercent(runScores?.aggregate)}</strong>
-                    <small>{humanize(run.conclusion ?? run.status)} · {humanize(run.artifact_state)} artifacts</small>
+                    <strong className={`score-${scoreTone(runScores?.aggregate)}`}>{scoresLoading ? "…" : scorePercent(runScores?.aggregate)}</strong>
+                    <small>{humanize(run.conclusion ?? run.status)} · {humanize(run.coverage_status)} coverage</small>
                   </span>
                   <span className="workflow-dimension-scores" aria-label="Dimension scores">
                     {DIMENSION_ORDER.map((dimension) => (
-                      <span key={dimension} title={`${DIMENSION_LABELS[dimension]}: ${preciseScorePercent(runScores?.dimensions[dimension])}`}>
+                      <span key={dimension} title={`${DIMENSION_LABELS[dimension]}: ${scorePercent(runScores?.dimensions[dimension])}`}>
                         <small>{DIMENSION_SHORT_LABELS[dimension]}</small>
                         <strong className={`score-${scoreTone(runScores?.dimensions[dimension])}`}>
-                          {scoresLoading ? "…" : preciseScorePercent(runScores?.dimensions[dimension])}
+                          {scoresLoading ? "…" : scorePercent(runScores?.dimensions[dimension])}
                         </strong>
                       </span>
                     ))}
@@ -595,8 +596,8 @@ function WorkflowBrowser({
                     <code>{shortSha(run.head_sha)}</code>
                   </span>
                   <span className="workflow-config">
-                    <strong>{humanize(run.run_scope)}</strong>
-                    <small>{humanize(run.selected_group)} · {formatCompact(summaryNumber(run, "total"))} docs · {formatLatency(summaryNumber(run, "avg_latency_ms"))}</small>
+                    <strong>{humanize(run.effective_scope)}</strong>
+                    <small>{humanize(run.effective_group)} · {formatCompact(run.observed_document_count)} docs · {formatLatency(summaryNumber(run, "avg_latency_ms"))}</small>
                   </span>
                   <span className="workflow-created">
                     <strong>{formatShortDate(run.source_created_at)}</strong>
@@ -651,6 +652,9 @@ function Overview({
   const total = summaryNumber(run, "total") ?? countDocuments(bundle);
   const successRate = summaryNumber(run, "success_rate");
   const latency = summaryNumber(run, "avg_latency_ms");
+  const selectionMismatch =
+    (run.requested_scope != null && run.requested_scope !== run.effective_scope) ||
+    (run.requested_group != null && run.requested_group !== run.effective_group);
 
   return (
     <main className="content-shell overview-shell">
@@ -679,14 +683,26 @@ function Overview({
 
       <section className="run-facts" aria-label="Selected run details">
         <div><span>Pipeline</span><strong>{humanize(run.pipeline_name)}</strong></div>
-        <div><span>Scope</span><strong>{humanize(run.run_scope)}</strong></div>
-        <div><span>Evaluation group</span><strong>{humanize(run.selected_group)}</strong></div>
+        <div><span>Dataset-derived scope</span><strong>{humanize(run.effective_scope)}</strong></div>
+        <div><span>Observed evaluation group</span><strong>{humanize(run.effective_group)}</strong></div>
+        <div><span>Coverage</span><strong>{humanize(run.coverage_status)}</strong></div>
         <div><span>Trigger</span><strong>{humanize(run.event)}</strong></div>
         <div><span>Attempt</span><strong>#{run.github_run_attempt}</strong></div>
         {Object.entries(run.pipeline_config ?? {}).slice(0, 4).map(([key, value]) => (
           <div key={key}><span>{humanize(key)}</span><strong>{String(value)}</strong></div>
         ))}
       </section>
+
+      {selectionMismatch && (
+        <section className="execution-notice" aria-label="Requested and observed benchmark configuration differ">
+          <strong>GitHub selection differed from the executed benchmark.</strong>
+          <p>
+            Requested {humanize(run.requested_scope)} · {humanize(run.requested_group)};
+            artifacts show {humanize(run.effective_scope)} · {humanize(run.effective_group)}.
+            Scores and leaderboard eligibility use the artifact-derived values.
+          </p>
+        </section>
+      )}
 
       <section className="section-block">
         <div className="section-heading">
@@ -1351,7 +1367,7 @@ export default function Home() {
                 <div className="run-meta">
                   <span>{formatDate(selectedRun.source_created_at)}</span>
                   <span>{selectedRun.head_branch ?? "Unknown branch"} · <code>{shortSha(selectedRun.head_sha)}</code></span>
-                  <span>{humanize(selectedRun.run_scope)} · {humanize(selectedRun.selected_group)}</span>
+                  <span>{humanize(selectedRun.effective_scope)} · {humanize(selectedRun.effective_group)}</span>
                   <span>Attempt #{selectedRun.github_run_attempt}</span>
                 </div>
               </>

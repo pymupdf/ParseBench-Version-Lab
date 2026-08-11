@@ -15,6 +15,9 @@ const PRIMARY_METRICS = [...new Set(Object.values(PRIMARY_METRIC_BY_DIMENSION))]
 export type DatasetVersion = {
   repository: string;
   resolved_sha: string;
+  profile: string | null;
+  document_count: number | null;
+  dimension_counts: Record<string, number>;
 };
 
 export type BenchmarkRun = {
@@ -31,6 +34,15 @@ export type BenchmarkRun = {
   pipeline_config: Record<string, unknown>;
   run_scope: string | null;
   selected_group: string | null;
+  requested_scope: string | null;
+  requested_group: string | null;
+  effective_scope: string | null;
+  effective_group: string | null;
+  observed_document_count: number | null;
+  observed_dimension_counts: Record<string, number>;
+  coverage_status: string;
+  leaderboard_eligible: boolean;
+  eligibility_reasons: string[];
   gcs_bucket: string | null;
   gcs_prefix: string | null;
   head_branch: string | null;
@@ -162,7 +174,8 @@ export function loadRuns(signal?: AbortSignal) {
     "benchmark_runs",
     new URLSearchParams({
       select:
-        "id,github_run_id,github_run_attempt,github_run_url,run_name,event,status,conclusion,artifact_state,pipeline_name,pipeline_config,run_scope,selected_group,gcs_bucket,gcs_prefix,head_branch,head_sha,source_created_at,completed_at,summary,dataset_versions(repository,resolved_sha)",
+        "id,github_run_id,github_run_attempt,github_run_url,run_name,event,status,conclusion,artifact_state,pipeline_name,pipeline_config,run_scope,selected_group,requested_scope,requested_group,effective_scope,effective_group,observed_document_count,observed_dimension_counts,coverage_status,leaderboard_eligible,eligibility_reasons,gcs_bucket,gcs_prefix,head_branch,head_sha,source_created_at,completed_at,summary,dataset_versions(repository,resolved_sha,profile,document_count,dimension_counts)",
+      pipeline_name: "not.is.null",
       order: "source_created_at.desc.nullslast,id.desc",
       limit: "500",
     }),
