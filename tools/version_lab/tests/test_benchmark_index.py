@@ -431,4 +431,5 @@ def test_indexer_discovers_single_group_report_at_pipeline_root(tmp_path: Path) 
     )
     assert database.rows["benchmark_runs"][0]["effective_group"] == "table"
     assert database.rows["benchmark_runs"][0]["coverage_status"] == "complete"
-    assert database.rows["benchmark_runs"][0]["leaderboard_eligible"] is False
+    assert database.rows["benchmark_runs"][0]["leaderboard_eligible"] is True
+    assert database.rows["benchmark_runs"][0]["eligibility_reasons"] == []

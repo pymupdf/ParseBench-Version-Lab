@@ -114,8 +114,6 @@ def execution_coverage(
         reasons.append("artifacts_incomplete")
     if dataset_profile != "full":
         reasons.append("dataset_not_full_profile")
-    if effective_group != "all":
-        reasons.append("not_all_dimensions")
     if not inference_complete:
         reasons.append("document_count_mismatch")
     if not reports_complete:
@@ -123,7 +121,7 @@ def execution_coverage(
     eligible = not reasons
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "requested_scope": requested_scope,
         "requested_group": requested_group,
         "effective_scope": dataset_profile,

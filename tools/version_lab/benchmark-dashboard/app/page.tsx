@@ -335,6 +335,10 @@ function WorkflowBrowser({
       let leader: BenchmarkRun | null = null;
       let bestScore: number | null = null;
       for (const run of comparableRuns) {
+        const groupMatches = metric.key === "aggregate"
+          ? run.effective_group === "all"
+          : run.effective_group === "all" || run.effective_group === metric.key;
+        if (!groupMatches) continue;
         const runScores = scores[run.id];
         const candidate = metric.key === "aggregate"
           ? runScores?.aggregate
@@ -474,7 +478,7 @@ function WorkflowBrowser({
             <span className="eyebrow">Full benchmark leaders</span>
             <h2>Highest scores by benchmark dimension</h2>
           </div>
-          <p>Only artifact-verified full datasets with complete observed dimension coverage are eligible.</p>
+          <p>Quick runs are excluded. Full-dataset runs compete only in the dimensions they completely evaluated.</p>
         </div>
         <div className="score-leader-grid">
           {scoreLeaders.map((leader) => (
