@@ -337,6 +337,8 @@ def test_indexer_extracts_document_scores_and_artifact_locators(tmp_path: Path) 
             "per_example_results": [
                 {
                     "test_id": "table/invoice",
+                    "source_relative_path": "docs/table/invoice.pdf",
+                    "source_media_type": "application/pdf",
                     "success": True,
                     "metrics": [
                         {
@@ -364,6 +366,7 @@ def test_indexer_extracts_document_scores_and_artifact_locators(tmp_path: Path) 
     )
 
     assert database.rows["benchmark_cases"][0]["pdf_relative_path"] == "docs/table/invoice.pdf"
+    assert database.rows["benchmark_cases"][0]["source_relative_path"] == "docs/table/invoice.pdf"
     assert database.rows["case_results"][0]["primary_score"] == 0.75
     assert database.rows["case_results"][0]["result_relative_path"] == (
         "pymupdf4llm_markdown/table/invoice.result.json"

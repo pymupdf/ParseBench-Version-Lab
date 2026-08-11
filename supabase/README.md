@@ -1,13 +1,13 @@
 # ParseBench benchmark index
 
-Supabase stores queryable metadata and scores. It does not duplicate PDFs,
+Supabase stores queryable metadata and scores. It does not duplicate source assets,
 ground truth, raw parser output, or evaluation reports.
 
 ## Data model
 
 - `dataset_versions`: immutable Hugging Face dataset commit and root locators.
 - `benchmark_cases`: stable document identity within one dataset commit, plus
-  its PDF path and ground-truth locator.
+  its exact source path, media type, and ground-truth locator.
 - `benchmark_runs`: one GitHub Actions run attempt, configuration, provenance,
   GCS artifact prefix, lifecycle state, and summary.
 - `run_components`: exact MuPDF/PyMuPDF/PyMuPDF Layout/PyMuPDF4LLM revisions.

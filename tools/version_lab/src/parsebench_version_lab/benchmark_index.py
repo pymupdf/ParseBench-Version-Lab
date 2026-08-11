@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import tempfile
 import urllib.error
@@ -19,9 +20,17 @@ from typing import Any, Protocol
 from .results import DEFAULT_METRICS
 
 KNOWN_DIMENSIONS = ("chart", "table", "layout", "text_content", "text_formatting")
-INGESTION_SCHEMA_VERSION = 1
+INGESTION_SCHEMA_VERSION = 2
 DEFAULT_BATCH_SIZE = 250
 DEFAULT_WORKFLOW = "pymupdf-source-stack-parsebench.yml"
+SOURCE_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".jfif": "image/jpeg",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 
 
 def _now_expression_payload() -> str:
@@ -66,6 +75,34 @@ def _array(value: Any) -> list[Any]:
 def _chunks(values: list[dict[str, Any]], size: int = DEFAULT_BATCH_SIZE) -> Iterator[list[dict[str, Any]]]:
     for offset in range(0, len(values), size):
         yield values[offset : offset + size]
+
+
+def _normalized_source_path(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = PurePosixPath(value.strip())
+    if path.is_absolute() or ".." in path.parts:
+        return None
+    return path.as_posix()
+
+
+def _source_media_type(path: str | None, declared: Any = None) -> str | None:
+    if path is not None:
+        inferred = SOURCE_MEDIA_TYPES.get(PurePosixPath(path).suffix.lower())
+        if inferred is not None:
+            return inferred
+    if isinstance(declared, str) and declared.strip():
+        return declared.strip().lower()
+    return None
+
+
+def _next_link(value: str | None) -> str | None:
+    if not value:
+        return None
+    for match in re.finditer(r'<([^>]+)>;\s*rel="([^"]+)"', value):
+        if match.group(2) == "next":
+            return match.group(1)
+    return None
 
 
 class JsonArtifactReader(Protocol):
@@ -389,6 +426,50 @@ class BenchmarkIndexer:
     def __init__(self, database: SupabaseRestClient, github: GithubClient) -> None:
         self.database = database
         self.github = github
+        self._dataset_asset_cache: dict[tuple[str, str], dict[str, str]] = {}
+
+    def _dataset_source_assets(self, repository: str, resolved_sha: str) -> dict[str, str]:
+        """Map legacy test ids to exact assets from the run's pinned dataset revision."""
+        cache_key = (repository, resolved_sha)
+        if cache_key in self._dataset_asset_cache:
+            return self._dataset_asset_cache[cache_key]
+
+        encoded_repository = urllib.parse.quote(repository, safe="/")
+        encoded_revision = urllib.parse.quote(resolved_sha, safe="")
+        url: str | None = (
+            f"https://huggingface.co/api/datasets/{encoded_repository}/tree/"
+            f"{encoded_revision}?recursive=true&expand=false&limit=1000"
+        )
+        candidates: dict[str, list[str]] = {}
+        headers = {"User-Agent": "parsebench-version-lab/benchmark-index"}
+        hub_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        if hub_token:
+            headers["Authorization"] = f"Bearer {hub_token}"
+
+        while url:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(request, timeout=120) as response:
+                payload = json.load(response)
+                if not isinstance(payload, list):
+                    raise ValueError(f"Expected a list from Hugging Face dataset tree: {url}")
+                for item_value in payload:
+                    item = _object(item_value)
+                    path = _normalized_source_path(item.get("path"))
+                    if item.get("type") != "file" or path is None:
+                        continue
+                    source_path = PurePosixPath(path)
+                    if len(source_path.parts) < 3 or source_path.parts[0] != "docs":
+                        continue
+                    if source_path.suffix.lower() not in SOURCE_MEDIA_TYPES:
+                        continue
+                    test_id = PurePosixPath(*source_path.parts[1:]).with_suffix("").as_posix()
+                    candidates.setdefault(test_id, []).append(path)
+                url = _next_link(response.headers.get("Link"))
+
+        # Never guess if a legacy revision contains two assets with the same test id.
+        assets = {test_id: paths[0] for test_id, paths in candidates.items() if len(paths) == 1}
+        self._dataset_asset_cache[cache_key] = assets
+        return assets
 
     def index_run(self, github_run: Mapping[str, Any], reader: JsonArtifactReader | None = None) -> int:
         run_id_value = _coerce_integer(github_run.get("id"))
@@ -398,8 +479,9 @@ class BenchmarkIndexer:
         run_metadata = _artifact_json(reader, "_github_run.json")
         pipeline_name = run_metadata.get("pipeline") or _pipeline_from_run_name(github_run)
         pipeline_metadata = _artifact_json(reader, f"{pipeline_name}/_metadata.json") if pipeline_name else {}
+        dataset = _dataset_row(run_metadata)
         dataset_id: int | None = None
-        if (dataset := _dataset_row(run_metadata)) is not None:
+        if dataset is not None:
             dataset_record = self.database.upsert_one(
                 "dataset_versions", dataset, "repository,resolved_sha"
             )
@@ -453,7 +535,7 @@ class BenchmarkIndexer:
         self._index_components(database_run_id, run_metadata)
         self._index_errors(database_run_id, inference_errors, github_failures)
         if reader is not None and dataset_id is not None and isinstance(pipeline_name, str):
-            self._index_reports(database_run_id, dataset_id, pipeline_name, reader)
+            self._index_reports(database_run_id, dataset_id, dataset, pipeline_name, reader)
         return database_run_id
 
     def _index_components(self, run_id: int, metadata: Mapping[str, Any]) -> None:
@@ -515,6 +597,7 @@ class BenchmarkIndexer:
         self,
         run_id: int,
         dataset_id: int,
+        dataset: Mapping[str, Any],
         pipeline_name: str,
         reader: JsonArtifactReader,
     ) -> None:
@@ -523,12 +606,21 @@ class BenchmarkIndexer:
             report = _object(reader.read_json(relative_path))
             if not report:
                 continue
-            self._index_report(run_id, dataset_id, pipeline_name, dimension, relative_path, report)
+            self._index_report(
+                run_id,
+                dataset_id,
+                dataset,
+                pipeline_name,
+                dimension,
+                relative_path,
+                report,
+            )
 
     def _index_report(
         self,
         run_id: int,
         dataset_id: int,
+        dataset: Mapping[str, Any],
         pipeline_name: str,
         dimension: str,
         report_path: str,
@@ -569,19 +661,31 @@ class BenchmarkIndexer:
             )
 
         example_rows = [_object(value) for value in _array(report.get("per_example_results"))]
+        legacy_assets: dict[str, str] | None = None
         case_rows: list[dict[str, Any]] = []
         for example in example_rows:
             test_id = example.get("test_id")
             if not isinstance(test_id, str):
                 continue
             inference_group = test_id.split("/", 1)[0] if "/" in test_id else None
-            pdf_path = f"docs/{test_id}.pdf" if "/" in test_id else None
+            source_path = _normalized_source_path(example.get("source_relative_path"))
+            if source_path is None:
+                repository = dataset.get("repository")
+                resolved_sha = dataset.get("resolved_sha")
+                if isinstance(repository, str) and isinstance(resolved_sha, str):
+                    if legacy_assets is None:
+                        legacy_assets = self._dataset_source_assets(repository, resolved_sha)
+                    source_path = legacy_assets.get(test_id)
+            source_media_type = _source_media_type(source_path, example.get("source_media_type"))
+            pdf_path = source_path if source_media_type == "application/pdf" else None
             case_rows.append(
                 {
                     "dataset_version_id": dataset_id,
                     "test_id": test_id,
                     "inference_group": inference_group,
                     "pdf_relative_path": pdf_path,
+                    "source_relative_path": source_path,
+                    "source_media_type": source_media_type,
                     "tags": [str(tag) for tag in _array(example.get("tags"))],
                     "ground_truth_locator": {"dimension": dimension, "test_id": test_id},
                     "metadata": {},

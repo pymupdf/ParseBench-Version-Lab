@@ -82,6 +82,8 @@ export type BenchmarkCase = {
   id: number;
   test_id: string;
   pdf_relative_path: string | null;
+  source_relative_path: string | null;
+  source_media_type: string | null;
   page_number: number | null;
   inference_group: string | null;
   tags: string[];
@@ -289,7 +291,7 @@ export function loadDocuments(
 ) {
   const params = new URLSearchParams({
     select:
-      "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,stats,tags,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,pdf_relative_path,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))",
+      "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,stats,tags,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,pdf_relative_path,source_relative_path,source_media_type,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))",
     "run_dimensions.run_id": `eq.${runId}`,
     order: "primary_score.asc.nullslast,id.asc",
     limit: String(options.limit ?? 120),
@@ -368,11 +370,22 @@ export function datasetFileUrl(
   return `https://huggingface.co/datasets/${encodePath(dataset.repository)}/resolve/${encodeURIComponent(dataset.resolved_sha)}/${encodePath(relativePath)}`;
 }
 
-export function pdfUrl(result: CaseResult) {
-  const path = result.benchmark_cases.pdf_relative_path;
+export function sourceAssetUrl(result: CaseResult) {
+  const path = result.benchmark_cases.source_relative_path;
   return path
     ? datasetFileUrl(result.benchmark_cases.dataset_versions, path)
     : null;
+}
+
+export function sourceAssetKind(result: CaseResult) {
+  const { source_media_type: mediaType, source_relative_path: path } =
+    result.benchmark_cases;
+  const suffix = path?.split(".").at(-1)?.toLowerCase();
+  if (mediaType === "application/pdf" || suffix === "pdf") return "pdf";
+  if (mediaType?.startsWith("image/") || ["png", "jpg", "jpeg", "jfif"].includes(suffix ?? "")) {
+    return "image";
+  }
+  return "unsupported";
 }
 
 export async function loadArtifact(
@@ -437,12 +450,12 @@ async function tableGroundTruthIndex(dataset: DatasetVersion) {
 
 export async function loadGroundTruth(result: CaseResult) {
   if (result.run_dimensions.dimension !== "table") return null;
-  const pdf = result.benchmark_cases.pdf_relative_path;
-  if (!pdf) return null;
+  const sourcePath = result.benchmark_cases.source_relative_path;
+  if (!sourcePath) return null;
   const index = await tableGroundTruthIndex(
     result.benchmark_cases.dataset_versions,
   );
-  return index.get(pdf) ?? null;
+  return index.get(sourcePath) ?? null;
 }
 
 export function primaryMetricForDimension(

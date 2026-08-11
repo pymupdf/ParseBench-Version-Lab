@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
@@ -23,11 +24,12 @@ import {
   loadRunBundle,
   loadRunScores,
   loadRuns,
-  pdfUrl,
   primaryMetricForDimension,
   RunBundle,
   RunDimension,
   RunScoreIndex,
+  sourceAssetKind,
+  sourceAssetUrl,
 } from "./lib/data";
 
 type View = "runs" | "overview" | "documents";
@@ -842,7 +844,10 @@ function DocumentExplorer({
   const [mobileInspecting, setMobileInspecting] = useState(false);
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
   const pageCount = Math.max(1, Math.ceil(documentTotal / 120));
-  const selectedPdf = selected ? pdfUrl(selected) : null;
+  const selectedSource = selected ? sourceAssetUrl(selected) : null;
+  const selectedSourceKind = selected ? sourceAssetKind(selected) : "unsupported";
+  const selectedSourceLabel = selectedSourceKind === "pdf" ? "PDF preview" :
+    selectedSourceKind === "image" ? "Image preview" : "Source asset";
   const hasReference = Boolean(artifact.reference?.trim());
   const showingReference = hasReference && referenceSelectionFor === selected?.id;
   const shownMarkdown = showingReference ? artifact.reference ?? "" : artifact.markdown;
@@ -959,7 +964,7 @@ function DocumentExplorer({
             </header>
 
             <div className="mobile-viewer-tabs" aria-label="Document comparison panels">
-              <button type="button" aria-pressed={mobileViewer === "source"} className={mobileViewer === "source" ? "mobile-viewer-active" : ""} onClick={() => setMobileViewer("source")}>Source PDF</button>
+              <button type="button" aria-pressed={mobileViewer === "source"} className={mobileViewer === "source" ? "mobile-viewer-active" : ""} onClick={() => setMobileViewer("source")}>Source</button>
               <button type="button" aria-pressed={mobileViewer === "output"} className={mobileViewer === "output" ? "mobile-viewer-active" : ""} onClick={() => setMobileViewer("output")}>Parsed output</button>
             </div>
 
@@ -968,19 +973,34 @@ function DocumentExplorer({
                 <div className="viewer-toolbar">
                   <div>
                     <span className="viewer-kicker">Source document</span>
-                    <strong>PDF preview</strong>
+                    <strong>{selectedSourceLabel}</strong>
                   </div>
-                  {selectedPdf && <a className="simple-link" href={selectedPdf} target="_blank" rel="noreferrer">Open PDF ↗</a>}
+                  {selectedSource && <a className="simple-link" href={selectedSource} target="_blank" rel="noreferrer">Open source ↗</a>}
                 </div>
                 <div className="pdf-stage">
-                  {selectedPdf ? (
+                  {selectedSource && selectedSourceKind === "pdf" ? (
                     <PdfPreview
-                      source={selectedPdf}
+                      source={selectedSource}
                       page={selected.benchmark_cases.page_number ?? 1}
                       title={`PDF preview for ${selected.benchmark_cases.test_id}`}
                     />
+                  ) : selectedSource && selectedSourceKind === "image" ? (
+                    <div
+                      className="image-preview"
+                      aria-label={`Image preview for ${selected.benchmark_cases.test_id}`}
+                    >
+                      <Image
+                        src={selectedSource}
+                        alt={`Source document ${selected.benchmark_cases.test_id}`}
+                        fill
+                        sizes="(max-width: 760px) 100vw, 50vw"
+                        unoptimized
+                      />
+                    </div>
+                  ) : selectedSource ? (
+                    <EmptyState title="Preview unavailable" body="Open the source asset to inspect this file type." />
                   ) : (
-                    <EmptyState title="PDF unavailable" body="This case does not include a dataset PDF locator." />
+                    <EmptyState title="Source unavailable" body="This case does not include a dataset source locator." />
                   )}
                 </div>
               </article>

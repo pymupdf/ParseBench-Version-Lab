@@ -1714,6 +1714,16 @@ code {
   max-width: 100%;
 }
 
+.image-preview {
+  min-height: 100%;
+  position: relative;
+  width: 100%;
+}
+
+.image-preview img {
+  object-fit: contain;
+}
+
 .output-toolbar {
   gap: 10px;
   padding-left: 6px;
