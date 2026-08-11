@@ -24,6 +24,7 @@ KNOWN_DIMENSIONS = ("chart", "table", "layout", "text_content", "text_formatting
 INGESTION_SCHEMA_VERSION = 3
 DEFAULT_BATCH_SIZE = 250
 DEFAULT_WORKFLOW = "pymupdf-source-stack-parsebench.yml"
+LEGACY_NON_BENCHMARK_RUN_PREFIXES = ("Publish source-stack environment",)
 SOURCE_MEDIA_TYPES = {
     ".pdf": "application/pdf",
     ".png": "image/png",
@@ -494,7 +495,13 @@ class BenchmarkIndexer:
         self._dataset_asset_cache[cache_key] = assets
         return assets
 
-    def index_run(self, github_run: Mapping[str, Any], reader: JsonArtifactReader | None = None) -> int:
+    def index_run(
+        self,
+        github_run: Mapping[str, Any],
+        reader: JsonArtifactReader | None = None,
+        *,
+        terminal_missing_artifact: bool = False,
+    ) -> int:
         run_id_value = _coerce_integer(github_run.get("id"))
         if run_id_value is None:
             raise ValueError("GitHub run payload is missing a numeric id")
@@ -535,7 +542,7 @@ class BenchmarkIndexer:
         summary = _object(pipeline_metadata.get("summary"))
         inference_errors = _array(summary.get("errors"))
         github_failures = self.github.failed_steps(run_id_value) if github_run.get("conclusion") != "success" else []
-        artifact_state = "missing"
+        artifact_state = "unavailable" if terminal_missing_artifact and reader is None else "missing"
         if reader is not None:
             artifact_state = "complete" if github_run.get("conclusion") == "success" else "partial"
         requested = _object(run_metadata.get("requested"))
@@ -902,6 +909,15 @@ def _run_key(run: Mapping[str, Any]) -> tuple[int, int] | None:
     return run_id, _coerce_integer(run.get("run_attempt")) or 1
 
 
+def _missing_artifact_is_terminal(run: Mapping[str, Any]) -> bool:
+    """Return whether an artifact-less completed run can never become a benchmark result."""
+    conclusion = str(run.get("conclusion") or "")
+    if conclusion and conclusion != "success":
+        return True
+    title = str(run.get("display_title") or run.get("name") or "")
+    return title.startswith(LEGACY_NON_BENCHMARK_RUN_PREFIXES)
+
+
 @dataclass(frozen=True)
 class IngestionJob:
     database: SupabaseRestClient
@@ -925,12 +941,16 @@ class IngestionJob:
     def finish(self, *, imported: bool, error: str | None = None) -> None:
         self._record("complete" if imported else "partial", imported=imported, error=error)
 
+    def exclude(self, reason: str) -> None:
+        self._record("complete", note={"disposition": "excluded", "reason": reason})
+
     def _record(
         self,
         status: str,
         *,
         imported: bool = False,
         error: str | None = None,
+        note: Mapping[str, Any] | None = None,
     ) -> None:
         completed_at = _now_expression_payload() if status != "running" else None
         self.database.upsert_one(
@@ -942,7 +962,7 @@ class IngestionJob:
                 "runs_seen": 1,
                 "runs_imported": int(imported),
                 "runs_failed": int(error is not None),
-                "error_summary": [] if error is None else [{"error": error}],
+                "error_summary": ([dict(note)] if note is not None else ([] if error is None else [{"error": error}])),
                 "started_at": self.started_at,
                 "completed_at": completed_at,
                 "updated_at": completed_at or self.started_at,
@@ -1150,6 +1170,7 @@ def reconcile_repository(
     candidates = [(run, *key) for key, run in runs_by_key.items() if state.needs_indexing(key)]
 
     imported = 0
+    excluded = 0
     storage: GcsClient | None = None
     indexer = BenchmarkIndexer(database, github)
     for run, run_id, attempt in reversed(candidates):
@@ -1170,8 +1191,20 @@ def reconcile_repository(
                     reader = gcs_reader_for_run(storage, bucket, run_id, attempt)
                     source = "gcs"
                 missing_error = artifact_error or "No GitHub artifact or GCS manifest was available"
-                indexer.index_run(run, reader)
+                terminal_missing = reader is None and _missing_artifact_is_terminal(run)
+                if terminal_missing:
+                    indexer.index_run(run, reader, terminal_missing_artifact=True)
+                else:
+                    indexer.index_run(run, reader)
             if reader is None:
+                if terminal_missing:
+                    ingestion.exclude(missing_error)
+                    excluded += 1
+                    print(
+                        f"Excluded GitHub run {run_id} attempt {attempt}: "
+                        f"the completed run has no recoverable benchmark artifact"
+                    )
+                    continue
                 ingestion.finish(imported=False, error=missing_error)
                 failures.append({"github_run_id": run_id, "attempt": attempt, "error": missing_error})
                 continue
@@ -1208,6 +1241,7 @@ def reconcile_repository(
         "runs_examined": len(runs_by_key),
         "runs_selected": len(candidates),
         "runs_imported": imported,
+        "runs_excluded": excluded,
         "runs_failed": len(failures),
         "failures": failures,
     }

@@ -27,6 +27,7 @@ def main() -> int:
             f"- Runs examined: **{result['runs_examined']}**",
             f"- Runs selected: **{result['runs_selected']}**",
             f"- Runs imported: **{result['runs_imported']}**",
+            f"- Runs excluded (no recoverable benchmark artifact): **{result['runs_excluded']}**",
             f"- Runs failed: **{result['runs_failed']}**",
         ]
     )

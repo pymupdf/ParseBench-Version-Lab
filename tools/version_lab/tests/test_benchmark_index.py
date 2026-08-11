@@ -228,6 +228,90 @@ def test_reconciliation_falls_back_to_gcs_when_the_artifact_expired(
     assert reconciliation["checkpoint"] == {"github_run_id": 123, "github_run_attempt": 2}
 
 
+@pytest.mark.parametrize(
+    ("conclusion", "display_title", "expected_excluded"),
+    [
+        ("cancelled", "All latest commits · Quick test", 1),
+        ("success", "Publish source-stack environment · Quick test", 1),
+        ("success", "Pymupdf4llm Markdown · Quick test", 0),
+    ],
+)
+def test_reconciliation_excludes_only_irrecoverable_artifactless_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    conclusion: str,
+    display_title: str,
+    expected_excluded: int,
+) -> None:
+    database = FakeDatabase()
+
+    def select(table: str, query: dict[str, str]) -> list[dict[str, Any]]:
+        del query
+        assert table in {"benchmark_runs", "ingestion_jobs"}
+        return []
+
+    database.select = select  # type: ignore[attr-defined]
+
+    class ReconcileGithub:
+        repository = "owner/repository"
+
+        def runs(self, workflow: str):  # noqa: ANN201
+            assert workflow == "benchmark.yml"
+            yield {
+                "id": 123,
+                "run_attempt": 1,
+                "path": ".github/workflows/benchmark.yml",
+                "status": "completed",
+                "conclusion": conclusion,
+                "display_title": display_title,
+            }
+
+        def run_attempt(self, run_id: int, attempt: int):  # noqa: ANN201
+            raise AssertionError(f"Unexpected attempt lookup for {run_id}/{attempt}")
+
+    terminal_flags: list[bool] = []
+
+    class ReconcileIndexer:
+        def __init__(self, selected_database: object, github: object) -> None:
+            assert selected_database is database
+            assert isinstance(github, ReconcileGithub)
+
+        def index_run(
+            self,
+            run: dict[str, Any],
+            reader: object,
+            *,
+            terminal_missing_artifact: bool = False,
+        ) -> int:
+            assert run["id"] == 123
+            assert reader is None
+            terminal_flags.append(terminal_missing_artifact)
+            return 1
+
+    monkeypatch.setattr(benchmark_index_module, "SupabaseRestClient", lambda *_args, **_kwargs: database)
+    monkeypatch.setattr(benchmark_index_module, "GithubClient", lambda *_args, **_kwargs: ReconcileGithub())
+    monkeypatch.setattr(benchmark_index_module, "BenchmarkIndexer", ReconcileIndexer)
+    monkeypatch.setattr(benchmark_index_module, "GcsClient", lambda _token: object())
+    monkeypatch.setattr(benchmark_index_module, "download_github_artifact", lambda **_kwargs: (None, "missing"))
+    monkeypatch.setattr(benchmark_index_module, "gcs_reader_for_run", lambda *_args, **_kwargs: None)
+
+    result = reconcile_repository(
+        github_repository="owner/repository",
+        bucket="benchmark-results",
+        workflow="benchmark.yml",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="secret",
+        github_token="github-token",
+        gcs_access_token="gcs-token",
+        lookback=10,
+    )
+
+    assert terminal_flags == [bool(expected_excluded)]
+    assert result["runs_excluded"] == expected_excluded
+    assert result["runs_failed"] == 1 - expected_excluded
+    run_jobs = [row for row in database.rows["ingestion_jobs"] if row["source"] == "github_run"]
+    assert run_jobs[-1]["status"] == ("complete" if expected_excluded else "partial")
+
+
 def test_reconciliation_scans_every_run_newer_than_its_cursor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
