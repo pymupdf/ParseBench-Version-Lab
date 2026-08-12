@@ -124,20 +124,29 @@ code {
   padding: 4px;
 }
 
-.view-nav button {
+.view-nav a,
+.view-nav span {
+  align-items: center;
   background: transparent;
   border: 0;
   border-radius: 6px;
   color: #b6cec5;
-  cursor: pointer;
+  display: inline-flex;
   font-size: 12px;
   font-weight: 650;
+  justify-content: center;
   min-height: 34px;
   padding: 0 14px;
+  text-decoration: none;
 }
 
-.view-nav button:hover:not(:disabled) {
+.view-nav a:hover {
   color: white;
+}
+
+.view-nav span[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .view-nav .view-nav-active {
@@ -2064,7 +2073,8 @@ code {
     width: 100%;
   }
 
-  .view-nav button {
+  .view-nav a,
+  .view-nav span {
     flex: 1;
     padding: 0 8px;
   }

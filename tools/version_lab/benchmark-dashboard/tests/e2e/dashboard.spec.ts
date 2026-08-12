@@ -16,7 +16,7 @@ test("finds workflows by commit and opens a selected run", async ({ page }) => {
   await expect(page.locator(".workflow-dimension-scores").first().locator(":scope > span")).toHaveCount(5);
 
   await page.locator(".workflow-row").first().click();
-  await expect(page).toHaveURL(/view=overview/);
+  await expect(page).toHaveURL(new RegExp(`/workflows/${RUN_ID}$`));
   await expect(page.getByRole("heading", { name: /Pymupdf4llm/i }).first()).toBeVisible();
 });
 
@@ -27,14 +27,14 @@ test("reopening the selected workflow preserves its evaluation data", async ({ p
   const evaluationCount = await page.locator(".dimension-grid > *").count();
   expect(evaluationCount).toBeGreaterThan(0);
 
-  await page.getByRole("button", { name: "Workflows", exact: true }).click();
-  const selectedWorkflow = page.locator(".workflow-row-selected");
-  await expect(selectedWorkflow.locator(".workflow-run-id")).toHaveCount(0);
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
+  await expect(page).toHaveURL(/\/workflows$/);
   await page.getByRole("button", { name: "Show run IDs" }).click();
-  await expect(selectedWorkflow).toContainText(`#${RUN_ID}`);
-  await selectedWorkflow.click();
+  const workflow = page.locator(".workflow-row").filter({ hasText: `#${RUN_ID}` });
+  await expect(workflow).toHaveCount(1);
+  await workflow.click();
 
-  await expect(page).toHaveURL(/view=overview/);
+  await expect(page).toHaveURL(new RegExp(`/workflows/${RUN_ID}$`));
   await expect(page.locator(".dimension-grid > *")).toHaveCount(evaluationCount);
   await expect(page.getByText("No evaluation reports")).toHaveCount(0);
 });
@@ -47,7 +47,7 @@ test("opens the workflow behind a leading benchmark score", async ({ page }) => 
   await expect(aggregateLeader).toContainText(/Run #\d+/);
   await aggregateLeader.click();
 
-  await expect(page).toHaveURL(/view=overview/);
+  await expect(page).toHaveURL(/\/workflows\/\d+$/);
   await expect(page.locator(".run-meta")).toContainText("Full · All");
   await expect(page.locator(".dimension-grid")).toBeVisible();
 });
