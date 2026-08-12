@@ -14,7 +14,7 @@ import type {
   DiagnosticOutcome,
 } from "./types";
 
-export type DiagnosticInspectorProps = {
+type DiagnosticInspectorProps = {
   diagnostic: DiagnosticArtifact;
   actualMarkdown: string;
   selectedEvidenceId?: string | null;
@@ -1090,5 +1090,3 @@ export function DiagnosticInspector(props: DiagnosticInspectorProps) {
     </div>
   );
 }
-
-export default DiagnosticInspector;

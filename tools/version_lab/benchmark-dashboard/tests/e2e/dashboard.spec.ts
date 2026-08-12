@@ -10,6 +10,13 @@ test("finds workflows by commit and opens a selected run", async ({ page }) => {
   await expect(
     page.getByText("Quick runs are excluded. Full-dataset runs compete only in the dimensions they completely evaluated."),
   ).toBeVisible();
+  await expect(page.getByLabel("Result").locator("option")).toHaveText([
+    "All results",
+    "Cancelled",
+    "Failure",
+    "Success",
+  ]);
+  await page.getByLabel("Result").selectOption("success");
   await page.getByPlaceholder("Search ID, commit, branch, pipeline, name…").fill("754c3ca2");
   await expect(page.locator(".workflow-row").first()).toContainText("754c3ca2");
   await expect(page.locator(".workflow-aggregate").first()).toContainText("%");
@@ -104,6 +111,7 @@ test("reuses the workflow catalog and selected run across navigation", async ({ 
   });
 
   await page.goto("/workflows");
+  await page.getByLabel("Result").selectOption("success");
   const firstWorkflow = page.locator(".workflow-row").first();
   await expect(firstWorkflow).toBeVisible();
   await expect(firstWorkflow.locator(".workflow-aggregate strong")).not.toHaveText("…");

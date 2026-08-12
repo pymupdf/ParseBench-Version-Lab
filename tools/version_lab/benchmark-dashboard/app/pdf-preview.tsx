@@ -5,8 +5,6 @@ import { Document, Page, pdfjs } from "react-pdf";
 
 import { EvidenceOverlay, type EvidenceOverlayBox } from "./evidence-overlay";
 
-export type { EvidenceOverlayBox } from "./evidence-overlay";
-
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,

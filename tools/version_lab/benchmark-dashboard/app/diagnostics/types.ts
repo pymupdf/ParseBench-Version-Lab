@@ -1,4 +1,4 @@
-export type DiagnosticDimension =
+type DiagnosticDimension =
   | "table"
   | "chart"
   | "layout"
@@ -6,11 +6,11 @@ export type DiagnosticDimension =
   | "text_formatting"
   | (string & {});
 
-export type JsonPrimitive = string | number | boolean | null;
-export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
-export type JsonObject = { [key: string]: JsonValue };
+type JsonPrimitive = string | number | boolean | null;
+type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+type JsonObject = { [key: string]: JsonValue };
 
-export type DiagnosticSource = {
+type DiagnosticSource = {
   asset_url?: string | null;
   render_url?: string | null;
   media_type?: string | null;
@@ -30,7 +30,7 @@ export type DiagnosticMetricComponent = {
   contribution?: number;
 };
 
-export type DiagnosticPrimaryMetric = {
+type DiagnosticPrimaryMetric = {
   name: string;
   value: number | null;
   formula?: JsonValue;

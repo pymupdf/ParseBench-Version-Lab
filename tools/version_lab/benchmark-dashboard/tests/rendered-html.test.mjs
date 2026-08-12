@@ -14,7 +14,8 @@ test("defines the ParseBench application shell", async () => {
   assert.match(dashboard, /Workflow run ID/);
   assert.match(dashboard, /Search ID, commit, branch, pipeline, name/);
   assert.match(dashboard, /Highest scores by benchmark dimension/);
-  assert.match(dashboard, /runs\.filter\(\(run\) => run\.leaderboard_eligible\)/);
+  assert.match(dashboard, /completeRuns\.filter\(\(run\) => run\.leaderboard_eligible\)/);
+  assert.doesNotMatch(dashboard, /const filtered = completeRuns\.filter/);
   assert.match(dashboard, /Show run IDs/);
   assert.match(dashboard, /workflow-dimension-scores/);
   assert.match(page, /redirect\("\/workflows"\)/);
@@ -30,12 +31,13 @@ test("keeps the standard Next.js dashboard client-only and publishable-key based
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(dashboard, /^"use client";/);
-  assert.match(dashboard, /hasReference \? \(/);
+  assert.match(dashboard, /\.join\("\\n\\n"\) \|\| artifact\.reference \|\| ""/);
   assert.doesNotMatch(dashboard, /No reference markdown exists/);
   assert.match(dashboard, /dynamic\(\(\) => import\("\.\/pdf-preview"\)/);
   assert.doesNotMatch(`${dashboard}\n${pdfPreview}`, /URL\.createObjectURL|<iframe/);
   assert.match(pdfPreview, /rangeChunkSize: 65_536/);
   assert.match(data, /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/);
+  assert.doesNotMatch(data, /pipeline_name: "not\.is\.null"/);
   assert.doesNotMatch(data, /service_role|SUPABASE_SECRET_KEY/);
   assert.match(packageJson, /"next": "16\.3\.0"/);
   assert.doesNotMatch(packageJson, /vinext|wrangler|cloudflare/i);

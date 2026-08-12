@@ -3,6 +3,7 @@ import test from "node:test";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const dashboardOrigin = "https://parsebench-dashboard.vercel.app";
 
 async function query(table, params) {
   const response = await fetch(
@@ -78,7 +79,7 @@ test(
       `https://huggingface.co/datasets/${dataset.repository}/resolve/${dataset.resolved_sha}/${datasetPath}`,
       {
         headers: {
-          Origin: "https://parsebench-run-observatory.vercel.app",
+          Origin: dashboardOrigin,
           Range: "bytes=0-65535",
         },
       },
@@ -86,7 +87,11 @@ test(
     assert.equal(pdfResponse.status, 206);
     assert.match(pdfResponse.headers.get("content-type") ?? "", /application\/pdf/);
     assert.match(pdfResponse.headers.get("content-range") ?? "", /^bytes 0-65535\//);
-    assert.equal(pdfResponse.headers.get("access-control-allow-origin"), "*");
+    assert.ok(
+      ["*", dashboardOrigin].includes(
+        pdfResponse.headers.get("access-control-allow-origin"),
+      ),
+    );
     await pdfResponse.body?.cancel();
   },
 );

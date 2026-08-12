@@ -181,17 +181,26 @@ async function apiFetch<T>(
   return (await response.json()) as T;
 }
 
-export function loadRuns(signal?: AbortSignal) {
-  return apiFetch<BenchmarkRun[]>(
-    "benchmark_runs",
-    new URLSearchParams({
-      select: RUN_SELECT,
-      pipeline_name: "not.is.null",
-      order: "source_created_at.desc.nullslast,id.desc",
-      limit: "500",
-    }),
-    signal,
-  );
+const RUN_CATALOG_PAGE_SIZE = 500;
+
+export async function loadRuns(signal?: AbortSignal) {
+  const runs: BenchmarkRun[] = [];
+
+  for (let offset = 0; ;) {
+    const page = await apiFetch<BenchmarkRun[]>(
+      "benchmark_runs",
+      new URLSearchParams({
+        select: RUN_SELECT,
+        order: "source_created_at.desc.nullslast,id.desc",
+        limit: String(RUN_CATALOG_PAGE_SIZE),
+        offset: String(offset),
+      }),
+      signal,
+    );
+    if (!page.length) return runs;
+    runs.push(...page);
+    offset += page.length;
+  }
 }
 
 export async function loadRun(githubRunId: number, signal?: AbortSignal) {
@@ -200,7 +209,6 @@ export async function loadRun(githubRunId: number, signal?: AbortSignal) {
     new URLSearchParams({
       select: RUN_SELECT,
       github_run_id: `eq.${githubRunId}`,
-      pipeline_name: "not.is.null",
       order: "github_run_attempt.desc,id.desc",
       limit: "1",
     }),

@@ -783,6 +783,7 @@ function WorkflowBrowser({
   const [scope, setScope] = useState("all");
   const [group, setGroup] = useState(ANY_GROUP);
   const [period, setPeriod] = useState("all");
+  const [periodReferenceTime, setPeriodReferenceTime] = useState<number | null>(null);
   const [sort, setSort] = useState<RunSort>("newest");
   const [page, setPage] = useState(0);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -795,11 +796,11 @@ function WorkflowBrowser({
     () => runs.filter((run) => run.artifact_state === "complete"),
     [runs],
   );
-  const pipelines = useMemo(() => uniqueValues(completeRuns, "pipeline_name").sort(), [completeRuns]);
-  const branches = useMemo(() => uniqueValues(completeRuns, "head_branch").sort(), [completeRuns]);
-  const conclusions = useMemo(() => uniqueValues(completeRuns, "conclusion").sort(), [completeRuns]);
-  const scopes = useMemo(() => uniqueValues(completeRuns, "effective_scope").sort(), [completeRuns]);
-  const groups = useMemo(() => uniqueValues(completeRuns, "effective_group").sort(), [completeRuns]);
+  const pipelines = useMemo(() => uniqueValues(runs, "pipeline_name").sort(), [runs]);
+  const branches = useMemo(() => uniqueValues(runs, "head_branch").sort(), [runs]);
+  const conclusions = useMemo(() => uniqueValues(runs, "conclusion").sort(), [runs]);
+  const scopes = useMemo(() => uniqueValues(runs, "effective_scope").sort(), [runs]);
+  const groups = useMemo(() => uniqueValues(runs, "effective_group").sort(), [runs]);
 
   const scoreLeaders = useMemo(() => {
     const comparableRuns = completeRuns.filter((run) => run.leaderboard_eligible);
@@ -833,16 +834,12 @@ function WorkflowBrowser({
 
   const filteredRuns = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    const newestIndexedTime = completeRuns.reduce((latest, run) => {
-      const created = run.source_created_at ? new Date(run.source_created_at).getTime() : 0;
-      return Math.max(latest, created);
-    }, 0);
     const periodMs: Record<string, number> = {
       "24h": 24 * 60 * 60 * 1_000,
       "7d": 7 * 24 * 60 * 60 * 1_000,
       "30d": 30 * 24 * 60 * 60 * 1_000,
     };
-    const filtered = completeRuns.filter((run) => {
+    const filtered = runs.filter((run) => {
       const searchable = [
         run.github_run_id,
         run.run_name,
@@ -867,7 +864,11 @@ function WorkflowBrowser({
       if (group !== ANY_GROUP && run.effective_group !== group) return false;
       if (period !== "all") {
         const created = run.source_created_at ? new Date(run.source_created_at).getTime() : 0;
-        if (!created || newestIndexedTime - created > periodMs[period]) return false;
+        if (
+          !created ||
+          periodReferenceTime == null ||
+          periodReferenceTime - created > periodMs[period]
+        ) return false;
       }
       return true;
     });
@@ -884,7 +885,7 @@ function WorkflowBrowser({
       }
       return new Date(b.source_created_at ?? 0).getTime() - new Date(a.source_created_at ?? 0).getTime();
     });
-  }, [branch, completeRuns, conclusion, group, period, pipeline, query, scope, sort]);
+  }, [branch, conclusion, group, period, periodReferenceTime, pipeline, query, runs, scope, sort]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRuns.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -902,6 +903,7 @@ function WorkflowBrowser({
     setScope("all");
     setGroup(ANY_GROUP);
     setPeriod("all");
+    setPeriodReferenceTime(null);
     setPage(0);
   }
 
@@ -1013,12 +1015,12 @@ function WorkflowBrowser({
             <label><span>Result</span><select value={conclusion} onChange={(event) => { setConclusion(event.target.value); setPage(0); }}><option value="all">All results</option>{conclusions.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
             <label><span>Scope</span><select value={scope} onChange={(event) => { setScope(event.target.value); setPage(0); }}><option value="all">Any scope</option>{scopes.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
             <label><span>Group</span><select value={group} onChange={(event) => { setGroup(event.target.value); setPage(0); }}><option value={ANY_GROUP}>Any group</option>{groups.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
-            <label><span>Created</span><select value={period} onChange={(event) => { setPeriod(event.target.value); setPage(0); }}><option value="all">Any time</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
+            <label><span>Created</span><select value={period} onChange={(event) => { const value = event.target.value; setPeriod(value); setPeriodReferenceTime(value === "all" ? null : Date.now()); setPage(0); }}><option value="all">Any time</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
           </div>
         </div>
 
         <div className="catalog-results-bar">
-          <p><strong>{filteredRuns.length}</strong> matching {filteredRuns.length === 1 ? "workflow" : "workflows"}</p>
+          <p><strong>{filteredRuns.length}</strong> matching {filteredRuns.length === 1 ? "workflow run" : "workflow runs"}</p>
           <div className="catalog-results-actions">
             <button type="button" className="id-toggle" aria-pressed={showIds} onClick={() => setShowIds((current) => !current)}>
               {showIds ? "Hide run IDs" : "Show run IDs"}
@@ -1054,7 +1056,11 @@ function WorkflowBrowser({
                   </span>
                   <span className="workflow-aggregate">
                     <strong className={`score-${scoreTone(runScores?.aggregate)}`}>{scoresLoading ? "…" : scorePercent(runScores?.aggregate)}</strong>
-                    <small>{humanize(run.conclusion ?? run.status)} · {humanize(run.coverage_status)} coverage</small>
+                    <small>
+                      {humanize(run.conclusion ?? run.status)} · {run.artifact_state === "complete"
+                        ? `${humanize(run.coverage_status)} coverage`
+                        : `${humanize(run.artifact_state)} artifacts`}
+                    </small>
                   </span>
                   <span className="workflow-dimension-scores" aria-label="Dimension scores">
                     {DIMENSION_ORDER.map((dimension) => (
@@ -1136,7 +1142,7 @@ function Overview({
     0,
   );
   const failed = summaryNumber(run, "failed") ?? failedFromDimensions;
-  const total = summaryNumber(run, "total") ?? countDocuments(bundle);
+  const total = summaryNumber(run, "total") ?? (bundle.dimensions.length ? countDocuments(bundle) : null);
   const successRate = summaryNumber(run, "success_rate");
   const latency = summaryNumber(run, "avg_latency_ms");
   const selectionMismatch =
@@ -1180,8 +1186,8 @@ function Overview({
           </div>
         ) : (
           <EmptyState
-            title="No evaluation reports"
-            body="This run has workflow metadata, but no dimension reports were indexed."
+            title="No completed benchmark result"
+            body={`This ${humanize(run.conclusion ?? run.status).toLowerCase()} workflow attempt is indexed, but it did not produce dimension reports.`}
           />
         )}
       </section>
@@ -1203,7 +1209,7 @@ function Overview({
           <span>Operational metadata and configuration</span>
         </div>
         <div className="run-facts">
-          <div><span>Documents</span><strong>{total.toLocaleString()}</strong></div>
+          <div><span>Documents</span><strong>{total == null ? "—" : total.toLocaleString()}</strong></div>
           <div><span>Average latency</span><strong>{formatLatency(latency)}</strong></div>
           <div><span>Pipeline</span><strong>{humanize(run.pipeline_name)}</strong></div>
           <div><span>Evaluation group</span><strong>{humanize(run.effective_group)}</strong></div>
@@ -1260,23 +1266,29 @@ function Overview({
               ))}
             </div>
           ) : (
-            <div className="clean-run">No indexed errors for this run</div>
+            <div className={run.artifact_state === "complete" ? "clean-run" : "incomplete-run-diagnostic"}>
+              {run.artifact_state === "complete"
+                ? "No indexed errors for this run"
+                : "No structured errors were retained for this incomplete run; open GitHub to inspect its logs."}
+            </div>
           )}
         </section>
       </div>
 
-      <TriageGrid
-        bundle={bundle}
-        documents={documents}
-        total={documentTotal}
-        loading={documentsLoading || loading}
-        filters={filters}
-        updateFilters={updateFilters}
-        resetFilters={resetFilters}
-        onSelect={inspectDocument}
-        embedded
-        fullPageHref={fullPageHref}
-      />
+      {bundle.dimensions.length ? (
+        <TriageGrid
+          bundle={bundle}
+          documents={documents}
+          total={documentTotal}
+          loading={documentsLoading || loading}
+          filters={filters}
+          updateFilters={updateFilters}
+          resetFilters={resetFilters}
+          onSelect={inspectDocument}
+          embedded
+          fullPageHref={fullPageHref}
+        />
+      ) : null}
     </main>
   );
 }
@@ -2116,7 +2128,7 @@ export default function DashboardClient({
   }, [selectedRunId]);
 
   useEffect(() => {
-    if (selectedRunId == null) return;
+    if (selectedRunId == null || selectedRun?.artifact_state !== "complete") return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setDocumentsLoading(true);
@@ -2160,6 +2172,7 @@ export default function DashboardClient({
     filters.page,
     filters.search,
     filters.sort,
+    selectedRun?.artifact_state,
     selectedRunId,
   ]);
 
