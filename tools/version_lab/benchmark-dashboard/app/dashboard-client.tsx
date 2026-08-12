@@ -4,7 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -131,6 +131,124 @@ function formatShortDate(value: string | null) {
 
 function shortSha(value: string | null | undefined) {
   return value ? value.slice(0, 8) : "unknown";
+}
+
+function scopeLabel(value: string | null | undefined) {
+  if (value === "full") return "Full dataset";
+  if (value === "test") return "Quick test";
+  return humanize(value);
+}
+
+type GitHubCommitReference = {
+  apiUrl: string;
+  webUrl: string;
+};
+
+const commitMessageCache = new Map<string, Promise<string>>();
+
+function githubCommitReference(
+  repository: string | null,
+  sha: string | null,
+): GitHubCommitReference | null {
+  const normalizedRepository = repository
+    ?.trim()
+    .replace(/^https:\/\/github\.com\//, "")
+    .replace(/\.git$/, "");
+  if (
+    !normalizedRepository ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalizedRepository) ||
+    !sha ||
+    !/^[a-f0-9]{7,40}$/i.test(sha)
+  ) {
+    return null;
+  }
+  const [owner, name] = normalizedRepository.split("/");
+  return {
+    apiUrl: `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits/${encodeURIComponent(sha)}`,
+    webUrl: `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commit/${encodeURIComponent(sha)}`,
+  };
+}
+
+function loadGitHubCommitMessage(reference: GitHubCommitReference) {
+  const cached = commitMessageCache.get(reference.apiUrl);
+  if (cached) return cached;
+  const request = fetch(reference.apiUrl, {
+    headers: { Accept: "application/vnd.github+json" },
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`GitHub returned ${response.status}`);
+      }
+      const payload = (await response.json()) as {
+        commit?: { message?: string };
+      };
+      const message = payload.commit?.message?.trim();
+      if (!message) throw new Error("GitHub did not return a commit message");
+      return message;
+    })
+    .catch((error) => {
+      commitMessageCache.delete(reference.apiUrl);
+      throw error;
+    });
+  commitMessageCache.set(reference.apiUrl, request);
+  return request;
+}
+
+function CommitLink({
+  repository,
+  sha,
+}: {
+  repository: string | null;
+  sha: string | null;
+}) {
+  const reference = githubCommitReference(repository, sha);
+  const [message, setMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const tooltipId = useId();
+
+  if (!reference) return <code>{shortSha(sha)}</code>;
+
+  function requestMessage() {
+    if (message || loading || unavailable) return;
+    setLoading(true);
+    setUnavailable(false);
+    loadGitHubCommitMessage(reference!)
+      .then(setMessage)
+      .catch(() => setUnavailable(true))
+      .finally(() => setLoading(false));
+  }
+
+  const tooltip = message ??
+    (unavailable ? "Commit message unavailable from GitHub" : "Loading commit message…");
+
+  return (
+    <span
+      className="commit-link-wrap"
+      onMouseEnter={requestMessage}
+      onFocus={requestMessage}
+    >
+      <a
+        className="commit-link"
+        href={reference.webUrl}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open commit ${shortSha(sha)} in ${repository} on GitHub`}
+        aria-describedby={tooltipId}
+      >
+        <code>{shortSha(sha)}</code>
+        <span className="commit-link-icon" aria-hidden="true">↗</span>
+      </a>
+      <span
+        className="commit-tooltip"
+        id={tooltipId}
+        role="tooltip"
+        aria-live="polite"
+      >
+        {tooltip}
+      </span>
+    </span>
+  );
 }
 
 function summaryNumber(run: BenchmarkRun, key: string) {
@@ -661,64 +779,30 @@ function Overview({
 
   return (
     <main className="content-shell overview-shell">
-      <section className="headline-grid" aria-label="Run headline numbers">
-        <article className="headline-card headline-primary">
-          <div className="headline-label">Composite view</div>
-          <strong>{scorePercent(overall)}</strong>
-          <p>Mean of available headline dimension scores</p>
-        </article>
-        <article className="headline-card">
-          <div className="headline-label">Documents</div>
-          <strong>{total.toLocaleString()}</strong>
-          <p>Benchmark documents processed in this workflow</p>
-        </article>
-        <article className="headline-card">
-          <div className="headline-label">Success rate</div>
-          <strong>{successRate == null ? (failed ? "—" : "100%") : `${Math.round(successRate)}%`}</strong>
-          <p>{failed.toLocaleString()} failed {failed === 1 ? "case" : "cases"} recorded</p>
-        </article>
-        <article className="headline-card">
-          <div className="headline-label">Average latency</div>
-          <strong>{formatLatency(latency)}</strong>
-          <p>Mean parser time per processed document</p>
-        </article>
-      </section>
-
-      <section className="run-facts" aria-label="Selected run details">
-        <div><span>Pipeline</span><strong>{humanize(run.pipeline_name)}</strong></div>
-        <div><span>Dataset-derived scope</span><strong>{humanize(run.effective_scope)}</strong></div>
-        <div><span>Observed evaluation group</span><strong>{humanize(run.effective_group)}</strong></div>
-        <div><span>Coverage</span><strong>{humanize(run.coverage_status)}</strong></div>
-        <div><span>Trigger</span><strong>{humanize(run.event)}</strong></div>
-        <div><span>Attempt</span><strong>#{run.github_run_attempt}</strong></div>
-        {Object.entries(run.pipeline_config ?? {}).slice(0, 4).map(([key, value]) => (
-          <div key={key}><span>{humanize(key)}</span><strong>{String(value)}</strong></div>
-        ))}
-      </section>
-
-      {selectionMismatch && (
-        <section className="execution-notice" aria-label="Requested and observed benchmark configuration differ">
-          <strong>GitHub selection differed from the executed benchmark.</strong>
-          <p>
-            Requested {humanize(run.requested_scope)} · {humanize(run.requested_group)};
-            artifacts show {humanize(run.effective_scope)} · {humanize(run.effective_group)}.
-            Scores and leaderboard eligibility use the artifact-derived values.
-          </p>
-        </section>
-      )}
-
-      <section className="section-block">
-        <div className="section-heading">
+      <section className="section-block benchmark-summary" aria-labelledby="benchmark-result-heading">
+        <div className="section-heading benchmark-summary-heading">
           <div>
-            <span className="eyebrow">Benchmark profile</span>
-            <h2>Scores by evaluation dimension</h2>
+            <span className="eyebrow">Benchmark result</span>
+            <h2 id="benchmark-result-heading">Score profile</h2>
           </div>
-          <span className="section-hint">Select a score to inspect its lowest documents</span>
+          <span className="section-hint">Select a dimension to inspect its lowest documents</span>
         </div>
+
         {loading ? (
           <div className="loading-panel">Loading score profile…</div>
         ) : bundle.dimensions.length ? (
-          <div className="dimension-grid">
+          <div className="score-profile-grid">
+            <article className="dimension-card composite-score-card">
+              <p>Composite</p>
+              <div className="dimension-score-row">
+                <strong>{scorePercent(overall)}</strong>
+              </div>
+              <ScoreBar score={overall} />
+              <span className="composite-meta">
+                <span>{scopeLabel(run.effective_scope)}</span>
+                <span>{successRate == null ? (failed ? "—" : "100%") : `${Math.round(successRate)}%`} success</span>
+              </span>
+            </article>
             {bundle.dimensions.map((dimension) => (
               <DimensionCard
                 key={dimension.id}
@@ -736,8 +820,86 @@ function Overview({
         )}
       </section>
 
-      <div className="overview-columns">
-        <section className="section-block low-score-section">
+      {selectionMismatch && (
+        <section className="execution-notice" aria-label="Requested and observed benchmark configuration differ">
+          <strong>GitHub selection differed from the executed benchmark.</strong>
+          <p>
+            Requested {humanize(run.requested_scope)} · {humanize(run.requested_group)};
+            artifacts show {humanize(run.effective_scope)} · {humanize(run.effective_group)}.
+            Scores and leaderboard eligibility use the artifact-derived values.
+          </p>
+        </section>
+      )}
+
+      <section className="run-details" aria-labelledby="run-details-heading">
+        <div className="run-details-heading">
+          <span className="eyebrow" id="run-details-heading">Supporting run details</span>
+          <span>Operational metadata and configuration</span>
+        </div>
+        <div className="run-facts">
+          <div><span>Documents</span><strong>{total.toLocaleString()}</strong></div>
+          <div><span>Average latency</span><strong>{formatLatency(latency)}</strong></div>
+          <div><span>Pipeline</span><strong>{humanize(run.pipeline_name)}</strong></div>
+          <div><span>Evaluation group</span><strong>{humanize(run.effective_group)}</strong></div>
+          <div><span>Coverage</span><strong>{humanize(run.coverage_status)}</strong></div>
+          <div><span>Trigger</span><strong>{humanize(run.event)}</strong></div>
+          <div><span>Attempt</span><strong>#{run.github_run_attempt}</strong></div>
+          {Object.entries(run.pipeline_config ?? {}).slice(0, 4).map(([key, value]) => (
+            <div key={key}><span>{humanize(key)}</span><strong>{String(value)}</strong></div>
+          ))}
+        </div>
+      </section>
+
+      <div className="overview-support-grid">
+        <section className="section-block compact-block provenance-block">
+          <div className="section-heading compact-heading">
+            <div>
+              <span className="eyebrow">Provenance</span>
+              <h2>Source stack</h2>
+            </div>
+            <span className="section-hint commit-help">
+              Hover for the message · click to open the commit
+            </span>
+          </div>
+          <div className="component-list">
+            {bundle.components.length ? bundle.components.map((component) => (
+              <div className="component-row" key={component.id}>
+                <div>
+                  <strong>{humanize(component.component)}</strong>
+                  <span>{component.installed_version ?? component.requested_ref ?? "Unversioned"}</span>
+                </div>
+                <CommitLink
+                  repository={component.repository}
+                  sha={component.resolved_sha}
+                />
+              </div>
+            )) : <p className="muted-copy">No component metadata was available.</p>}
+          </div>
+        </section>
+
+        <section className="section-block compact-block diagnostics-block">
+          <div className="section-heading compact-heading">
+            <div>
+              <span className="eyebrow">Diagnostics</span>
+              <h2>Run errors</h2>
+            </div>
+          </div>
+          {bundle.errors.length ? (
+            <div className="error-list">
+              {bundle.errors.slice(0, 5).map((error) => (
+                <div className="error-row" key={error.id}>
+                  <span>{humanize(error.stage)}</span>
+                  <p>{error.message}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="clean-run">No indexed errors for this run</div>
+          )}
+        </section>
+      </div>
+
+      <section className="section-block low-score-section">
           <div className="section-heading compact-heading">
             <div>
               <span className="eyebrow">Triage queue</span>
@@ -774,51 +936,7 @@ function Overview({
           ) : (
             <EmptyState title="No document scores" body="There are no granular results attached to this run." />
           )}
-        </section>
-
-        <aside className="overview-sidebar">
-          <section className="section-block compact-block">
-            <div className="section-heading compact-heading">
-              <div>
-                <span className="eyebrow">Provenance</span>
-                <h2>Source stack</h2>
-              </div>
-            </div>
-            <div className="component-list">
-              {bundle.components.length ? bundle.components.map((component) => (
-                <div className="component-row" key={component.id}>
-                  <div>
-                    <strong>{humanize(component.component)}</strong>
-                    <span>{component.installed_version ?? component.requested_ref ?? "Unversioned"}</span>
-                  </div>
-                  <code>{shortSha(component.resolved_sha)}</code>
-                </div>
-              )) : <p className="muted-copy">No component metadata was available.</p>}
-            </div>
-          </section>
-
-          <section className="section-block compact-block">
-            <div className="section-heading compact-heading">
-              <div>
-                <span className="eyebrow">Diagnostics</span>
-                <h2>Run errors</h2>
-              </div>
-            </div>
-            {bundle.errors.length ? (
-              <div className="error-list">
-                {bundle.errors.slice(0, 5).map((error) => (
-                  <div className="error-row" key={error.id}>
-                    <span>{humanize(error.stage)}</span>
-                    <p>{error.message}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="clean-run">No indexed errors for this run</div>
-            )}
-          </section>
-        </aside>
-      </div>
+      </section>
     </main>
   );
 }
