@@ -282,14 +282,12 @@ function WorkflowBrowser({
   scores,
   loading,
   scoresLoading,
-  selectedRunId,
   onSelect,
 }: {
   runs: BenchmarkRun[];
   scores: RunScoreIndex;
   loading: boolean;
   scoresLoading: boolean;
-  selectedRunId: number | null;
   onSelect: (run: BenchmarkRun) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -569,7 +567,7 @@ function WorkflowBrowser({
               return (
                 <button
                   type="button"
-                  className={`workflow-row ${selectedRunId === run.id ? "workflow-row-selected" : ""}`}
+                  className="workflow-row"
                   key={run.id}
                   onClick={() => onSelect(run)}
                   aria-label={`Open workflow run ${run.github_run_id}`}
@@ -578,7 +576,6 @@ function WorkflowBrowser({
                     <span className="workflow-title-line">
                       <strong>{humanize(run.pipeline_name ?? run.run_name)}</strong>
                       {showIds && <code className="workflow-run-id">#{run.github_run_id}</code>}
-                      {selectedRunId === run.id && <em>Viewing</em>}
                       {run.github_run_attempt > 1 && <em>Attempt {run.github_run_attempt}</em>}
                     </span>
                     <small>{run.run_name ?? "Unnamed workflow"}</small>
@@ -1398,7 +1395,6 @@ export default function DashboardClient({
           scores={runScores}
           loading={runsLoading}
           scoresLoading={runScoresLoading}
-          selectedRunId={selectedRun?.id ?? null}
           onSelect={selectWorkflow}
         />
       ) : selectedRun ? (

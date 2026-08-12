@@ -733,11 +733,6 @@ code {
   background: #f7faf8;
 }
 
-.workflow-row-selected {
-  background: #f0f8f5;
-  box-shadow: inset 3px 0 0 var(--brand);
-}
-
 .workflow-identity,
 .workflow-source,
 .workflow-config,
