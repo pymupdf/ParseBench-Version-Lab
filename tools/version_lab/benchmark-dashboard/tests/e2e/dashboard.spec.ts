@@ -65,7 +65,60 @@ test("mobile triage browsing uses a focused grid-to-detail flow", async ({ page 
   await expect(page.getByRole("link", { name: "Back to triage queue" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Browse queue" })).toBeVisible();
   await expect(page.locator(".pdf-card")).toBeVisible();
-  await page.getByRole("button", { name: "Parsed output" }).click();
+  await page.getByRole("button", { name: "Analysis" }).click();
   await expect(page.locator(".output-card")).toBeVisible();
   await expect(page.locator(".pdf-card")).toBeHidden();
+});
+
+test("keeps passed checks visible for compact diagnostic rule sets", async ({ page }) => {
+  await page.goto(`/workflows/${RUN_ID}/triage/38105?dimension=text_formatting&from=triage`);
+
+  const allChecks = page.getByRole("button", { name: "All", exact: true });
+  await expect(allChecks).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".diagnostic-rule-row")).toHaveCount(8);
+  await expect(page.locator(".diagnostic-rule-row").first()).toBeVisible();
+  await expect(page.locator(".diagnostic-status-passed")).toHaveCount(8);
+});
+
+test("renders diagnostic count metrics as numbers", async ({ page }) => {
+  await page.goto(`/workflows/${RUN_ID}/triage/37099?dimension=layout&from=triage`);
+  await page.getByRole("tab", { name: "JSON" }).click();
+
+  const countMetric = page.locator(".diagnostic-json-metric").filter({ hasText: "Num Predictions" });
+  await expect(countMetric.locator("summary code")).toHaveText("7");
+});
+
+test("reuses the workflow catalog and selected run across navigation", async ({ page }) => {
+  const runRequests: string[] = [];
+  const dimensionRequests: string[] = [];
+  const caseResultRequests: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("/rest/v1/benchmark_runs")) {
+      runRequests.push(request.url());
+    } else if (path.endsWith("/rest/v1/run_dimensions")) {
+      dimensionRequests.push(request.url());
+    } else if (path.endsWith("/rest/v1/case_results")) {
+      caseResultRequests.push(request.url());
+    }
+  });
+
+  await page.goto("/workflows");
+  const firstWorkflow = page.locator(".workflow-row").first();
+  await expect(firstWorkflow).toBeVisible();
+  await expect(firstWorkflow.locator(".workflow-aggregate strong")).not.toHaveText("…");
+  const initialRunRequestCount = runRequests.length;
+  const initialDimensionRequestCount = dimensionRequests.length;
+  const initialCaseResultRequestCount = caseResultRequests.length;
+  await firstWorkflow.click();
+  await expect(page).toHaveURL(/\/workflows\/\d+$/);
+  await expect(page.locator(".score-profile-grid")).toBeVisible();
+  await expect(page.locator(".triage-card").first()).toBeVisible();
+  expect(dimensionRequests).toHaveLength(initialDimensionRequestCount + 1);
+  expect(caseResultRequests).toHaveLength(initialCaseResultRequestCount + 1);
+
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
+  await expect(page).toHaveURL(/\/workflows$/);
+  await expect(page.locator(".workflow-row")).toHaveCount(12);
+  expect(runRequests).toHaveLength(initialRunRequestCount);
 });

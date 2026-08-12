@@ -1,3 +1,5 @@
+import type { DiagnosticArtifact } from "../diagnostics";
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -11,6 +13,9 @@ const PRIMARY_METRIC_BY_DIMENSION: Record<string, string> = {
 };
 
 const PRIMARY_METRICS = [...new Set(Object.values(PRIMARY_METRIC_BY_DIMENSION))];
+
+const RUN_SELECT =
+  "id,github_run_id,github_run_attempt,github_run_url,run_name,event,status,conclusion,artifact_state,pipeline_name,pipeline_config,run_scope,selected_group,requested_scope,requested_group,effective_scope,effective_group,observed_document_count,observed_dimension_counts,coverage_status,leaderboard_eligible,eligibility_reasons,gcs_bucket,gcs_prefix,head_branch,head_sha,source_created_at,completed_at,summary,dataset_versions(repository,resolved_sha,profile,document_count,dimension_counts)";
 
 export type DatasetVersion = {
   repository: string;
@@ -111,6 +116,8 @@ export type CaseResult = {
   primary_score: number | null;
   result_relative_path: string | null;
   raw_relative_path: string | null;
+  diagnostic_relative_path: string | null;
+  diagnostic_schema_version: number | null;
   stats: Record<string, { value?: number | string; unit?: string }>;
   tags: string[];
   run_dimensions: Pick<RunDimension, "id" | "run_id" | "dimension">;
@@ -142,7 +149,7 @@ export type RunScoreIndex = Record<number, RunScoreSummary>;
 export type DocumentSort = "lowest" | "highest" | "document";
 
 const CASE_RESULT_SELECT =
-  "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,stats,tags,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,pdf_relative_path,source_relative_path,source_media_type,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))";
+  "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,diagnostic_relative_path,diagnostic_schema_version,stats,tags,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,pdf_relative_path,source_relative_path,source_media_type,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))";
 
 function configurationError() {
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
@@ -178,14 +185,28 @@ export function loadRuns(signal?: AbortSignal) {
   return apiFetch<BenchmarkRun[]>(
     "benchmark_runs",
     new URLSearchParams({
-      select:
-        "id,github_run_id,github_run_attempt,github_run_url,run_name,event,status,conclusion,artifact_state,pipeline_name,pipeline_config,run_scope,selected_group,requested_scope,requested_group,effective_scope,effective_group,observed_document_count,observed_dimension_counts,coverage_status,leaderboard_eligible,eligibility_reasons,gcs_bucket,gcs_prefix,head_branch,head_sha,source_created_at,completed_at,summary,dataset_versions(repository,resolved_sha,profile,document_count,dimension_counts)",
+      select: RUN_SELECT,
       pipeline_name: "not.is.null",
       order: "source_created_at.desc.nullslast,id.desc",
       limit: "500",
     }),
     signal,
   );
+}
+
+export async function loadRun(githubRunId: number, signal?: AbortSignal) {
+  const rows = await apiFetch<BenchmarkRun[]>(
+    "benchmark_runs",
+    new URLSearchParams({
+      select: RUN_SELECT,
+      github_run_id: `eq.${githubRunId}`,
+      pipeline_name: "not.is.null",
+      order: "github_run_attempt.desc,id.desc",
+      limit: "1",
+    }),
+    signal,
+  );
+  return rows[0] ?? null;
 }
 
 export async function loadRunScores(
@@ -472,6 +493,36 @@ export async function loadArtifact(
       .join("\n\n") ??
     "";
   return { url, markdown };
+}
+
+export async function loadDiagnostic(
+  run: BenchmarkRun,
+  result: CaseResult,
+  signal?: AbortSignal,
+) {
+  const url = artifactUrl(run, result.diagnostic_relative_path);
+  if (!url || result.diagnostic_schema_version == null) {
+    return { url: null, diagnostic: null };
+  }
+  if (![1, 2].includes(result.diagnostic_schema_version)) {
+    throw new Error(
+      `Diagnostic schema ${result.diagnostic_schema_version} is not supported by this dashboard.`,
+    );
+  }
+
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    throw new Error(`Diagnostic artifact returned ${response.status}`);
+  }
+  const diagnostic = (await response.json()) as DiagnosticArtifact;
+  if (
+    Number(diagnostic.schema_version) !== result.diagnostic_schema_version ||
+    diagnostic.test_id !== result.benchmark_cases.test_id ||
+    diagnostic.dimension !== result.run_dimensions.dimension
+  ) {
+    throw new Error("Diagnostic artifact does not match this benchmark case.");
+  }
+  return { url, diagnostic };
 }
 
 const tableGroundTruthCache = new Map<string, Promise<Map<string, string>>>();

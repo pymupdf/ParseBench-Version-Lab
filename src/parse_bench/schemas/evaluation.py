@@ -69,6 +69,13 @@ class EvaluationSummary(BaseModel):
     successful: int = Field(description="Number of successful evaluations")
     failed: int = Field(description="Number of failed evaluations")
     skipped: int = Field(description="Number of skipped examples (no result found)")
+    verified_only: bool = Field(
+        default=False,
+        description=(
+            "Whether rules explicitly marked verified=false were discarded before evaluation. "
+            "Defaults to false for reports written before this provenance field existed."
+        ),
+    )
     aggregate_metrics: dict[str, float] = Field(
         default_factory=dict,
         description="Aggregated metric values (e.g., avg_accuracy, avg_latency)",

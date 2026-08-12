@@ -8,6 +8,7 @@ from pathlib import Path
 import fire
 
 from parse_bench.analysis.detailed_report import generate_detailed_html_report
+from parse_bench.evaluation.diagnostics import diagnostic_dimension, write_diagnostic_artifacts
 from parse_bench.evaluation.reports import (
     export_csv as export_csv_report,
 )
@@ -175,6 +176,15 @@ class EvaluationCLI:
             print("\n✅ Evaluation complete!")
             print(f"📊 Results saved to: {report_json_path.resolve()}")
 
+            diagnostic_index_path = write_diagnostic_artifacts(
+                summary,
+                report_dir_path,
+                test_cases_dir=test_cases_dir_path,
+                dimension=diagnostic_dimension(group),
+                verified_only=verified_only,
+            )
+            print(f"🔎 Per-document diagnostics saved to: {diagnostic_index_path.resolve()}")
+
             # Print summary
             self._print_summary(summary)
 
@@ -311,6 +321,20 @@ class EvaluationCLI:
                 print(f"  Test cases: {test_cases_dir_path}")
             if pdf_base_url:
                 print(f"  PDF base URL: {pdf_base_url}")
+
+            diagnostic_index_path = write_diagnostic_artifacts(
+                summary,
+                report_dir_path,
+                test_cases_dir=test_cases_dir_path,
+                dimension=diagnostic_dimension(
+                    evaluation_path.name
+                    if test_cases_dir_path is not None
+                    and (test_cases_dir_path / f"{evaluation_path.name}.jsonl").is_file()
+                    else None
+                ),
+                verified_only=summary.verified_only,
+            )
+            print(f"  Per-document diagnostics: {diagnostic_index_path.resolve()}")
 
             if export_csv:
                 csv_path = export_csv_report(summary, report_dir_path)

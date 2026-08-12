@@ -1138,6 +1138,7 @@ class EvaluationRunner:
             successful=successful,
             failed=failed,
             skipped=skipped,
+            verified_only=self.verified_only,
             aggregate_metrics=aggregate_metrics,
             per_example_results=evaluation_results,
             confusion_matrix=confusion_matrix,

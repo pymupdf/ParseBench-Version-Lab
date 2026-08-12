@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from .benchmark_index import backfill_repository
+from .diagnostic_backfill import backfill_diagnostics
 from .local import LocalRun, create_paths, doctor, ensure_ready
 from .model import COMPONENT_SPECS, GROUPS, PIPELINES, RUN_SCOPES, STANDARD_REF, RunConfig
 from .util import repository_root
@@ -148,6 +149,37 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Ignored directory for the GCS inventory and backfill result",
     )
+    diagnostics = subparsers.add_parser(
+        "backfill-diagnostics",
+        help="Reconstruct per-case diagnostics for indexed historical runs",
+        description=(
+            "Find historical case results without diagnostic locators, reconstruct them from each run's "
+            "pinned dataset and immutable GCS report, publish sidecars, and re-index the locators."
+        ),
+        formatter_class=HelpFormatter,
+    )
+    diagnostics.add_argument(
+        "--repository",
+        default="pymupdf/ParseBench-Version-Lab",
+        help="GitHub repository whose indexed benchmark runs should be backfilled",
+    )
+    diagnostics.add_argument(
+        "--run-id",
+        type=int,
+        action="append",
+        default=[],
+        help="Only backfill this GitHub run ID; repeat to select multiple runs",
+    )
+    diagnostics.add_argument(
+        "--workspace",
+        type=Path,
+        help="Ignored cache for pinned datasets, reports, generated diagnostics, and the result manifest",
+    )
+    diagnostics.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only inventory recoverable missing diagnostics; do not write files, GCS, or Supabase",
+    )
     return parser
 
 
@@ -175,6 +207,26 @@ def main(arguments: list[str] | None = None) -> int:
         )
         print(json.dumps(result, indent=2, sort_keys=True))
         print(f"Backfill inventory: {workspace / 'gcs-run-inventory.json'}")
+        return 0 if result["runs_failed"] == 0 else 1
+    if args.command == "backfill-diagnostics":
+        repository = repository_root()
+        workspace = (args.workspace or repository / ".version-lab" / "diagnostic-backfill").resolve()
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_secret_key = os.environ.get("SUPABASE_SECRET_KEY")
+        if not supabase_url or not supabase_secret_key:
+            print("SUPABASE_URL and SUPABASE_SECRET_KEY are required", file=sys.stderr)
+            return 2
+        result = backfill_diagnostics(
+            github_repository=args.repository,
+            supabase_url=supabase_url,
+            supabase_secret_key=supabase_secret_key,
+            workspace=workspace,
+            github_run_ids=args.run_id,
+            dry_run=args.dry_run,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        if not args.dry_run:
+            print(f"Diagnostic backfill result: {workspace / 'backfill-result.json'}")
         return 0 if result["runs_failed"] == 0 else 1
     config = config_from_args(args)
     if args.command == "plan":

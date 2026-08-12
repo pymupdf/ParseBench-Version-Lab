@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
+import { EvidenceOverlay, type EvidenceOverlayBox } from "./evidence-overlay";
+
+export type { EvidenceOverlayBox } from "./evidence-overlay";
+
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
@@ -14,10 +18,16 @@ export default function PdfPreview({
   source,
   page,
   title,
+  boxes = [],
+  selectedId,
+  onSelect,
 }: {
   source: string;
   page: number;
   title: string;
+  boxes?: EvidenceOverlayBox[];
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
@@ -41,14 +51,17 @@ export default function PdfPreview({
         loading={<div className="artifact-loading">Loading PDF page…</div>}
         error={<div className="artifact-loading">PDF preview unavailable</div>}
       >
-        <Page
-          pageNumber={Math.max(1, page)}
-          width={width}
-          devicePixelRatio={Math.min(window.devicePixelRatio || 1, 1.5)}
-          renderAnnotationLayer={false}
-          renderTextLayer={false}
-          loading={<div className="artifact-loading">Rendering PDF page…</div>}
-        />
+        <div className="pdf-evidence-page">
+          <Page
+            pageNumber={Math.max(1, page)}
+            width={width}
+            devicePixelRatio={Math.min(window.devicePixelRatio || 1, 1.5)}
+            renderAnnotationLayer={false}
+            renderTextLayer={false}
+            loading={<div className="artifact-loading">Rendering PDF page…</div>}
+          />
+          <EvidenceOverlay boxes={boxes} selectedId={selectedId} onSelect={onSelect} />
+        </div>
       </Document>
     </div>
   );

@@ -57,6 +57,24 @@ class FakeDatabase:
         return self._record(table, row)
 
     def upsert_many(self, table: str, rows: list[dict[str, Any]], conflict: str) -> list[dict[str, Any]]:
+        if table == "case_results" and conflict == "run_dimension_id,benchmark_case_id":
+            recorded: list[dict[str, Any]] = []
+            for row in rows:
+                existing = next(
+                    (
+                        value
+                        for value in self.rows.get(table, [])
+                        if value["run_dimension_id"] == row["run_dimension_id"]
+                        and value["benchmark_case_id"] == row["benchmark_case_id"]
+                    ),
+                    None,
+                )
+                if existing is None:
+                    existing = self._record(table, row)
+                else:
+                    existing.update(row)
+                recorded.append(existing)
+            return recorded
         del conflict
         return [self._record(table, row) for row in rows]
 
@@ -99,9 +117,7 @@ def test_gcs_reader_resolves_the_durable_manifest_for_one_run() -> None:
     reader = gcs_reader_for_run(RunStorage(), "benchmark-results", 123, 2)  # type: ignore[arg-type]
 
     assert reader is not None
-    assert reader.artifact_root == (
-        "gs://benchmark-results/parsebench/stack/main/run-123-attempt-2/parsebench-output/"
-    )
+    assert reader.artifact_root == ("gs://benchmark-results/parsebench/stack/main/run-123-attempt-2/parsebench-output/")
 
 
 def test_ingestion_job_uses_stable_source_key() -> None:
@@ -216,15 +232,9 @@ def test_reconciliation_falls_back_to_gcs_when_the_artifact_expired(
     assert indexed_readers == [gcs_reader]
     assert result["runs_imported"] == 1
     assert result["runs_failed"] == 0
-    run_jobs = [
-        row for row in database.rows["ingestion_jobs"] if row["source"] == "github_run"
-    ]
+    run_jobs = [row for row in database.rows["ingestion_jobs"] if row["source"] == "github_run"]
     assert [row["status"] for row in run_jobs] == ["running", "complete"]
-    reconciliation = next(
-        row
-        for row in database.rows["ingestion_jobs"]
-        if row["source"] == "github_reconciliation"
-    )
+    reconciliation = next(row for row in database.rows["ingestion_jobs"] if row["source"] == "github_reconciliation")
     assert reconciliation["checkpoint"] == {"github_run_id": 123, "github_run_attempt": 2}
 
 
@@ -390,11 +400,7 @@ def test_reconciliation_scans_every_run_newer_than_its_cursor(
     assert indexed == [50, 101, 102, 103, 104, 105]
     assert result["runs_examined"] == 6
     assert result["cursor_github_run_id"] == 105
-    reconciliation = next(
-        row
-        for row in database.rows["ingestion_jobs"]
-        if row["source"] == "github_reconciliation"
-    )
+    reconciliation = next(row for row in database.rows["ingestion_jobs"] if row["source"] == "github_reconciliation")
     assert reconciliation["checkpoint"] == {"github_run_id": 105, "github_run_attempt": 1}
 
 
@@ -436,6 +442,20 @@ def test_indexer_extracts_document_scores_and_artifact_locators(tmp_path: Path) 
             ],
         },
     )
+    diagnostic_index_path = tmp_path / pipeline / "table" / "_diagnostics" / "index.json"
+    write_json(
+        diagnostic_index_path,
+        {
+            "schema_version": 1,
+            "dimension": "table",
+            "diagnostics": {
+                "table/invoice": {
+                    "relative_path": "_diagnostics/0123456789abcdef0123456789abcdef.json",
+                    "schema_version": 1,
+                }
+            },
+        },
+    )
     database = FakeDatabase()
     github_run = {
         "id": 123,
@@ -455,7 +475,202 @@ def test_indexer_extracts_document_scores_and_artifact_locators(tmp_path: Path) 
     assert database.rows["case_results"][0]["result_relative_path"] == (
         "pymupdf4llm_markdown/table/invoice.result.json"
     )
+    assert database.rows["case_results"][0]["diagnostic_relative_path"] == (
+        "pymupdf4llm_markdown/table/_diagnostics/0123456789abcdef0123456789abcdef.json"
+    )
+    assert database.rows["case_results"][0]["diagnostic_schema_version"] == 1
     assert database.rows["case_metrics"][0]["passed_count"] == 3
+
+    diagnostic_index_path.unlink()
+    historical_database = FakeDatabase()
+    BenchmarkIndexer(historical_database, FakeGithub()).index_run(  # type: ignore[arg-type]
+        github_run, LocalArtifactReader(tmp_path)
+    )
+
+    assert "diagnostic_relative_path" not in historical_database.rows["case_results"][0]
+    assert "diagnostic_schema_version" not in historical_database.rows["case_results"][0]
+
+
+def test_diagnostic_index_rejects_unsafe_or_incompatible_locators(tmp_path: Path) -> None:
+    index_path = tmp_path / "pipeline" / "table" / "_diagnostics" / "index.json"
+    write_json(
+        index_path,
+        {
+            "schema_version": 1,
+            "dimension": "table",
+            "diagnostics": {
+                "table/safe": {"relative_path": "_diagnostics/safe.json"},
+                "table/escape": {"relative_path": "../../escape.json"},
+                "table/outside": {"relative_path": "results/outside.json"},
+                "table/version": {
+                    "relative_path": "_diagnostics/version.json",
+                    "schema_version": 0,
+                },
+            },
+        },
+    )
+
+    locators = benchmark_index_module._diagnostic_locators(
+        LocalArtifactReader(tmp_path),
+        "pipeline/table/_evaluation_report.json",
+        "table",
+    )
+
+    assert locators == {"table/safe": ("pipeline/table/_diagnostics/safe.json", 1)}
+    assert (
+        benchmark_index_module._diagnostic_locators(
+            LocalArtifactReader(tmp_path),
+            "pipeline/table/_evaluation_report.json",
+            "layout",
+        )
+        == {}
+    )
+
+
+def test_diagnostic_index_prefers_versioned_v2_over_immutable_v1(tmp_path: Path) -> None:
+    write_json(
+        tmp_path / "pipeline" / "table" / "_diagnostics" / "index.json",
+        {
+            "schema_version": 1,
+            "dimension": "table",
+            "diagnostics": {
+                "table/example": {
+                    "relative_path": "_diagnostics/legacy.json",
+                    "schema_version": 1,
+                }
+            },
+        },
+    )
+    write_json(
+        tmp_path / "pipeline" / "table" / "_diagnostics" / "v2" / "index.json",
+        {
+            "schema_version": 2,
+            "dimension": "table",
+            "diagnostics": {
+                "table/example": {
+                    "relative_path": "_diagnostics/v2/compact.json",
+                    "schema_version": 2,
+                }
+            },
+        },
+    )
+
+    assert benchmark_index_module._diagnostic_locators(
+        LocalArtifactReader(tmp_path),
+        "pipeline/table/_evaluation_report.json",
+        "table",
+    ) == {"table/example": ("pipeline/table/_diagnostics/v2/compact.json", 2)}
+
+
+@pytest.mark.parametrize(
+    (
+        "existing_version",
+        "existing_has_path",
+        "artifact_version",
+        "expected_path",
+        "expected_upserts",
+    ),
+    [
+        (2, True, 1, "pipeline/table/_diagnostics/v2/persisted.json", 1),
+        (2, False, 1, None, 1),
+        (1, True, 2, "pipeline/table/_diagnostics/v2/upgrade.json", 2),
+        (2, False, 2, "pipeline/table/_diagnostics/v2/upgrade.json", 2),
+    ],
+)
+def test_indexer_never_downgrades_a_persisted_diagnostic_locator(
+    tmp_path: Path,
+    existing_version: int,
+    existing_has_path: bool,
+    artifact_version: int,
+    expected_path: str | None,
+    expected_upserts: int,
+) -> None:
+    class ExistingLocatorDatabase(FakeDatabase):
+        def __init__(self) -> None:
+            super().__init__()
+            self.case_result_upserts = 0
+            self.case_result_payloads: list[list[dict[str, Any]]] = []
+
+        def upsert_many(
+            self,
+            table: str,
+            rows: list[dict[str, Any]],
+            conflict: str,
+        ) -> list[dict[str, Any]]:
+            if table == "case_results":
+                self.case_result_payloads.append([dict(row) for row in rows])
+            records = super().upsert_many(table, rows, conflict)
+            if table != "case_results":
+                return records
+            self.case_result_upserts += 1
+            if self.case_result_upserts == 1:
+                for record in records:
+                    record.update(
+                        {
+                            "diagnostic_relative_path": (
+                                f"pipeline/table/_diagnostics/v{existing_version}/persisted.json"
+                                if existing_has_path
+                                else None
+                            ),
+                            "diagnostic_schema_version": existing_version,
+                        }
+                    )
+            return records
+
+    diagnostic_directory = "_diagnostics" if artifact_version == 1 else "_diagnostics/v2"
+    diagnostic_filename = "artifact.json" if artifact_version == 1 else "upgrade.json"
+    write_json(
+        tmp_path / "pipeline" / "table" / diagnostic_directory / "index.json",
+        {
+            "schema_version": artifact_version,
+            "dimension": "table",
+            "diagnostics": {
+                "table/example": {
+                    "relative_path": f"{diagnostic_directory}/{diagnostic_filename}",
+                    "schema_version": artifact_version,
+                }
+            },
+        },
+    )
+    report = {
+        "total_examples": 1,
+        "successful": 1,
+        "failed": 0,
+        "skipped": 0,
+        "per_example_results": [
+            {
+                "test_id": "table/example",
+                "source_relative_path": "docs/table/example.pdf",
+                "source_media_type": "application/pdf",
+                "success": True,
+                "metrics": [],
+                "tags": ["table"],
+                "stats": [{"name": "latency_ms", "value": 5, "unit": "ms"}],
+            }
+        ],
+    }
+    database = ExistingLocatorDatabase()
+
+    BenchmarkIndexer(database, FakeGithub())._index_report(  # type: ignore[arg-type]
+        1,
+        1,
+        {},
+        "pipeline",
+        "table",
+        "pipeline/table/_evaluation_report.json",
+        report,
+        LocalArtifactReader(tmp_path),
+    )
+
+    result = database.rows["case_results"][0]
+    assert result["diagnostic_schema_version"] == max(existing_version, artifact_version)
+    assert result["diagnostic_relative_path"] == expected_path
+    assert database.case_result_upserts == expected_upserts
+    if expected_upserts == 2:
+        upgrade = database.case_result_payloads[1][0]
+        assert upgrade["success"] is True
+        assert upgrade["tags"] == ["table"]
+        assert upgrade["stats"] == {"latency_ms": {"value": 5, "unit": "ms"}}
 
 
 def test_indexer_discovers_single_group_report_at_pipeline_root(tmp_path: Path) -> None:

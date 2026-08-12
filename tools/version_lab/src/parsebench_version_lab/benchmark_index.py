@@ -21,7 +21,7 @@ from .coverage import execution_coverage
 from .results import DEFAULT_METRICS, report_dimension
 
 KNOWN_DIMENSIONS = ("chart", "table", "layout", "text_content", "text_formatting")
-INGESTION_SCHEMA_VERSION = 3
+INGESTION_SCHEMA_VERSION = 4
 DEFAULT_BATCH_SIZE = 250
 DEFAULT_WORKFLOW = "pymupdf-source-stack-parsebench.yml"
 LEGACY_NON_BENCHMARK_RUN_PREFIXES = ("Publish source-stack environment",)
@@ -108,7 +108,8 @@ def _next_link(value: str | None) -> str | None:
 
 
 class JsonArtifactReader(Protocol):
-    artifact_root: str
+    @property
+    def artifact_root(self) -> str: ...
 
     def read_json(self, relative_path: str) -> dict[str, Any] | list[Any] | None: ...
 
@@ -357,6 +358,47 @@ def _artifact_json(reader: JsonArtifactReader | None, path: str) -> dict[str, An
     if reader is None:
         return {}
     return _object(reader.read_json(path))
+
+
+def _diagnostic_locators(
+    reader: JsonArtifactReader,
+    report_path: str,
+    dimension: str,
+) -> dict[str, tuple[str, int]]:
+    """Read safe diagnostic paths, preferring the current versioned index."""
+    report_directory = PurePosixPath(report_path).parent
+    candidates = (
+        (PurePosixPath("_diagnostics/v2/index.json"), 2, PurePosixPath("_diagnostics/v2")),
+        (PurePosixPath("_diagnostics/index.json"), 1, PurePosixPath("_diagnostics")),
+    )
+    for relative_index_path, expected_version, expected_directory in candidates:
+        index_path = (report_directory / relative_index_path).as_posix()
+        index = _object(reader.read_json(index_path))
+        index_version = _coerce_integer(index.get("schema_version"))
+        index_dimension = index.get("dimension")
+        if (
+            index_version != expected_version
+            or (index_dimension is not None and index_dimension != dimension)
+        ):
+            continue
+
+        locators: dict[str, tuple[str, int]] = {}
+        for test_id, value in _object(index.get("diagnostics")).items():
+            if not test_id:
+                continue
+            entry = _object(value)
+            relative_path = _normalized_source_path(entry.get("relative_path"))
+            entry_version = _coerce_integer(entry.get("schema_version"))
+            schema_version = index_version if entry_version is None else entry_version
+            if relative_path is None or schema_version != expected_version:
+                continue
+            path = PurePosixPath(relative_path)
+            if path.parent != expected_directory or path.suffix != ".json":
+                continue
+            locators[test_id] = ((report_directory / path).as_posix(), schema_version)
+        if locators:
+            return locators
+    return {}
 
 
 def _pipeline_from_run_name(run: Mapping[str, Any]) -> str | None:
@@ -638,6 +680,7 @@ class BenchmarkIndexer:
                 dataset_record or dataset or {},
                 pipeline_name,
                 reports,
+                reader,
             )
         return database_run_id
 
@@ -657,9 +700,11 @@ class BenchmarkIndexer:
         root_report = _object(reader.read_json(root_path))
         if root_report:
             fallback = str(requested_group) if requested_group in KNOWN_DIMENSIONS else None
-            dimension = report_dimension(root_report, fallback)
-            if dimension in KNOWN_DIMENSIONS and not any(value[0] == dimension for value in reports):
-                reports.append((dimension, root_path, root_report))
+            resolved_dimension = report_dimension(root_report, fallback)
+            if resolved_dimension in KNOWN_DIMENSIONS and not any(
+                value[0] == resolved_dimension for value in reports
+            ):
+                reports.append((resolved_dimension, root_path, root_report))
         return reports
 
     def _index_components(self, run_id: int, metadata: Mapping[str, Any]) -> None:
@@ -722,6 +767,7 @@ class BenchmarkIndexer:
         dataset: Mapping[str, Any],
         pipeline_name: str,
         reports: list[tuple[str, str, dict[str, Any]]],
+        reader: JsonArtifactReader,
     ) -> None:
         for dimension, relative_path, report in reports:
             self._index_report(
@@ -732,6 +778,7 @@ class BenchmarkIndexer:
                 dimension,
                 relative_path,
                 report,
+                reader,
             )
 
     def _index_report(
@@ -743,6 +790,7 @@ class BenchmarkIndexer:
         dimension: str,
         report_path: str,
         report: Mapping[str, Any],
+        reader: JsonArtifactReader,
     ) -> None:
         failed_count = _integer(report.get("failed")) or 0
         dimension_row = {
@@ -778,6 +826,7 @@ class BenchmarkIndexer:
             return
 
         example_rows = [_object(value) for value in _array(report.get("per_example_results"))]
+        diagnostic_locators = _diagnostic_locators(reader, report_path, dimension)
         legacy_assets: dict[str, str] | None = None
         case_rows: list[dict[str, Any]] = []
         for example in example_rows:
@@ -813,6 +862,8 @@ class BenchmarkIndexer:
         case_ids = {str(row["test_id"]): int(row["id"]) for row in case_records}
 
         result_rows: list[dict[str, Any]] = []
+        result_rows_by_case_id: dict[int, dict[str, Any]] = {}
+        diagnostic_by_case_id: dict[int, tuple[str, int]] = {}
         metrics_by_case_id: dict[int, list[dict[str, Any]]] = {}
         for example in example_rows:
             test_id = example.get("test_id")
@@ -821,43 +872,81 @@ class BenchmarkIndexer:
             metrics = [_object(metric) for metric in _array(example.get("metrics"))]
             primary_name, primary_score = _primary_metric(dimension, metrics)
             case_id = case_ids[test_id]
-            result_rows.append(
+            diagnostic = diagnostic_locators.get(test_id)
+            if diagnostic is not None:
+                diagnostic_by_case_id[case_id] = diagnostic
+            result_row = {
+                "run_dimension_id": run_dimension_id,
+                "benchmark_case_id": case_id,
+                "success": bool(example.get("success")),
+                "error": example.get("error"),
+                "primary_metric_name": primary_name,
+                "primary_score": primary_score,
+                "raw_relative_path": f"{pipeline_name}/{test_id}.raw.json",
+                "result_relative_path": f"{pipeline_name}/{test_id}.result.json",
+                "evaluated_at": example.get("evaluated_at"),
+                "job_id": example.get("job_id"),
+                "parse_job_id": example.get("parse_job_id"),
+                "tags": [str(tag) for tag in _array(example.get("tags"))],
+                "stats": {
+                    str(stat.get("name")): {"value": stat.get("value"), "unit": stat.get("unit")}
+                    for stat in (_object(value) for value in _array(example.get("stats")))
+                    if isinstance(stat.get("name"), str)
+                },
+                "updated_at": _now_expression_payload(),
+            }
+            result_rows.append(result_row)
+            result_rows_by_case_id[case_id] = result_row
+            metrics_by_case_id[case_id] = metrics
+        # First merge ordinary result data without locator columns. PostgREST's
+        # merge-duplicates behavior preserves any locator already in Supabase,
+        # and return=representation gives us that current schema. Apply artifact
+        # locators in a second merge only when they are a monotonic upgrade.
+        result_records = self.database.upsert_many("case_results", result_rows, "run_dimension_id,benchmark_case_id")
+        locator_updates: list[dict[str, Any]] = []
+        for result_record in result_records:
+            case_id = int(result_record["benchmark_case_id"])
+            diagnostic = diagnostic_by_case_id.get(case_id)
+            if diagnostic is None:
+                continue
+            diagnostic_path, diagnostic_schema_version = diagnostic
+            existing_schema_version = _integer(result_record.get("diagnostic_schema_version"))
+            existing_path = result_record.get("diagnostic_relative_path")
+            has_existing_locator = isinstance(existing_path, str) and bool(existing_path.strip())
+            if existing_schema_version is not None and (
+                existing_schema_version > diagnostic_schema_version
+                or (existing_schema_version == diagnostic_schema_version and has_existing_locator)
+            ):
+                continue
+            locator_updates.append(
                 {
-                    "run_dimension_id": run_dimension_id,
-                    "benchmark_case_id": case_id,
-                    "success": bool(example.get("success")),
-                    "error": example.get("error"),
-                    "primary_metric_name": primary_name,
-                    "primary_score": primary_score,
-                    "raw_relative_path": f"{pipeline_name}/{test_id}.raw.json",
-                    "result_relative_path": f"{pipeline_name}/{test_id}.result.json",
-                    "evaluated_at": example.get("evaluated_at"),
-                    "job_id": example.get("job_id"),
-                    "parse_job_id": example.get("parse_job_id"),
-                    "tags": [str(tag) for tag in _array(example.get("tags"))],
-                    "stats": {
-                        str(stat.get("name")): {"value": stat.get("value"), "unit": stat.get("unit")}
-                        for stat in (_object(value) for value in _array(example.get("stats")))
-                        if isinstance(stat.get("name"), str)
-                    },
-                    "updated_at": _now_expression_payload(),
+                    # A PostgREST upsert still validates the proposed INSERT
+                    # before resolving its conflict. Repeat every required base
+                    # column so the upgrade row is valid on either path.
+                    **result_rows_by_case_id[case_id],
+                    "diagnostic_relative_path": diagnostic_path,
+                    "diagnostic_schema_version": diagnostic_schema_version,
                 }
             )
-            metrics_by_case_id[case_id] = metrics
-        result_records = self.database.upsert_many("case_results", result_rows, "run_dimension_id,benchmark_case_id")
+        if locator_updates:
+            self.database.upsert_many(
+                "case_results",
+                locator_updates,
+                "run_dimension_id,benchmark_case_id",
+            )
         metric_rows: list[dict[str, Any]] = []
         for result in result_records:
             case_id = int(result["benchmark_case_id"])
             for metric in metrics_by_case_id.get(case_id, []):
-                name = metric.get("metric_name")
+                metric_name = metric.get("metric_name")
                 value = _finite_number(metric.get("value"))
-                if not isinstance(name, str) or value is None:
+                if not isinstance(metric_name, str) or value is None:
                     continue
                 metadata = _compact_metric_metadata(metric.get("metadata"))
                 metric_rows.append(
                     {
                         "case_result_id": int(result["id"]),
-                        "metric_name": name,
+                        "metric_name": metric_name,
                         "metric_value": value,
                         "passed_count": _integer(metadata.get("passed")),
                         "total_count": _integer(metadata.get("total")),
@@ -1177,13 +1266,14 @@ def reconcile_repository(
         ingestion = IngestionJob.start(database, github_repository, run)
         try:
             with tempfile.TemporaryDirectory(prefix="parsebench-index-") as temporary:
-                reader, artifact_error = download_github_artifact(
+                downloaded_reader, artifact_error = download_github_artifact(
                     repository=github_repository,
                     github_token=token,
                     run_id=run_id,
                     attempt=attempt,
                     destination=Path(temporary),
                 )
+                reader: JsonArtifactReader | None = downloaded_reader
                 source = "github_artifact"
                 if reader is None:
                     if storage is None:

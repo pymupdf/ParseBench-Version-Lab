@@ -21,9 +21,11 @@ import {
   humanize,
   loadArtifact,
   loadCaseMetrics,
+  loadDiagnostic,
   loadDocument,
   loadDocuments,
   loadGroundTruth,
+  loadRun,
   loadRunBundle,
   loadRunScores,
   loadRuns,
@@ -35,16 +37,30 @@ import {
   sourceAssetUrl,
   thumbnailUrl,
 } from "./lib/data";
+import {
+  DiagnosticInspector,
+  type DiagnosticArtifact,
+  type DiagnosticMetric,
+} from "./diagnostics";
+import { EvidenceOverlay, type EvidenceOverlayBox } from "./evidence-overlay";
 
 type View = "runs" | "overview" | "triage" | "inspect";
 
 type MarkdownMode = "preview" | "source";
+type InspectorTab = "explain" | "output" | "expectations" | "json";
 type RunSort = "newest" | "oldest" | "largest" | "fastest";
 const ANY_GROUP = "__any_group__";
 type ArtifactState = {
   loading: boolean;
   markdown: string;
   reference: string | null;
+  url: string | null;
+  error: string | null;
+};
+
+type DiagnosticState = {
+  loading: boolean;
+  data: DiagnosticArtifact | null;
   url: string | null;
   error: string | null;
 };
@@ -69,6 +85,13 @@ const EMPTY_ARTIFACT: ArtifactState = {
   error: null,
 };
 
+const EMPTY_DIAGNOSTIC: DiagnosticState = {
+  loading: false,
+  data: null,
+  url: null,
+  error: null,
+};
+
 const DIMENSION_LABELS: Record<string, string> = {
   chart: "Charts",
   layout: "Layout",
@@ -78,11 +101,11 @@ const DIMENSION_LABELS: Record<string, string> = {
 };
 
 const DIMENSION_ORDER = [
-  "chart",
-  "layout",
   "table",
   "text_content",
   "text_formatting",
+  "layout",
+  "chart",
 ] as const;
 
 const DIMENSION_SHORT_LABELS: Record<(typeof DIMENSION_ORDER)[number], string> = {
@@ -94,6 +117,18 @@ const DIMENSION_SHORT_LABELS: Record<(typeof DIMENSION_ORDER)[number], string> =
 };
 
 const TRIAGE_PAGE_SIZE = 60;
+const DIAGNOSTIC_LIST_PAGE_SIZE = 60;
+
+function orderRunDimensions(dimensions: RunDimension[]) {
+  const rank = new Map<string, number>(
+    DIMENSION_ORDER.map((dimension, index) => [dimension, index]),
+  );
+  return [...dimensions].sort(
+    (left, right) =>
+      (rank.get(left.dimension) ?? Number.POSITIVE_INFINITY) -
+      (rank.get(right.dimension) ?? Number.POSITIVE_INFINITY),
+  );
+}
 
 type TriageFilters = {
   dimension: string;
@@ -154,11 +189,130 @@ function scorePercent(value: number | null | undefined) {
   }).format(value);
 }
 
+function isCountMetric(metricName: string) {
+  const normalizedName = metricName.toLowerCase();
+  return normalizedName.startsWith("num_") ||
+    /^n_(?:gt|pred|ground_truth|predictions?)(?:_|$)/.test(normalizedName) ||
+    /^tables_(?:expected|actual|paired|unparseable|unmatched)(?:_|$)/.test(normalizedName) ||
+    /^unmatched_(?:gt|pred)(?:_|$)/.test(normalizedName) ||
+    /_(?:count|counts)$/.test(normalizedName);
+}
+
+function metricDisplay(metricName: string, value: number | null | undefined) {
+  if (!isCountMetric(metricName)) return scorePercent(value);
+  if (value == null || !Number.isFinite(value)) return "—";
+  return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
+function diagnosticMetricDisplay(metric: DiagnosticMetric) {
+  return metricDisplay(metric.metric_name, metric.value);
+}
+
 function scoreTone(value: number | null | undefined) {
   if (value == null) return "neutral";
   if (value < 0.45) return "critical";
   if (value < 0.75) return "warning";
   return "good";
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizedBox(value: unknown) {
+  if (!Array.isArray(value) || value.length < 4) return null;
+  const coordinates = value.slice(0, 4).map(finiteNumber);
+  if (coordinates.some((coordinate) => coordinate == null)) return null;
+  const [x, y, width, height] = coordinates as [number, number, number, number];
+  if (width <= 0 || height <= 0) return null;
+  return { x, y, width, height };
+}
+
+function normalizedCornerBox(value: unknown) {
+  if (!Array.isArray(value) || value.length < 4) return null;
+  const coordinates = value.slice(0, 4).map(finiteNumber);
+  if (coordinates.some((coordinate) => coordinate == null)) return null;
+  const [x1, y1, x2, y2] = coordinates as [number, number, number, number];
+  return normalizedBox([x1, y1, x2 - x1, y2 - y1]);
+}
+
+function layoutEvidenceStatus(outcome: Record<string, unknown>) {
+  const applicable = [
+    outcome.localization_pass,
+    outcome.classification_pass,
+    outcome.attribution_applicable === true ? outcome.attribution_pass : undefined,
+  ].filter((value): value is boolean => typeof value === "boolean");
+  if (!applicable.length) return "neutral" as const;
+  if (applicable.every(Boolean)) return "passed" as const;
+  if (applicable.some(Boolean)) return "partial" as const;
+  return "failed" as const;
+}
+
+function layoutOverlayBoxes(
+  diagnostic: DiagnosticArtifact | null,
+  layers: { expected: boolean; predicted: boolean },
+) {
+  if (!diagnostic || diagnostic.dimension !== "layout") return [];
+  const boxes: EvidenceOverlayBox[] = [];
+  const compactOutcomes = (diagnostic.outcomes ?? [])
+    .map(objectValue)
+    .filter((value): value is Record<string, unknown> => value != null);
+  const metricOutcomes = diagnostic.metrics
+    .flatMap((metric) => {
+      const results = objectValue(metric.metadata)?.rule_results;
+      return Array.isArray(results)
+        ? results.map(objectValue).filter((value): value is Record<string, unknown> => value != null)
+        : [];
+    });
+  const outcomes = compactOutcomes.length ? compactOutcomes : metricOutcomes;
+  const outcomesById = new Map<string, Record<string, unknown>>();
+  for (const outcome of outcomes) {
+    const id = [outcome.element_id, outcome.id, outcome.rule_id]
+      .find((value): value is string => typeof value === "string");
+    if (id) outcomesById.set(id, outcome);
+  }
+
+  for (const expectation of diagnostic.expectations) {
+    const rule = objectValue(expectation.rule);
+    const outcome = outcomesById.get(expectation.id);
+    const expectedClass = typeof rule?.canonical_class === "string"
+      ? rule.canonical_class
+      : "Expected element";
+    const status = outcome ? layoutEvidenceStatus(outcome) : "neutral";
+    if (layers.expected) {
+      const box = normalizedBox(rule?.bbox);
+      if (box) {
+        boxes.push({
+          ...box,
+          id: expectation.id,
+          kind: "ground-truth",
+          label: expectedClass,
+          status,
+        });
+      }
+    }
+    if (layers.predicted && outcome) {
+      const box = normalizedCornerBox(outcome.best_pred_bbox);
+      if (box) {
+        boxes.push({
+          ...box,
+          id: expectation.id,
+          kind: "prediction",
+          label: typeof outcome.best_pred_class === "string"
+            ? outcome.best_pred_class
+            : "Predicted element",
+          status,
+        });
+      }
+    }
+  }
+  return boxes;
 }
 
 function formatDate(value: string | null) {
@@ -423,6 +577,163 @@ function EmptyState({
     <div className="empty-state">
       <strong>{title}</strong>
       <p>{body}</p>
+    </div>
+  );
+}
+
+function LazyJsonDetails({
+  label,
+  code,
+  value,
+  className = "expectation-row",
+}: {
+  label: ReactNode;
+  code?: string;
+  value: unknown;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details className={className} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>
+        {label}
+        {code && <code>{code}</code>}
+      </summary>
+      {open && <pre><code>{JSON.stringify(value, null, 2)}</code></pre>}
+    </details>
+  );
+}
+
+function PaginatedJsonList<T>({
+  items,
+  labelFor,
+  codeFor,
+}: {
+  items: T[];
+  labelFor: (item: T, index: number) => ReactNode;
+  codeFor?: (item: T, index: number) => string | undefined;
+}) {
+  const [visible, setVisible] = useState(DIAGNOSTIC_LIST_PAGE_SIZE);
+  const rendered = items.slice(0, visible);
+  return (
+    <div className="expectation-list diagnostic-json-items">
+      {rendered.map((item, index) => (
+        <LazyJsonDetails
+          key={`${codeFor?.(item, index) ?? "item"}-${index}`}
+          label={labelFor(item, index)}
+          code={codeFor?.(item, index)}
+          value={item}
+        />
+      ))}
+      {rendered.length < items.length && (
+        <button
+          className="diagnostic-load-more"
+          type="button"
+          onClick={() => setVisible((current) => current + DIAGNOSTIC_LIST_PAGE_SIZE)}
+        >
+          Show {Math.min(DIAGNOSTIC_LIST_PAGE_SIZE, items.length - rendered.length)} more · {(items.length - rendered.length).toLocaleString()} remaining
+        </button>
+      )}
+    </div>
+  );
+}
+
+function GroundTruthList({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
+  return (
+    <PaginatedJsonList
+      items={diagnostic.expectations}
+      labelFor={(expectation) => <strong>{humanize(expectation.type)}</strong>}
+      codeFor={(expectation) => expectation.id}
+    />
+  );
+}
+
+function DiagnosticMetricJson({ metric }: { metric: DiagnosticMetric }) {
+  const [open, setOpen] = useState(false);
+  const metadata = metric.metadata ?? {};
+  const rawRuleResults = metadata.rule_results;
+  const ruleResults = Array.isArray(rawRuleResults) ? rawRuleResults : [];
+  const metadataWithoutRuleResults = { ...metadata };
+  delete metadataWithoutRuleResults.rule_results;
+  const compactMetric = {
+    ...metric,
+    metadata: {
+      ...metadataWithoutRuleResults,
+      ...(ruleResults.length ? { rule_results: `${ruleResults.length.toLocaleString()} entries shown below` } : {}),
+    },
+  };
+  return (
+    <details className="expectation-row diagnostic-json-metric" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>
+        <strong>{humanize(metric.metric_name)}</strong>
+        <code>{diagnosticMetricDisplay(metric)}</code>
+      </summary>
+      {open && (
+        <>
+          <pre><code>{JSON.stringify(compactMetric, null, 2)}</code></pre>
+          {ruleResults.length > 0 && (
+            <PaginatedJsonList
+              items={ruleResults}
+              labelFor={(outcome, index) => {
+                const record = typeof outcome === "object" && outcome !== null && !Array.isArray(outcome)
+                  ? outcome as Record<string, unknown>
+                  : null;
+                return <strong>{humanize(String(record?.type ?? `Outcome ${index + 1}`))}</strong>;
+              }}
+              codeFor={(outcome, index) => {
+                const record = typeof outcome === "object" && outcome !== null && !Array.isArray(outcome)
+                  ? outcome as Record<string, unknown>
+                  : null;
+                return String(record?.id ?? index + 1);
+              }}
+            />
+          )}
+        </>
+      )}
+    </details>
+  );
+}
+
+function DiagnosticJsonBrowser({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
+  const { metrics, expectations, outcomes, ...manifest } = diagnostic;
+  return (
+    <div className="diagnostic-json-browser">
+      <dl className="diagnostic-json-summary">
+        <div><dt>Schema</dt><dd>v{diagnostic.schema_version}</dd></div>
+        <div><dt>Metrics</dt><dd>{metrics.length.toLocaleString()}</dd></div>
+        <div><dt>Expectations</dt><dd>{expectations.length.toLocaleString()}</dd></div>
+        <div><dt>Outcomes</dt><dd>{outcomes?.length.toLocaleString() ?? "In metrics"}</dd></div>
+      </dl>
+      <section className="diagnostic-json-section">
+        <h3>Manifest</h3>
+        <LazyJsonDetails label={<strong>Run and source metadata</strong>} value={manifest} />
+      </section>
+      <section className="diagnostic-json-section">
+        <h3>Metrics</h3>
+        <div className="expectation-list diagnostic-json-items">
+          {metrics.map((metric, index) => (
+            <DiagnosticMetricJson key={`${metric.metric_name}-${index}`} metric={metric} />
+          ))}
+        </div>
+      </section>
+      <section className="diagnostic-json-section">
+        <h3>Expectations</h3>
+        <PaginatedJsonList
+          items={expectations}
+          labelFor={(expectation) => <strong>{humanize(expectation.type)}</strong>}
+          codeFor={(expectation) => expectation.id}
+        />
+      </section>
+      {outcomes && outcomes.length > 0 && (
+        <section className="diagnostic-json-section">
+          <h3>Top-level outcomes</h3>
+          <PaginatedJsonList
+            items={outcomes}
+            labelFor={(outcome, index) => <strong>{humanize(String(outcome.type ?? `Outcome ${index + 1}`))}</strong>}
+            codeFor={(outcome, index) => String(outcome.id ?? outcome.rule_id ?? index + 1)}
+          />
+        </section>
+      )}
     </div>
   );
 }
@@ -970,11 +1281,47 @@ function Overview({
   );
 }
 
+function DiagnosticImagePreview({
+  source,
+  title,
+  boxes,
+  selectedId,
+  onSelect,
+}: {
+  source: string;
+  title: string;
+  boxes: EvidenceOverlayBox[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const [aspectRatio, setAspectRatio] = useState(1);
+  return (
+    <div className="image-preview" aria-label={title}>
+      <div className="image-evidence-page" style={{ aspectRatio }}>
+        <Image
+          src={source}
+          alt={title}
+          fill
+          sizes="(max-width: 760px) 100vw, 50vw"
+          loading="eager"
+          unoptimized
+          onLoad={(event) => {
+            const { naturalWidth, naturalHeight } = event.currentTarget;
+            if (naturalWidth > 0 && naturalHeight > 0) setAspectRatio(naturalWidth / naturalHeight);
+          }}
+        />
+        <EvidenceOverlay boxes={boxes} selectedId={selectedId} onSelect={onSelect} />
+      </div>
+    </div>
+  );
+}
+
 function DocumentExplorer({
   run,
   selected,
   loading,
   artifact,
+  diagnostic,
   caseMetrics,
   onBrowseQueue,
   previous,
@@ -985,22 +1332,31 @@ function DocumentExplorer({
   selected: CaseResult | null;
   loading: boolean;
   artifact: ArtifactState;
+  diagnostic: DiagnosticState;
   caseMetrics: CaseMetric[];
   onBrowseQueue: (trigger: HTMLButtonElement) => void;
   previous: CaseResult | null;
   next: CaseResult | null;
   onNavigate: (result: CaseResult) => void;
 }) {
-  const [referenceSelectionFor, setReferenceSelectionFor] = useState<number | null>(null);
   const [markdownMode, setMarkdownMode] = useState<MarkdownMode>("preview");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("explain");
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
+  const [layers, setLayers] = useState({ expected: true, predicted: true });
   const selectedSource = selected ? sourceAssetUrl(selected) : null;
   const selectedSourceKind = selected ? sourceAssetKind(selected) : "unsupported";
   const selectedSourceLabel = selectedSourceKind === "pdf" ? "PDF preview" :
     selectedSourceKind === "image" ? "Image preview" : "Source asset";
-  const hasReference = Boolean(artifact.reference?.trim());
-  const showingReference = hasReference && referenceSelectionFor === selected?.id;
-  const shownMarkdown = showingReference ? artifact.reference ?? "" : artifact.markdown;
+  const boxes = useMemo(
+    () => layoutOverlayBoxes(diagnostic.data, layers),
+    [diagnostic.data, layers],
+  );
+  const hasLayoutEvidence = diagnostic.data?.dimension === "layout";
+  const expectedMarkdown = diagnostic.data?.expectations
+    .map((expectation) => expectation.expected_markdown?.trim())
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n") || artifact.reference || "";
 
   return (
     <main className="workbench-shell">
@@ -1033,10 +1389,10 @@ function DocumentExplorer({
                 <small>{humanize(selected.primary_metric_name)}</small>
               </div>
               <div className="metric-strip">
-                {caseMetrics.slice(0, 4).map((metric) => (
+                {caseMetrics.slice(0, 3).map((metric) => (
                   <div className="metric-chip" key={metric.id}>
                     <span>{humanize(metric.metric_name)}</span>
-                    <strong>{scorePercent(metric.metric_value)}</strong>
+                    <strong>{metricDisplay(metric.metric_name, metric.metric_value)}</strong>
                   </div>
                 ))}
               </div>
@@ -1046,40 +1402,50 @@ function DocumentExplorer({
               </div>
             </header>
 
-            <div className="mobile-viewer-tabs" aria-label="Document comparison panels">
+            <div className="mobile-viewer-tabs" aria-label="Document inspection panels">
               <button type="button" aria-pressed={mobileViewer === "source"} className={mobileViewer === "source" ? "mobile-viewer-active" : ""} onClick={() => setMobileViewer("source")}>Source</button>
-              <button type="button" aria-pressed={mobileViewer === "output"} className={mobileViewer === "output" ? "mobile-viewer-active" : ""} onClick={() => setMobileViewer("output")}>Parsed output</button>
+              <button type="button" aria-pressed={mobileViewer === "output"} className={mobileViewer === "output" ? "mobile-viewer-active" : ""} onClick={() => setMobileViewer("output")}>Analysis</button>
             </div>
 
             <div className={`comparison-grid mobile-view-${mobileViewer}`}>
               <article className="viewer-card pdf-card">
-                <div className="viewer-toolbar">
+                <div className="viewer-toolbar source-toolbar">
                   <div>
                     <span className="viewer-kicker">Source document</span>
                     <strong>{selectedSourceLabel}</strong>
                   </div>
-                  {selectedSource && <a className="simple-link" href={selectedSource} target="_blank" rel="noreferrer">Open source ↗</a>}
+                  <div className="source-toolbar-actions">
+                    {hasLayoutEvidence && (
+                      <div className="layer-toggle" aria-label="Layout evidence layers">
+                        <button type="button" aria-pressed={layers.expected} onClick={() => setLayers((current) => ({ ...current, expected: !current.expected }))}>
+                          <span className="layer-swatch layer-swatch-expected" aria-hidden="true" />Expected
+                        </button>
+                        <button type="button" aria-pressed={layers.predicted} onClick={() => setLayers((current) => ({ ...current, predicted: !current.predicted }))}>
+                          <span className="layer-swatch layer-swatch-predicted" aria-hidden="true" />Output
+                        </button>
+                      </div>
+                    )}
+                    {selectedSource && <a className="simple-link" href={selectedSource} target="_blank" rel="noreferrer">Open source ↗</a>}
+                  </div>
                 </div>
                 <div className="pdf-stage">
                   {selectedSource && selectedSourceKind === "pdf" ? (
                     <PdfPreview
                       source={selectedSource}
-                      page={selected.benchmark_cases.page_number ?? 1}
+                      page={selected.benchmark_cases.page_number ?? diagnostic.data?.source?.page ?? 1}
                       title={`PDF preview for ${selected.benchmark_cases.test_id}`}
+                      boxes={boxes}
+                      selectedId={selectedEvidenceId}
+                      onSelect={setSelectedEvidenceId}
                     />
                   ) : selectedSource && selectedSourceKind === "image" ? (
-                    <div
-                      className="image-preview"
-                      aria-label={`Image preview for ${selected.benchmark_cases.test_id}`}
-                    >
-                      <Image
-                        src={selectedSource}
-                        alt={`Source document ${selected.benchmark_cases.test_id}`}
-                        fill
-                        sizes="(max-width: 760px) 100vw, 50vw"
-                        unoptimized
-                      />
-                    </div>
+                    <DiagnosticImagePreview
+                      source={selectedSource}
+                      title={`Source document ${selected.benchmark_cases.test_id}`}
+                      boxes={boxes}
+                      selectedId={selectedEvidenceId}
+                      onSelect={setSelectedEvidenceId}
+                    />
                   ) : selectedSource ? (
                     <EmptyState title="Preview unavailable" body="Open the source asset to inspect this file type." />
                   ) : (
@@ -1090,81 +1456,92 @@ function DocumentExplorer({
 
               <article className="viewer-card output-card">
                 <div className="viewer-toolbar output-toolbar">
-                  {hasReference ? (
-                    <div className="content-tabs" role="tablist" aria-label="Output comparison">
+                  <div className="content-tabs inspector-tabs" role="tablist" aria-label="Case inspection views">
+                    {([
+                      ["explain", "Explain"],
+                      ["output", "Output"],
+                      ["expectations", "Ground truth"],
+                      ["json", "JSON"],
+                    ] as const).map(([value, label]) => (
                       <button
-                        id="rendered-output-tab"
+                        id={`inspector-${value}-tab`}
                         role="tab"
-                        aria-selected={!showingReference}
-                        aria-controls="output-panel"
-                        className={!showingReference ? "content-tab-active" : ""}
-                        onClick={() => setReferenceSelectionFor(null)}
+                        aria-selected={inspectorTab === value}
+                        aria-controls="inspector-panel"
+                        className={inspectorTab === value ? "content-tab-active" : ""}
+                        onClick={() => setInspectorTab(value)}
                         type="button"
+                        key={value}
                       >
-                        Rendered output
+                        {label}
                       </button>
-                      <button
-                        id="ground-truth-tab"
-                        role="tab"
-                        aria-selected={showingReference}
-                        aria-controls="output-panel"
-                        className={showingReference ? "content-tab-active" : ""}
-                        onClick={() => setReferenceSelectionFor(selected.id)}
-                        type="button"
-                      >
-                        Ground truth
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="output-heading">
-                      <span className="viewer-kicker">Evaluation result</span>
-                      <strong>Rendered output</strong>
+                    ))}
+                  </div>
+                  {inspectorTab === "output" && (
+                    <div className="mode-toggle" aria-label="Markdown display mode">
+                      <button aria-pressed={markdownMode === "preview"} className={markdownMode === "preview" ? "mode-active" : ""} onClick={() => setMarkdownMode("preview")} type="button">Preview</button>
+                      <button aria-pressed={markdownMode === "source"} className={markdownMode === "source" ? "mode-active" : ""} onClick={() => setMarkdownMode("source")} type="button">Source</button>
                     </div>
                   )}
-                  <div className="viewer-actions">
-                    <div className="mode-toggle" aria-label="Markdown display mode">
-                      <button
-                        aria-pressed={markdownMode === "preview"}
-                        className={markdownMode === "preview" ? "mode-active" : ""}
-                        onClick={() => setMarkdownMode("preview")}
-                        type="button"
-                      >
-                        Preview
-                      </button>
-                      <button
-                        aria-pressed={markdownMode === "source"}
-                        className={markdownMode === "source" ? "mode-active" : ""}
-                        onClick={() => setMarkdownMode("source")}
-                        type="button"
-                      >
-                        Source
-                      </button>
-                    </div>
-                    {artifact.url && (
-                      <a href={artifact.url} target="_blank" rel="noreferrer" className="simple-link" aria-label="Open result JSON">
-                        JSON ↗
-                      </a>
-                    )}
-                  </div>
                 </div>
-                <div
-                  className="markdown-stage"
-                  id="output-panel"
-                  role={hasReference ? "tabpanel" : undefined}
-                  aria-labelledby={hasReference ? (showingReference ? "ground-truth-tab" : "rendered-output-tab") : undefined}
-                >
-                  {artifact.loading ? (
-                    <div className="artifact-loading">Loading rendered artifact…</div>
-                  ) : artifact.error ? (
-                    <EmptyState title="Output unavailable" body={artifact.error} />
-                  ) : shownMarkdown ? (
-                    markdownMode === "preview" ? (
-                      <MarkdownPanel markdown={shownMarkdown} />
+                <div className="markdown-stage inspector-stage" id="inspector-panel" role="tabpanel" aria-labelledby={`inspector-${inspectorTab}-tab`}>
+                  {inspectorTab === "explain" ? (
+                    diagnostic.loading ? (
+                      <div className="artifact-loading">Loading score evidence…</div>
+                    ) : diagnostic.data ? (
+                      <DiagnosticInspector
+                        diagnostic={diagnostic.data}
+                        actualMarkdown={artifact.markdown}
+                        selectedEvidenceId={selectedEvidenceId}
+                        onSelectEvidence={setSelectedEvidenceId}
+                      />
                     ) : (
-                      <pre className="markdown-source"><code>{shownMarkdown}</code></pre>
+                      <div className="diagnostic-unavailable">
+                        <EmptyState
+                          title="Detailed evidence unavailable"
+                          body={diagnostic.error ?? "This historical result predates per-case diagnostic artifacts. The stored case metrics remain available below."}
+                        />
+                        {caseMetrics.length > 0 && (
+                          <dl className="historical-metrics">
+                            {caseMetrics.map((metric) => (
+                              <div key={metric.id}><dt>{humanize(metric.metric_name)}</dt><dd>{metricDisplay(metric.metric_name, metric.metric_value)}</dd></div>
+                            ))}
+                          </dl>
+                        )}
+                      </div>
+                    )
+                  ) : inspectorTab === "output" ? (
+                    artifact.loading ? (
+                      <div className="artifact-loading">Loading rendered artifact…</div>
+                    ) : artifact.error ? (
+                      <EmptyState title="Output unavailable" body={artifact.error} />
+                    ) : artifact.markdown ? (
+                      markdownMode === "preview" ? <MarkdownPanel markdown={artifact.markdown} /> : <pre className="markdown-source"><code>{artifact.markdown}</code></pre>
+                    ) : (
+                      <EmptyState title="No rendered markdown" body="The indexed result does not contain a markdown payload." />
+                    )
+                  ) : inspectorTab === "expectations" ? (
+                    diagnostic.loading ? (
+                      <div className="artifact-loading">Loading ground truth…</div>
+                    ) : expectedMarkdown ? (
+                      <MarkdownPanel markdown={expectedMarkdown} />
+                    ) : diagnostic.data?.expectations.length ? (
+                      <GroundTruthList key={diagnostic.data.test_id} diagnostic={diagnostic.data} />
+                    ) : (
+                      <EmptyState title="Ground truth unavailable" body="No expectation payload was retained for this result." />
                     )
                   ) : (
-                    <EmptyState title="No rendered markdown" body="The indexed result does not contain a markdown payload." />
+                    <div className="raw-artifacts-view">
+                      <div className="raw-artifact-links">
+                        {artifact.url && <a href={artifact.url} target="_blank" rel="noreferrer">Open parser result JSON ↗</a>}
+                        {diagnostic.url && <a href={diagnostic.url} target="_blank" rel="noreferrer">Open diagnostic JSON ↗</a>}
+                      </div>
+                      {diagnostic.data ? (
+                        <DiagnosticJsonBrowser key={diagnostic.data.test_id} diagnostic={diagnostic.data} />
+                      ) : (
+                        <EmptyState title="Diagnostic JSON unavailable" body={diagnostic.error ?? "This result does not have a diagnostic artifact."} />
+                      )}
+                    </div>
                   )}
                 </div>
               </article>
@@ -1183,10 +1560,12 @@ function DocumentExplorer({
 function ThumbnailCard({
   result,
   selected,
+  eager,
   onSelect,
 }: {
   result: CaseResult;
   selected?: boolean;
+  eager?: boolean;
   onSelect: (result: CaseResult) => void;
 }) {
   const thumbnail = thumbnailUrl(result);
@@ -1216,6 +1595,7 @@ function ThumbnailCard({
             src={imageSource}
             alt={`Thumbnail of ${documentName(result)}`}
             fill
+            loading={eager ? "eager" : "lazy"}
             sizes="(max-width: 620px) 50vw, (max-width: 1000px) 33vw, 20vw"
             unoptimized
             onError={recoverMissingThumbnail}
@@ -1479,11 +1859,12 @@ function TriageGrid({
           <div className="triage-grid-loading" role="status">Loading document thumbnails…</div>
         ) : documents.length ? (
           <div className="triage-grid">
-            {documents.map((result) => (
+            {documents.map((result, index) => (
               <ThumbnailCard
                 key={result.id}
                 result={result}
                 selected={result.id === selectedId}
+                eager={index < 6}
                 onSelect={(selected) => {
                   navigationPendingRef.current = true;
                   onSelect(selected, draftFiltersRef.current);
@@ -1540,8 +1921,11 @@ export default function DashboardClient({
       page: parsePage(searchParams.get("page")),
     }), [searchParams, sortValue]);
   const inspectionOrigin = searchParams.get("from") === "overview" ? "overview" : "triage";
-  const [runs, setRuns] = useState<BenchmarkRun[]>([]);
-  const [runsLoading, setRunsLoading] = useState(true);
+  const [catalogRuns, setCatalogRuns] = useState<BenchmarkRun[]>([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(view === "runs");
+  const [selectedRunRecord, setSelectedRunRecord] = useState<BenchmarkRun | null>(null);
+  const [selectedRunLoading, setSelectedRunLoading] = useState(githubRunId != null);
   const [runScores, setRunScores] = useState<RunScoreIndex>({});
   const [runScoresLoading, setRunScoresLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1559,14 +1943,17 @@ export default function DashboardClient({
   const [caseMetricsResultId, setCaseMetricsResultId] = useState<number | null>(null);
   const [artifact, setArtifact] = useState<ArtifactState>(EMPTY_ARTIFACT);
   const [artifactResultId, setArtifactResultId] = useState<number | null>(null);
+  const [diagnostic, setDiagnostic] = useState<DiagnosticState>(EMPTY_DIAGNOSTIC);
+  const [diagnosticResultId, setDiagnosticResultId] = useState<number | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const queueOverlayRef = useRef<HTMLDivElement>(null);
   const queueCloseButtonRef = useRef<HTMLButtonElement>(null);
   const queueTriggerRef = useRef<HTMLButtonElement>(null);
 
-  const selectedRun = githubRunId == null
-    ? null
-    : runs.find((run) => run.github_run_id === githubRunId) ?? null;
+  const selectedRun = githubRunId != null && selectedRunRecord?.github_run_id === githubRunId
+    ? selectedRunRecord
+    : null;
+  const selectedRunId = selectedRun?.id ?? null;
   const activeDimension = bundle.dimensions.some((item) => item.dimension === filters.dimension)
     ? filters.dimension
     : bundle.dimensions[0]?.dimension ?? filters.dimension;
@@ -1638,27 +2025,63 @@ export default function DashboardClient({
   }, [queueOpen]);
 
   useEffect(() => {
+    if (view !== "runs" || catalogLoaded) return;
     const controller = new AbortController();
+    // The catalog is loaded lazily and retained while detail routes are open.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCatalogLoading(true);
     loadRuns(controller.signal)
       .then((loadedRuns) => {
-        setRuns(loadedRuns);
+        setCatalogRuns(loadedRuns);
+        setCatalogLoaded(true);
       })
       .catch((error: Error) => {
         if (error.name !== "AbortError") setLoadError(error.message);
       })
       .finally(() => {
-        if (!controller.signal.aborted) setRunsLoading(false);
+        if (!controller.signal.aborted) setCatalogLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [catalogLoaded, view]);
 
   useEffect(() => {
-    if (!runs.length) return;
+    if (githubRunId == null) {
+      // Keep the last record cached for a possible forward navigation, but do
+      // not expose it as selected while the catalog route is active.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedRunLoading(false);
+      return;
+    }
+    if (selectedRunRecord?.github_run_id === githubRunId) {
+      setSelectedRunLoading(false);
+      return;
+    }
+    const catalogMatch = catalogRuns.find((run) => run.github_run_id === githubRunId);
+    if (catalogMatch) {
+      setSelectedRunRecord(catalogMatch);
+      setSelectedRunLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setSelectedRunLoading(true);
+    loadRun(githubRunId, controller.signal)
+      .then(setSelectedRunRecord)
+      .catch((error: Error) => {
+        if (error.name !== "AbortError") setLoadError(error.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSelectedRunLoading(false);
+      });
+    return () => controller.abort();
+  }, [catalogRuns, githubRunId, selectedRunRecord?.github_run_id]);
+
+  useEffect(() => {
+    if (view !== "runs" || !catalogRuns.length) return;
     const controller = new AbortController();
     // This loading state follows the catalog score request lifecycle.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRunScoresLoading(true);
-    loadRunScores(runs.map((run) => run.id), controller.signal)
+    loadRunScores(catalogRuns.map((run) => run.id), controller.signal)
       .then(setRunScores)
       .catch((error: Error) => {
         if (error.name !== "AbortError") setLoadError(error.message);
@@ -1667,17 +2090,22 @@ export default function DashboardClient({
         if (!controller.signal.aborted) setRunScoresLoading(false);
       });
     return () => controller.abort();
-  }, [runs]);
+  }, [catalogRuns, view]);
 
   useEffect(() => {
-    if (!selectedRun) return;
+    if (selectedRunId == null) return;
     const controller = new AbortController();
     // This reset intentionally belongs to the selected-run synchronization.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setBundleLoading(true);
     setBundle(EMPTY_BUNDLE);
-    loadRunBundle(selectedRun.id, controller.signal)
-      .then(setBundle)
+    loadRunBundle(selectedRunId, controller.signal)
+      .then((loadedBundle) => {
+        setBundle({
+          ...loadedBundle,
+          dimensions: orderRunDimensions(loadedBundle.dimensions),
+        });
+      })
       .catch((error: Error) => {
         if (error.name !== "AbortError") setLoadError(error.message);
       })
@@ -1685,15 +2113,15 @@ export default function DashboardClient({
         if (!controller.signal.aborted) setBundleLoading(false);
       });
     return () => controller.abort();
-  }, [selectedRun]);
+  }, [selectedRunId]);
 
   useEffect(() => {
-    if (!selectedRun) return;
+    if (selectedRunId == null) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setDocumentsLoading(true);
       loadDocuments(
-        selectedRun.id,
+        selectedRunId,
         {
           dimension: activeDimension,
           search: filters.search,
@@ -1732,11 +2160,11 @@ export default function DashboardClient({
     filters.page,
     filters.search,
     filters.sort,
-    selectedRun,
+    selectedRunId,
   ]);
 
   useEffect(() => {
-    if (!selectedRun || view !== "inspect" || routeCaseResultId == null) {
+    if (selectedRunId == null || view !== "inspect" || routeCaseResultId == null) {
       // Route changes intentionally clear the case-specific workbench state.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedDocument(null);
@@ -1745,7 +2173,7 @@ export default function DashboardClient({
     }
     const controller = new AbortController();
     setDocumentLoadState({ id: routeCaseResultId, loading: true });
-    loadDocument(selectedRun.id, routeCaseResultId, controller.signal)
+    loadDocument(selectedRunId, routeCaseResultId, controller.signal)
       .then((document) => {
         if (controller.signal.aborted) return;
         setSelectedDocument(document);
@@ -1760,7 +2188,7 @@ export default function DashboardClient({
         }
       });
     return () => controller.abort();
-  }, [routeCaseResultId, selectedRun, view]);
+  }, [routeCaseResultId, selectedRunId, view]);
 
   useEffect(() => {
     if (!selectedRun || !selectedDocument) {
@@ -1772,11 +2200,18 @@ export default function DashboardClient({
     setCaseMetrics([]);
     setCaseMetricsResultId(selectedDocument.id);
     setArtifactResultId(selectedDocument.id);
+    setDiagnosticResultId(selectedDocument.id);
     setArtifact({
       loading: true,
       markdown: "",
       reference: null,
       url: artifactUrl(selectedRun, selectedDocument.result_relative_path),
+      error: null,
+    });
+    setDiagnostic({
+      loading: true,
+      data: null,
+      url: artifactUrl(selectedRun, selectedDocument.diagnostic_relative_path),
       error: null,
     });
     loadArtifact(selectedRun, selectedDocument, controller.signal)
@@ -1800,19 +2235,36 @@ export default function DashboardClient({
         if (!controller.signal.aborted) setCaseMetrics(metrics);
       })
       .catch(() => undefined);
-    loadGroundTruth(selectedDocument)
-      .then((reference) => {
-        if (!controller.signal.aborted && reference) {
-          setArtifact((current) => ({ ...current, reference }));
-        }
+    loadDiagnostic(selectedRun, selectedDocument, controller.signal)
+      .then((loadedDiagnostic) => {
+        if (controller.signal.aborted) return;
+        setDiagnostic({
+          loading: false,
+          data: loadedDiagnostic.diagnostic,
+          url: loadedDiagnostic.url,
+          error: null,
+        });
       })
-      .catch(() => undefined);
+      .catch((error: Error) => {
+        if (error.name !== "AbortError") {
+          setDiagnostic((current) => ({ ...current, loading: false, error: error.message }));
+        }
+      });
+    if (!selectedDocument.diagnostic_relative_path) {
+      loadGroundTruth(selectedDocument)
+        .then((reference) => {
+          if (!controller.signal.aborted && reference) {
+            setArtifact((current) => ({ ...current, reference }));
+          }
+        })
+        .catch(() => undefined);
+    }
     return () => controller.abort();
   }, [selectedRun, selectedDocument]);
 
   function selectWorkflow(candidate: BenchmarkRun) {
     setLoadError(null);
-    if (candidate.id !== selectedRun?.id) {
+    if (candidate.id !== selectedRunId) {
       setBundle(EMPTY_BUNDLE);
       setDocuments([]);
       setDocumentTotal(0);
@@ -1821,7 +2273,10 @@ export default function DashboardClient({
       setCaseMetricsResultId(null);
       setArtifact(EMPTY_ARTIFACT);
       setArtifactResultId(null);
+      setDiagnostic(EMPTY_DIAGNOSTIC);
+      setDiagnosticResultId(null);
     }
+    setSelectedRunRecord(candidate);
     router.push(`/workflows/${candidate.github_run_id}`);
   }
 
@@ -1841,6 +2296,7 @@ export default function DashboardClient({
     setDocumentLoadState({ id: result.id, loading: true });
     setCaseMetricsResultId(null);
     setArtifactResultId(null);
+    setDiagnosticResultId(null);
     const query = triageQuery(navigationFilters);
     const origin = view === "overview"
       ? "overview"
@@ -1907,6 +2363,9 @@ export default function DashboardClient({
     ? artifact
     : { ...EMPTY_ARTIFACT, loading: documentDetailsLoading || displayedDocument != null };
   const displayedCaseMetrics = caseMetricsResultId === routeCaseResultId ? caseMetrics : [];
+  const displayedDiagnostic = diagnosticResultId === routeCaseResultId
+    ? diagnostic
+    : { ...EMPTY_DIAGNOSTIC, loading: documentDetailsLoading || displayedDocument != null };
 
   return (
     <div className="app-shell">
@@ -1949,7 +2408,7 @@ export default function DashboardClient({
                 </div>
               </>
             ) : (
-              <h1>{runsLoading ? "Loading latest workflow…" : "No workflow selected"}</h1>
+              <h1>{selectedRunLoading ? "Loading latest workflow…" : "No workflow selected"}</h1>
             )}
           </div>
           <div className="run-toolbar-actions">
@@ -1969,9 +2428,9 @@ export default function DashboardClient({
 
       {view === "runs" ? (
         <WorkflowBrowser
-          runs={runs}
+          runs={catalogRuns}
           scores={runScores}
-          loading={runsLoading}
+          loading={catalogLoading}
           scoresLoading={runScoresLoading}
           onSelect={selectWorkflow}
         />
@@ -2009,6 +2468,7 @@ export default function DashboardClient({
             selected={displayedDocument}
             loading={documentDetailsLoading}
             artifact={displayedArtifact}
+            diagnostic={displayedDiagnostic}
             caseMetrics={displayedCaseMetrics}
             onBrowseQueue={(trigger) => {
               queueTriggerRef.current = trigger;
@@ -2022,8 +2482,8 @@ export default function DashboardClient({
       ) : (
         <main className="content-shell">
           <EmptyState
-            title={runsLoading ? "Loading workflow" : "Workflow not found"}
-            body={runsLoading
+            title={selectedRunLoading ? "Loading workflow" : "Workflow not found"}
+            body={selectedRunLoading
               ? "Loading the selected workflow from the benchmark index."
               : `Workflow run #${githubRunId} is not in the benchmark index.`}
           />
