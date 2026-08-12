@@ -2983,10 +2983,17 @@ code {
 
 .diagnostic-differences > summary,
 .diagnostic-matrix-details > summary {
-  color: var(--brand);
   cursor: pointer;
   font-size: 9px;
   font-weight: 720;
+}
+
+.diagnostic-differences > summary {
+  color: var(--critical);
+}
+
+.diagnostic-matrix-details > summary {
+  color: var(--brand);
 }
 
 .diagnostic-layout-summary {
