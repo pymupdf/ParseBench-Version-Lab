@@ -40,6 +40,7 @@ type View = "runs" | "overview" | "triage" | "inspect";
 
 type MarkdownMode = "preview" | "source";
 type RunSort = "newest" | "oldest" | "largest" | "fastest";
+const ANY_GROUP = "__any_group__";
 type ArtifactState = {
   loading: boolean;
   markdown: string;
@@ -467,11 +468,9 @@ function WorkflowBrowser({
   const [query, setQuery] = useState("");
   const [pipeline, setPipeline] = useState("all");
   const [branch, setBranch] = useState("all");
-  const [commit, setCommit] = useState("all");
   const [conclusion, setConclusion] = useState("all");
-  const [artifactState, setArtifactState] = useState("all");
   const [scope, setScope] = useState("all");
-  const [group, setGroup] = useState("all");
+  const [group, setGroup] = useState(ANY_GROUP);
   const [period, setPeriod] = useState("all");
   const [sort, setSort] = useState<RunSort>("newest");
   const [page, setPage] = useState(0);
@@ -481,23 +480,18 @@ function WorkflowBrowser({
   const [jumpError, setJumpError] = useState<string | null>(null);
   const pageSize = 12;
 
-  const pipelines = useMemo(() => uniqueValues(runs, "pipeline_name").sort(), [runs]);
-  const branches = useMemo(() => uniqueValues(runs, "head_branch").sort(), [runs]);
-  const conclusions = useMemo(() => uniqueValues(runs, "conclusion").sort(), [runs]);
-  const artifactStates = useMemo(() => uniqueValues(runs, "artifact_state").sort(), [runs]);
-  const scopes = useMemo(() => uniqueValues(runs, "effective_scope").sort(), [runs]);
-  const groups = useMemo(() => uniqueValues(runs, "effective_group").sort(), [runs]);
-  const commits = useMemo(() => {
-    const seen = new Set<string>();
-    return runs.filter((run) => {
-      if (!run.head_sha || seen.has(run.head_sha)) return false;
-      seen.add(run.head_sha);
-      return true;
-    });
-  }, [runs]);
+  const completeRuns = useMemo(
+    () => runs.filter((run) => run.artifact_state === "complete"),
+    [runs],
+  );
+  const pipelines = useMemo(() => uniqueValues(completeRuns, "pipeline_name").sort(), [completeRuns]);
+  const branches = useMemo(() => uniqueValues(completeRuns, "head_branch").sort(), [completeRuns]);
+  const conclusions = useMemo(() => uniqueValues(completeRuns, "conclusion").sort(), [completeRuns]);
+  const scopes = useMemo(() => uniqueValues(completeRuns, "effective_scope").sort(), [completeRuns]);
+  const groups = useMemo(() => uniqueValues(completeRuns, "effective_group").sort(), [completeRuns]);
 
   const scoreLeaders = useMemo(() => {
-    const comparableRuns = runs.filter((run) => run.leaderboard_eligible);
+    const comparableRuns = completeRuns.filter((run) => run.leaderboard_eligible);
     const metrics: Array<{ key: "aggregate" | (typeof DIMENSION_ORDER)[number]; label: string }> = [
       { key: "aggregate", label: "Aggregate" },
       ...DIMENSION_ORDER.map((dimension) => ({
@@ -524,11 +518,11 @@ function WorkflowBrowser({
       }
       return { ...metric, run: leader, score: bestScore };
     });
-  }, [runs, scores]);
+  }, [completeRuns, scores]);
 
   const filteredRuns = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    const newestIndexedTime = runs.reduce((latest, run) => {
+    const newestIndexedTime = completeRuns.reduce((latest, run) => {
       const created = run.source_created_at ? new Date(run.source_created_at).getTime() : 0;
       return Math.max(latest, created);
     }, 0);
@@ -537,7 +531,7 @@ function WorkflowBrowser({
       "7d": 7 * 24 * 60 * 60 * 1_000,
       "30d": 30 * 24 * 60 * 60 * 1_000,
     };
-    const filtered = runs.filter((run) => {
+    const filtered = completeRuns.filter((run) => {
       const searchable = [
         run.github_run_id,
         run.run_name,
@@ -557,11 +551,9 @@ function WorkflowBrowser({
       if (normalizedQuery && !searchable.includes(normalizedQuery)) return false;
       if (pipeline !== "all" && run.pipeline_name !== pipeline) return false;
       if (branch !== "all" && run.head_branch !== branch) return false;
-      if (commit !== "all" && run.head_sha !== commit) return false;
       if (conclusion !== "all" && run.conclusion !== conclusion) return false;
-      if (artifactState !== "all" && run.artifact_state !== artifactState) return false;
       if (scope !== "all" && run.effective_scope !== scope) return false;
-      if (group !== "all" && run.effective_group !== group) return false;
+      if (group !== ANY_GROUP && run.effective_group !== group) return false;
       if (period !== "all") {
         const created = run.source_created_at ? new Date(run.source_created_at).getTime() : 0;
         if (!created || newestIndexedTime - created > periodMs[period]) return false;
@@ -581,26 +573,23 @@ function WorkflowBrowser({
       }
       return new Date(b.source_created_at ?? 0).getTime() - new Date(a.source_created_at ?? 0).getTime();
     });
-  }, [artifactState, branch, commit, conclusion, group, period, pipeline, query, runs, scope, sort]);
+  }, [branch, completeRuns, conclusion, group, period, pipeline, query, scope, sort]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRuns.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
   const visibleRuns = filteredRuns.slice(safePage * pageSize, safePage * pageSize + pageSize);
   const hasFilters = Boolean(
-    query || pipeline !== "all" || branch !== "all" || commit !== "all" ||
-    conclusion !== "all" || artifactState !== "all" || scope !== "all" ||
-    group !== "all" || period !== "all",
+    query || pipeline !== "all" || branch !== "all" || conclusion !== "all" ||
+    scope !== "all" || group !== ANY_GROUP || period !== "all",
   );
 
   function clearFilters() {
     setQuery("");
     setPipeline("all");
     setBranch("all");
-    setCommit("all");
     setConclusion("all");
-    setArtifactState("all");
     setScope("all");
-    setGroup("all");
+    setGroup(ANY_GROUP);
     setPeriod("all");
     setPage(0);
   }
@@ -608,7 +597,7 @@ function WorkflowBrowser({
   function jumpToRun(event: FormEvent) {
     event.preventDefault();
     const candidate = jumpValue.trim().replace(/^#/, "").toLowerCase();
-    const match = runs.find((run) =>
+    const match = completeRuns.find((run) =>
       String(run.github_run_id) === candidate ||
       Boolean(run.head_sha?.toLowerCase().startsWith(candidate)),
     );
@@ -705,16 +694,14 @@ function WorkflowBrowser({
 
         <div className="catalog-filter-disclosure">
           <button className="catalog-filter-toggle" type="button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((current) => !current)}>
-            <span>Filters</span><small>8 filter options</small>
+            <span>Filters</span><small>6 filter options</small>
           </button>
           <div className={`catalog-filters ${filtersOpen ? "catalog-filters-open" : ""}`}>
             <label><span>Pipeline</span><select value={pipeline} onChange={(event) => { setPipeline(event.target.value); setPage(0); }}><option value="all">All pipelines</option>{pipelines.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
             <label><span>Branch</span><select value={branch} onChange={(event) => { setBranch(event.target.value); setPage(0); }}><option value="all">All branches</option>{branches.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
-            <label><span>Commit</span><select value={commit} onChange={(event) => { setCommit(event.target.value); setPage(0); }}><option value="all">All commits</option>{commits.map((run) => <option value={run.head_sha ?? ""} key={run.head_sha}>{shortSha(run.head_sha)} · {run.head_branch ?? "unknown"}</option>)}</select></label>
             <label><span>Result</span><select value={conclusion} onChange={(event) => { setConclusion(event.target.value); setPage(0); }}><option value="all">All results</option>{conclusions.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
-            <label><span>Artifacts</span><select value={artifactState} onChange={(event) => { setArtifactState(event.target.value); setPage(0); }}><option value="all">Any artifact state</option>{artifactStates.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
             <label><span>Scope</span><select value={scope} onChange={(event) => { setScope(event.target.value); setPage(0); }}><option value="all">Any scope</option>{scopes.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
-            <label><span>Group</span><select value={group} onChange={(event) => { setGroup(event.target.value); setPage(0); }}><option value="all">Any group</option>{groups.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
+            <label><span>Group</span><select value={group} onChange={(event) => { setGroup(event.target.value); setPage(0); }}><option value={ANY_GROUP}>Any group</option>{groups.map((value) => <option value={value} key={value}>{humanize(value)}</option>)}</select></label>
             <label><span>Created</span><select value={period} onChange={(event) => { setPeriod(event.target.value); setPage(0); }}><option value="all">Any time</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
           </div>
         </div>
