@@ -4,8 +4,8 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useId, useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -16,10 +16,12 @@ import {
   BenchmarkRun,
   CaseMetric,
   CaseResult,
+  DocumentSort,
   DimensionMetric,
   humanize,
   loadArtifact,
   loadCaseMetrics,
+  loadDocument,
   loadDocuments,
   loadGroundTruth,
   loadRunBundle,
@@ -31,9 +33,10 @@ import {
   RunScoreIndex,
   sourceAssetKind,
   sourceAssetUrl,
+  thumbnailUrl,
 } from "./lib/data";
 
-type View = "runs" | "overview" | "documents";
+type View = "runs" | "overview" | "triage" | "inspect";
 
 type MarkdownMode = "preview" | "source";
 type RunSort = "newest" | "oldest" | "largest" | "fastest";
@@ -88,6 +91,59 @@ const DIMENSION_SHORT_LABELS: Record<(typeof DIMENSION_ORDER)[number], string> =
   text_content: "Text",
   text_formatting: "Format",
 };
+
+const TRIAGE_PAGE_SIZE = 60;
+
+type TriageFilters = {
+  dimension: string;
+  search: string;
+  minimum: number;
+  maximum: number;
+  sort: DocumentSort;
+  page: number;
+};
+
+function documentName(result: CaseResult) {
+  return result.benchmark_cases.test_id.split("/").at(-1) ?? result.benchmark_cases.test_id;
+}
+
+function parsePercent(value: string | null, fallback: number) {
+  if (value == null || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : fallback;
+}
+
+function parsePage(value: string | null) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed - 1 : 0;
+}
+
+function normalizeTriageFilters(filters: TriageFilters): TriageFilters {
+  const firstBound = Math.max(0, Math.min(100, filters.minimum));
+  const secondBound = Math.max(0, Math.min(100, filters.maximum));
+  return {
+    ...filters,
+    minimum: Math.min(firstBound, secondBound),
+    maximum: Math.max(firstBound, secondBound),
+    page: Number.isInteger(filters.page) ? Math.max(0, filters.page) : 0,
+  };
+}
+
+function triageQuery(filters: TriageFilters) {
+  const query = new URLSearchParams();
+  query.set("dimension", filters.dimension);
+  if (filters.search.trim()) query.set("q", filters.search.trim());
+  if (filters.minimum > 0) query.set("min", String(filters.minimum));
+  if (filters.maximum < 100) query.set("max", String(filters.maximum));
+  if (filters.sort !== "lowest") query.set("sort", filters.sort);
+  if (filters.page > 0) query.set("page", String(filters.page + 1));
+  return query;
+}
+
+function hrefWithTriageFilters(path: string, filters: TriageFilters) {
+  const query = triageQuery(filters);
+  return query.size ? `${path}?${query.toString()}` : path;
+}
 
 function scorePercent(value: number | null | undefined) {
   if (value == null) return "—";
@@ -753,16 +809,28 @@ function Overview({
   run,
   bundle,
   documents,
+  documentTotal,
   loading,
+  documentsLoading,
+  filters,
+  updateFilters,
+  resetFilters,
+  fullPageHref,
   inspectDimension,
   inspectDocument,
 }: {
   run: BenchmarkRun;
   bundle: RunBundle;
   documents: CaseResult[];
+  documentTotal: number;
   loading: boolean;
+  documentsLoading: boolean;
+  filters: TriageFilters;
+  updateFilters: (updates: Partial<TriageFilters>) => void;
+  resetFilters: () => void;
+  fullPageHref: string;
   inspectDimension: (dimension: string) => void;
-  inspectDocument: (result: CaseResult) => void;
+  inspectDocument: (result: CaseResult, navigationFilters?: TriageFilters) => void;
 }) {
   const overall = overallScore(bundle);
   const failedFromDimensions = bundle.dimensions.reduce(
@@ -899,88 +967,46 @@ function Overview({
         </section>
       </div>
 
-      <section className="section-block low-score-section">
-          <div className="section-heading compact-heading">
-            <div>
-              <span className="eyebrow">Triage queue</span>
-              <h2>Lowest-scoring documents</h2>
-            </div>
-            <button className="text-button" onClick={() => inspectDimension("all")} type="button">
-              Open explorer ↗
-            </button>
-          </div>
-          {documents.length ? (
-            <div className="score-table">
-              <div className="score-table-head">
-                <span>Document</span><span>Dimension</span><span>Score</span>
-              </div>
-              {documents.slice(0, 8).map((result) => (
-                <button
-                  type="button"
-                  className="score-table-row"
-                  key={result.id}
-                  onClick={() => inspectDocument(result)}
-                >
-                  <span className="document-cell">
-                    <span>{result.benchmark_cases.test_id.split("/").at(-1)}</span>
-                  </span>
-                  <span className="dimension-pill">
-                    {DIMENSION_LABELS[result.run_dimensions.dimension] ?? humanize(result.run_dimensions.dimension)}
-                  </span>
-                  <span className={`score-number score-${scoreTone(result.primary_score)}`}>
-                    {scorePercent(result.primary_score)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="No document scores" body="There are no granular results attached to this run." />
-          )}
-      </section>
+      <TriageGrid
+        bundle={bundle}
+        documents={documents}
+        total={documentTotal}
+        loading={documentsLoading || loading}
+        filters={filters}
+        updateFilters={updateFilters}
+        resetFilters={resetFilters}
+        onSelect={inspectDocument}
+        embedded
+        fullPageHref={fullPageHref}
+      />
     </main>
   );
 }
 
 function DocumentExplorer({
-  bundle,
-  documents,
-  documentTotal,
-  documentPage,
-  setDocumentPage,
-  documentsLoading,
+  run,
   selected,
-  selectDocument,
-  dimension,
-  setDimension,
-  search,
-  setSearch,
-  ceiling,
-  setCeiling,
+  loading,
   artifact,
   caseMetrics,
+  onBrowseQueue,
+  previous,
+  next,
+  onNavigate,
 }: {
-  bundle: RunBundle;
-  documents: CaseResult[];
-  documentTotal: number;
-  documentPage: number;
-  setDocumentPage: (page: number) => void;
-  documentsLoading: boolean;
+  run: BenchmarkRun;
   selected: CaseResult | null;
-  selectDocument: (result: CaseResult) => void;
-  dimension: string;
-  setDimension: (dimension: string) => void;
-  search: string;
-  setSearch: (search: string) => void;
-  ceiling: number;
-  setCeiling: (ceiling: number) => void;
+  loading: boolean;
   artifact: ArtifactState;
   caseMetrics: CaseMetric[];
+  onBrowseQueue: (trigger: HTMLButtonElement) => void;
+  previous: CaseResult | null;
+  next: CaseResult | null;
+  onNavigate: (result: CaseResult) => void;
 }) {
   const [referenceSelectionFor, setReferenceSelectionFor] = useState<number | null>(null);
   const [markdownMode, setMarkdownMode] = useState<MarkdownMode>("preview");
-  const [mobileInspecting, setMobileInspecting] = useState(false);
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
-  const pageCount = Math.max(1, Math.ceil(documentTotal / 120));
   const selectedSource = selected ? sourceAssetUrl(selected) : null;
   const selectedSourceKind = selected ? sourceAssetKind(selected) : "unsupported";
   const selectedSourceLabel = selectedSourceKind === "pdf" ? "PDF preview" :
@@ -990,98 +1016,27 @@ function DocumentExplorer({
   const shownMarkdown = showingReference ? artifact.reference ?? "" : artifact.markdown;
 
   return (
-    <main className={`explorer-shell ${mobileInspecting ? "mobile-inspecting" : ""}`}>
-      <aside className="document-browser">
-        <div className="browser-heading">
-          <div>
-            <span className="eyebrow">Low-score finder</span>
-            <h2>Documents</h2>
-          </div>
-          <span className="result-count" title={`${documentTotal.toLocaleString()} matching documents`}>{formatCompact(documentTotal)}</span>
-        </div>
-        <label className="search-field compact-search">
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search document name"
-            aria-label="Search document name"
-          />
-        </label>
-        <div className="filter-row">
-          <label>
-            <span>Dimension</span>
-            <select value={dimension} onChange={(event) => setDimension(event.target.value)}>
-              <option value="all">All dimensions</option>
-              {bundle.dimensions.map((item) => (
-                <option value={item.dimension} key={item.id}>
-                  {DIMENSION_LABELS[item.dimension] ?? humanize(item.dimension)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="ceiling-filter">
-            <span>Score ≤ <strong>{ceiling}%</strong></span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              value={ceiling}
-              onChange={(event) => setCeiling(Number(event.target.value))}
-            />
-          </label>
-        </div>
-        <div className="document-list" aria-live="polite">
-          {documentsLoading ? (
-            <div className="loading-list" role="status">Finding low scores…</div>
-          ) : documents.length ? (
-            documents.map((result) => (
-              <button
-                type="button"
-                key={result.id}
-                className={`document-row ${selected?.id === result.id ? "document-row-selected" : ""}`}
-                aria-pressed={selected?.id === result.id}
-                onClick={() => { selectDocument(result); setMobileViewer("source"); setMobileInspecting(true); }}
-              >
-                <div className="document-row-main">
-                  <div>
-                    <strong>{result.benchmark_cases.test_id.split("/").at(-1)}</strong>
-                    <span>{DIMENSION_LABELS[result.run_dimensions.dimension] ?? humanize(result.run_dimensions.dimension)}</span>
-                  </div>
-                </div>
-                <span className={`document-score score-${scoreTone(result.primary_score)}`}>
-                  {scorePercent(result.primary_score)}
-                </span>
-              </button>
-            ))
-          ) : (
-            <EmptyState
-              title="No matching low scores"
-              body="Raise the score ceiling or change the dimension filter."
-            />
-          )}
-        </div>
-        {documentTotal > 120 && (
-          <div className="document-pagination" aria-label="Document result pages">
-            <button type="button" disabled={documentPage === 0} onClick={() => setDocumentPage(Math.max(0, documentPage - 1))} aria-label="Previous document page">←</button>
-            <span>{documentPage + 1} / {pageCount}</span>
-            <button type="button" disabled={documentPage >= pageCount - 1} onClick={() => setDocumentPage(Math.min(pageCount - 1, documentPage + 1))} aria-label="Next document page">→</button>
-          </div>
-        )}
-      </aside>
-
+    <main className="workbench-shell">
       <section className="inspection-workspace">
         {selected ? (
           <>
-            <button className="mobile-back-button" type="button" onClick={() => setMobileInspecting(false)}>← Back to documents</button>
-            <header className="inspection-header">
+            <header className="workbench-header">
+              <div className="workbench-navigation">
+                <button
+                  className="queue-browser-button"
+                  type="button"
+                  onClick={(event) => onBrowseQueue(event.currentTarget)}
+                >
+                  Browse queue
+                </button>
+              </div>
               <div className="inspection-title">
                 <div className="breadcrumb">
                   <span>{DIMENSION_LABELS[selected.run_dimensions.dimension] ?? humanize(selected.run_dimensions.dimension)}</span>
                   <span>/</span>
                   <span>{selected.benchmark_cases.inference_group ?? "document"}</span>
                 </div>
-                <h2>{selected.benchmark_cases.test_id.split("/").at(-1)}</h2>
+                <h2>{documentName(selected)}</h2>
               </div>
               <div className="inspection-score">
                 <span>Primary score</span>
@@ -1097,6 +1052,10 @@ function DocumentExplorer({
                     <strong>{scorePercent(metric.metric_value)}</strong>
                   </div>
                 ))}
+              </div>
+              <div className="case-navigation" aria-label="Cases in the current triage result page">
+                <button type="button" disabled={!previous} onClick={() => previous && onNavigate(previous)} aria-label="Previous case">←</button>
+                <button type="button" disabled={!next} onClick={() => next && onNavigate(next)} aria-label="Next case">→</button>
               </div>
             </header>
 
@@ -1224,11 +1183,339 @@ function DocumentExplorer({
               </article>
             </div>
           </>
+        ) : loading ? (
+          <div className="artifact-loading" role="status">Loading document details…</div>
         ) : (
-          <EmptyState title="Select a document" body="Choose a low-scoring document to inspect its PDF and parser output." />
+          <EmptyState title="Case not found" body={`This result is not available for workflow #${run.github_run_id}.`} />
         )}
       </section>
     </main>
+  );
+}
+
+function ThumbnailCard({
+  result,
+  selected,
+  onSelect,
+}: {
+  result: CaseResult;
+  selected?: boolean;
+  onSelect: (result: CaseResult) => void;
+}) {
+  const thumbnail = thumbnailUrl(result);
+  const sourceFallback = sourceAssetKind(result) === "image" ? sourceAssetUrl(result) : null;
+  const [imageSource, setImageSource] = useState(thumbnail ?? sourceFallback);
+  const [imageFailed, setImageFailed] = useState(false);
+  const label = DIMENSION_LABELS[result.run_dimensions.dimension] ?? humanize(result.run_dimensions.dimension);
+
+  function recoverMissingThumbnail() {
+    if (imageSource === thumbnail && sourceFallback) {
+      setImageSource(sourceFallback);
+    } else {
+      setImageFailed(true);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className={`triage-card ${selected ? "triage-card-selected" : ""}`}
+      aria-pressed={selected}
+      onClick={() => onSelect(result)}
+    >
+      <span className="triage-thumbnail">
+        {imageSource && !imageFailed ? (
+          <Image
+            src={imageSource}
+            alt={`Thumbnail of ${documentName(result)}`}
+            fill
+            sizes="(max-width: 620px) 50vw, (max-width: 1000px) 33vw, 20vw"
+            unoptimized
+            onError={recoverMissingThumbnail}
+          />
+        ) : (
+          <span className="thumbnail-fallback" aria-hidden="true">
+            <span>{label.slice(0, 1)}</span>
+            Preview unavailable
+          </span>
+        )}
+        <span className="triage-card-badges">
+          <span className="triage-dimension-badge">{label}</span>
+          <span className={`triage-score-badge score-${scoreTone(result.primary_score)}`}>
+            {scorePercent(result.primary_score)}
+          </span>
+        </span>
+      </span>
+      <span className="triage-card-copy">
+        <strong title={documentName(result)}>{documentName(result)}</strong>
+        <span>{result.success ? humanize(result.primary_metric_name) : "Evaluation error"}</span>
+      </span>
+    </button>
+  );
+}
+
+function TriageToolbar({
+  bundle,
+  filters,
+  total,
+  updateFilters,
+  resetFilters,
+  onDraftFiltersChange,
+  navigationPendingRef,
+  fullPageHref,
+}: {
+  bundle: RunBundle;
+  filters: TriageFilters;
+  total: number;
+  updateFilters: (updates: Partial<TriageFilters>) => void;
+  resetFilters: () => void;
+  onDraftFiltersChange: (filters: TriageFilters) => void;
+  navigationPendingRef: { current: boolean };
+  fullPageHref?: string;
+}) {
+  const [draftSearch, setDraftSearch] = useState(filters.search);
+  const [draftMinimum, setDraftMinimum] = useState(filters.minimum);
+  const [draftMaximum, setDraftMaximum] = useState(filters.maximum);
+  const draftFilters = normalizeTriageFilters({
+    ...filters,
+    search: draftSearch,
+    minimum: draftMinimum,
+    maximum: draftMaximum,
+  });
+
+  function reportDraft(updates: Partial<TriageFilters>) {
+    const next = normalizeTriageFilters({ ...draftFilters, ...updates });
+    onDraftFiltersChange(next);
+    return next;
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!navigationPendingRef.current && draftSearch !== filters.search) {
+        updateFilters({ search: draftSearch, page: 0 });
+      }
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [draftSearch, filters.search, navigationPendingRef, updateFilters]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!navigationPendingRef.current && (draftMinimum !== filters.minimum || draftMaximum !== filters.maximum)) {
+        updateFilters({ minimum: draftMinimum, maximum: draftMaximum, page: 0 });
+      }
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [draftMaximum, draftMinimum, filters.maximum, filters.minimum, navigationPendingRef, updateFilters]);
+
+  return (
+    <section className="triage-toolbar" aria-label="Triage filters">
+      <div className="triage-toolbar-topline">
+        <div>
+          <span className="eyebrow">Visual case finder</span>
+          <h1>Triage queue</h1>
+        </div>
+        <div className="triage-toolbar-actions">
+          <span className="triage-result-summary" aria-live="polite">
+            <strong>{total.toLocaleString()}</strong> matching cases
+          </span>
+          {fullPageHref && (
+            <Link
+              className="triage-full-page-link"
+              href={hrefWithTriageFilters(fullPageHref.split("?")[0], draftFilters)}
+              onNavigate={() => {
+                navigationPendingRef.current = true;
+              }}
+            >
+              Open full page ↗
+            </Link>
+          )}
+        </div>
+      </div>
+
+      <div className="dimension-pills" aria-label="Evaluation dimension">
+        {bundle.dimensions.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            aria-pressed={filters.dimension === item.dimension}
+            onClick={() => updateFilters(reportDraft({ dimension: item.dimension, page: 0 }))}
+          >
+            {DIMENSION_LABELS[item.dimension] ?? humanize(item.dimension)}
+            <span>{item.total_examples?.toLocaleString() ?? 0}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="triage-controls">
+        <label className="triage-search">
+          <span>Search documents</span>
+          <input
+            type="search"
+            value={draftSearch}
+            onChange={(event) => {
+              setDraftSearch(event.target.value);
+              reportDraft({ search: event.target.value, page: 0 });
+            }}
+            placeholder="Name, identifier, or page"
+          />
+        </label>
+
+        <fieldset className="score-range-control">
+          <legend>Score range</legend>
+          <div className="score-range-values">
+            <output>{draftMinimum}%</output>
+            <span>to</span>
+            <output>{draftMaximum}%</output>
+          </div>
+          <div className="dual-range" style={{ "--range-start": `${draftMinimum}%`, "--range-end": `${draftMaximum}%` } as CSSProperties}>
+            <span className="dual-range-track" />
+            <input
+              aria-label="Minimum score"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={draftMinimum}
+              onChange={(event) => {
+                const minimum = Math.min(Number(event.target.value), draftMaximum);
+                setDraftMinimum(minimum);
+                reportDraft({ minimum, page: 0 });
+              }}
+            />
+            <input
+              aria-label="Maximum score"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={draftMaximum}
+              onChange={(event) => {
+                const maximum = Math.max(Number(event.target.value), draftMinimum);
+                setDraftMaximum(maximum);
+                reportDraft({ maximum, page: 0 });
+              }}
+            />
+          </div>
+        </fieldset>
+
+        <label className="triage-sort">
+          <span>Sort by</span>
+          <select
+            value={filters.sort}
+            onChange={(event) => updateFilters(reportDraft({ sort: event.target.value as DocumentSort, page: 0 }))}
+          >
+            <option value="lowest">Lowest score</option>
+            <option value="highest">Highest score</option>
+            <option value="document">Document order</option>
+          </select>
+        </label>
+
+        <button
+          className="reset-filters"
+          type="button"
+          onClick={() => {
+            const next = normalizeTriageFilters({
+              dimension: bundle.dimensions[0]?.dimension ?? DIMENSION_ORDER[0],
+              search: "",
+              minimum: 0,
+              maximum: 100,
+              sort: "lowest",
+              page: 0,
+            });
+            setDraftSearch("");
+            setDraftMinimum(0);
+            setDraftMaximum(100);
+            onDraftFiltersChange(next);
+            resetFilters();
+          }}
+        >
+          Reset
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function TriageGrid({
+  bundle,
+  documents,
+  total,
+  loading,
+  filters,
+  updateFilters,
+  resetFilters,
+  onSelect,
+  compact = false,
+  embedded = false,
+  fullPageHref,
+  selectedId,
+}: {
+  bundle: RunBundle;
+  documents: CaseResult[];
+  total: number;
+  loading: boolean;
+  filters: TriageFilters;
+  updateFilters: (updates: Partial<TriageFilters>) => void;
+  resetFilters: () => void;
+  onSelect: (result: CaseResult, navigationFilters?: TriageFilters) => void;
+  compact?: boolean;
+  embedded?: boolean;
+  fullPageHref?: string;
+  selectedId?: number;
+}) {
+  const pageCount = Math.max(1, Math.ceil(total / TRIAGE_PAGE_SIZE));
+  const draftFiltersRef = useRef(filters);
+  const navigationPendingRef = useRef(false);
+
+  useEffect(() => {
+    draftFiltersRef.current = filters;
+  }, [filters]);
+
+  return (
+    <div className={compact ? "queue-overlay-body" : embedded ? "triage-embedded" : "triage-page"}>
+      <TriageToolbar
+        key={`${filters.search}:${filters.minimum}:${filters.maximum}`}
+        bundle={bundle}
+        filters={filters}
+        total={total}
+        updateFilters={updateFilters}
+        resetFilters={resetFilters}
+        onDraftFiltersChange={(draftFilters) => {
+          navigationPendingRef.current = false;
+          draftFiltersRef.current = draftFilters;
+        }}
+        navigationPendingRef={navigationPendingRef}
+        fullPageHref={fullPageHref}
+      />
+      <section className="triage-results" aria-label="Matching benchmark cases">
+        {loading ? (
+          <div className="triage-grid-loading" role="status">Loading document thumbnails…</div>
+        ) : documents.length ? (
+          <div className="triage-grid">
+            {documents.map((result) => (
+              <ThumbnailCard
+                key={result.id}
+                result={result}
+                selected={result.id === selectedId}
+                onSelect={(selected) => {
+                  navigationPendingRef.current = true;
+                  onSelect(selected, draftFiltersRef.current);
+                }}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No matching cases" body="Adjust the score range, dimension, or document search." />
+        )}
+      </section>
+      {total > TRIAGE_PAGE_SIZE && (
+        <nav className="triage-pagination" aria-label="Triage result pages">
+          <button type="button" disabled={filters.page === 0} onClick={() => updateFilters({ page: Math.max(0, filters.page - 1) })}>← Previous</button>
+          <span>Page {filters.page + 1} of {pageCount}</span>
+          <button type="button" disabled={filters.page >= pageCount - 1} onClick={() => updateFilters({ page: Math.min(pageCount - 1, filters.page + 1) })}>Next →</button>
+        </nav>
+      )}
+    </div>
   );
 }
 
@@ -1243,10 +1530,29 @@ export default function DashboardClient({
   const searchParams = useSearchParams();
   const routeRunId = routeParams.runId;
   const githubRunId = routeRunId && /^\d+$/.test(routeRunId) ? Number(routeRunId) : undefined;
-  const view: View = pathname.endsWith("/documents")
-    ? "documents"
-    : githubRunId == null ? "runs" : "overview";
-  const routeDimension = searchParams.get("dimension") || "all";
+  const routeCaseResultValue = pathname.match(/\/triage\/(\d+)\/?$/)?.[1];
+  const routeCaseResultId = routeCaseResultValue && /^\d+$/.test(routeCaseResultValue)
+    ? Number(routeCaseResultValue)
+    : null;
+  const view: View = githubRunId == null
+    ? "runs"
+    : pathname.includes("/triage/")
+      ? "inspect"
+      : pathname.endsWith("/triage")
+        ? "triage"
+        : "overview";
+  const sortValue = searchParams.get("sort");
+  const filters = useMemo<TriageFilters>(() => normalizeTriageFilters({
+      dimension: DIMENSION_ORDER.includes(searchParams.get("dimension") as (typeof DIMENSION_ORDER)[number])
+        ? searchParams.get("dimension")!
+        : DIMENSION_ORDER[0],
+      search: searchParams.get("q") || "",
+      minimum: parsePercent(searchParams.get("min"), 0),
+      maximum: parsePercent(searchParams.get("max"), 100),
+      sort: sortValue === "highest" || sortValue === "document" ? sortValue : "lowest",
+      page: parsePage(searchParams.get("page")),
+    }), [searchParams, sortValue]);
+  const inspectionOrigin = searchParams.get("from") === "overview" ? "overview" : "triage";
   const [runs, setRuns] = useState<BenchmarkRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(true);
   const [runScores, setRunScores] = useState<RunScoreIndex>({});
@@ -1256,18 +1562,93 @@ export default function DashboardClient({
   const [bundleLoading, setBundleLoading] = useState(false);
   const [documents, setDocuments] = useState<CaseResult[]>([]);
   const [documentTotal, setDocumentTotal] = useState(0);
-  const [documentPage, setDocumentPage] = useState(0);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<CaseResult | null>(null);
-  const [dimension, setDimension] = useState(routeDimension);
-  const [search, setSearch] = useState("");
-  const [ceiling, setCeiling] = useState(65);
+  const [documentLoadState, setDocumentLoadState] = useState<{ id: number | null; loading: boolean }>({
+    id: null,
+    loading: false,
+  });
   const [caseMetrics, setCaseMetrics] = useState<CaseMetric[]>([]);
+  const [caseMetricsResultId, setCaseMetricsResultId] = useState<number | null>(null);
   const [artifact, setArtifact] = useState<ArtifactState>(EMPTY_ARTIFACT);
+  const [artifactResultId, setArtifactResultId] = useState<number | null>(null);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const queueOverlayRef = useRef<HTMLDivElement>(null);
+  const queueCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const queueTriggerRef = useRef<HTMLButtonElement>(null);
 
   const selectedRun = githubRunId == null
     ? null
     : runs.find((run) => run.github_run_id === githubRunId) ?? null;
+  const activeDimension = bundle.dimensions.some((item) => item.dimension === filters.dimension)
+    ? filters.dimension
+    : bundle.dimensions[0]?.dimension ?? filters.dimension;
+
+  const updateFilters = useCallback((updates: Partial<TriageFilters>) => {
+    if (!selectedRun) return;
+    const next = { ...filters, ...updates };
+    if (next.minimum > next.maximum) {
+      if (updates.minimum != null) next.maximum = next.minimum;
+      else next.minimum = next.maximum;
+    }
+    const normalized = normalizeTriageFilters(next);
+    const base = view === "inspect" && routeCaseResultId != null
+      ? `/workflows/${selectedRun.github_run_id}/triage/${routeCaseResultId}`
+      : view === "overview"
+        ? `/workflows/${selectedRun.github_run_id}`
+        : `/workflows/${selectedRun.github_run_id}/triage`;
+    const query = triageQuery(normalized);
+    if (view === "inspect") query.set("from", inspectionOrigin);
+    router.replace(query.size ? `${base}?${query.toString()}` : base, { scroll: false });
+  }, [filters, inspectionOrigin, routeCaseResultId, router, selectedRun, view]);
+
+  const reconcileDocumentPage = useEffectEvent((total: number) => {
+    const lastPage = Math.max(0, Math.ceil(total / TRIAGE_PAGE_SIZE) - 1);
+    if (filters.page <= lastPage) return false;
+    updateFilters({ page: lastPage });
+    return true;
+  });
+
+  const defaultDetailDimension = useEffectEvent((document: CaseResult) => {
+    const requestedDimension = searchParams.get("dimension");
+    if (
+      !DIMENSION_ORDER.includes(requestedDimension as (typeof DIMENSION_ORDER)[number]) &&
+      DIMENSION_ORDER.includes(document.run_dimensions.dimension as (typeof DIMENSION_ORDER)[number])
+    ) {
+      updateFilters({ dimension: document.run_dimensions.dimension, page: 0 });
+    }
+  });
+
+  useEffect(() => {
+    if (!queueOpen) return;
+    const trigger = queueTriggerRef.current;
+    queueCloseButtonRef.current?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setQueueOpen(false);
+      if (event.key !== "Tab") return;
+      const focusable = queueOverlayRef.current?.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled])",
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [queueOpen]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1283,14 +1664,6 @@ export default function DashboardClient({
       });
     return () => controller.abort();
   }, []);
-
-  useEffect(() => {
-    // Route changes intentionally reset the view-specific document filters.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDocumentPage(0);
-    setSearch("");
-    setDimension(view === "documents" ? routeDimension : "all");
-  }, [githubRunId, routeDimension, view]);
 
   useEffect(() => {
     if (!runs.length) return;
@@ -1335,22 +1708,24 @@ export default function DashboardClient({
       loadDocuments(
         selectedRun.id,
         {
-          dimension,
-          search,
-          ceiling: ceiling / 100,
-          limit: 120,
-          offset: documentPage * 120,
+          dimension: activeDimension,
+          search: filters.search,
+          floor: filters.minimum / 100,
+          ceiling: filters.maximum / 100,
+          sort: filters.sort,
+          limit: TRIAGE_PAGE_SIZE,
+          offset: filters.page * TRIAGE_PAGE_SIZE,
         },
         controller.signal,
       )
         .then(({ documents: loadedDocuments, total }) => {
+          if (reconcileDocumentPage(total)) {
+            setDocuments([]);
+            setDocumentTotal(total);
+            return;
+          }
           setDocuments(loadedDocuments);
           setDocumentTotal(total);
-          setSelectedDocument((current) =>
-            loadedDocuments.find((document) => document.id === current?.id) ??
-            loadedDocuments.find((document) => document.primary_score != null) ??
-            null,
-          );
         })
         .catch((error: Error) => {
           if (error.name !== "AbortError") setLoadError(error.message);
@@ -1358,12 +1733,47 @@ export default function DashboardClient({
         .finally(() => {
           if (!controller.signal.aborted) setDocumentsLoading(false);
         });
-    }, search ? 280 : 0);
+    }, 0);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [ceiling, documentPage, selectedRun, dimension, search]);
+  }, [
+    activeDimension,
+    filters.maximum,
+    filters.minimum,
+    filters.page,
+    filters.search,
+    filters.sort,
+    selectedRun,
+  ]);
+
+  useEffect(() => {
+    if (!selectedRun || view !== "inspect" || routeCaseResultId == null) {
+      // Route changes intentionally clear the case-specific workbench state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedDocument(null);
+      setDocumentLoadState({ id: null, loading: false });
+      return;
+    }
+    const controller = new AbortController();
+    setDocumentLoadState({ id: routeCaseResultId, loading: true });
+    loadDocument(selectedRun.id, routeCaseResultId, controller.signal)
+      .then((document) => {
+        if (controller.signal.aborted) return;
+        setSelectedDocument(document);
+        setDocumentLoadState({ id: routeCaseResultId, loading: false });
+        if (document) defaultDetailDimension(document);
+      })
+      .catch((error: Error) => {
+        if (error.name !== "AbortError") {
+          setSelectedDocument(null);
+          setDocumentLoadState({ id: routeCaseResultId, loading: false });
+          setLoadError(error.message);
+        }
+      });
+    return () => controller.abort();
+  }, [routeCaseResultId, selectedRun, view]);
 
   useEffect(() => {
     if (!selectedRun || !selectedDocument) {
@@ -1373,6 +1783,8 @@ export default function DashboardClient({
     // This reset intentionally belongs to the selected-document synchronization.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCaseMetrics([]);
+    setCaseMetricsResultId(selectedDocument.id);
+    setArtifactResultId(selectedDocument.id);
     setArtifact({
       loading: true,
       markdown: "",
@@ -1419,32 +1831,95 @@ export default function DashboardClient({
       setDocumentTotal(0);
       setSelectedDocument(null);
       setCaseMetrics([]);
+      setCaseMetricsResultId(null);
       setArtifact(EMPTY_ARTIFACT);
+      setArtifactResultId(null);
     }
-    setDocumentPage(0);
-    setDimension("all");
-    setSearch("");
-    setCeiling(65);
     router.push(`/workflows/${candidate.github_run_id}`);
   }
 
   function inspectDimension(nextDimension: string) {
-    setDimension(nextDimension);
-    setSearch("");
-    setDocumentPage(0);
     if (!selectedRun) return;
-    const query = nextDimension === "all" ? "" : `?dimension=${encodeURIComponent(nextDimension)}`;
-    router.push(`/workflows/${selectedRun.github_run_id}/documents${query}`);
+    const resolvedDimension = nextDimension === "all"
+      ? bundle.dimensions[0]?.dimension ?? DIMENSION_ORDER[0]
+      : nextDimension;
+    const query = `?dimension=${encodeURIComponent(resolvedDimension)}`;
+    router.push(`/workflows/${selectedRun.github_run_id}/triage${query}`);
   }
 
-  function inspectDocument(result: CaseResult) {
-    setDimension(result.run_dimensions.dimension);
-    setDocumentPage(0);
-    setSelectedDocument(result);
+  function inspectDocument(result: CaseResult, navigationFilters: TriageFilters = filters) {
     if (!selectedRun) return;
-    const query = new URLSearchParams({ dimension: result.run_dimensions.dimension });
-    router.push(`/workflows/${selectedRun.github_run_id}/documents?${query.toString()}`);
+    setQueueOpen(false);
+    setSelectedDocument(null);
+    setDocumentLoadState({ id: result.id, loading: true });
+    setCaseMetricsResultId(null);
+    setArtifactResultId(null);
+    const query = triageQuery(navigationFilters);
+    const origin = view === "overview"
+      ? "overview"
+      : view === "triage"
+        ? "triage"
+        : inspectionOrigin;
+    query.set("from", origin);
+    const href = `/workflows/${selectedRun.github_run_id}/triage/${result.id}`;
+    router.push(query.size ? `${href}?${query.toString()}` : href, { scroll: false });
   }
+
+  const resetFilters = useCallback(() => {
+    updateFilters({
+      dimension: bundle.dimensions[0]?.dimension ?? DIMENSION_ORDER[0],
+      search: "",
+      minimum: 0,
+      maximum: 100,
+      sort: "lowest",
+      page: 0,
+    });
+  }, [bundle.dimensions, updateFilters]);
+
+  useEffect(() => {
+    if (
+      view !== "runs" &&
+      bundle.dimensions.length &&
+      !bundle.dimensions.some((item) => item.dimension === filters.dimension)
+    ) {
+      updateFilters({ dimension: bundle.dimensions[0].dimension, page: 0 });
+    }
+  }, [bundle.dimensions, filters.dimension, updateFilters, view]);
+
+  const currentIndex = routeCaseResultId == null
+    ? -1
+    : documents.findIndex((document) => document.id === routeCaseResultId);
+  const previousDocument = currentIndex > 0 ? documents[currentIndex - 1] : null;
+  const nextDocument = currentIndex >= 0 && currentIndex < documents.length - 1
+    ? documents[currentIndex + 1]
+    : null;
+  const queueHref = selectedRun
+    ? hrefWithTriageFilters(`/workflows/${selectedRun.github_run_id}/triage`, filters)
+    : "/workflows";
+  const overviewHref = selectedRun
+    ? hrefWithTriageFilters(`/workflows/${selectedRun.github_run_id}`, filters)
+    : "/workflows";
+  const inspectorBackHref = inspectionOrigin === "overview" ? overviewHref : queueHref;
+  const pageBackHref = view === "overview"
+    ? "/workflows"
+    : view === "triage"
+      ? overviewHref
+      : inspectorBackHref;
+  const pageBackLabel = view === "overview"
+    ? "Back to workflows"
+    : view === "triage"
+      ? "Back to overview"
+      : inspectionOrigin === "overview"
+        ? "Back to overview"
+        : "Back to triage queue";
+  const displayedDocument = selectedDocument?.id === routeCaseResultId ? selectedDocument : null;
+  const documentDetailsLoading = routeCaseResultId != null && (
+    documentLoadState.id !== routeCaseResultId || documentLoadState.loading
+  );
+  const displayedArtifact = artifactResultId === routeCaseResultId
+    ? artifact
+    : { ...EMPTY_ARTIFACT, loading: documentDetailsLoading || displayedDocument != null };
+  const displayedCaseMetrics = caseMetricsResultId === routeCaseResultId ? caseMetrics : [];
 
   return (
     <div className="app-shell">
@@ -1457,21 +1932,20 @@ export default function DashboardClient({
             Workflows
           </Link>
           {selectedRun ? (
-            <Link href={`/workflows/${selectedRun.github_run_id}`} aria-current={view === "overview" ? "page" : undefined} className={view === "overview" ? "view-nav-active" : ""}>
+            <Link href={`/workflows/${selectedRun.github_run_id}`} aria-current={view !== "runs" ? "page" : undefined} className={view !== "runs" ? "view-nav-active" : ""}>
               Overview
             </Link>
-          ) : <span aria-disabled="true">Overview</span>}
-          {selectedRun ? (
-            <Link href={`/workflows/${selectedRun.github_run_id}/documents`} aria-current={view === "documents" ? "page" : undefined} className={view === "documents" ? "view-nav-active" : ""}>
-              Documents
-            </Link>
-          ) : <span aria-disabled="true">Documents</span>}
+          ) : null}
         </nav>
       </header>
 
       {view !== "runs" && (
         <section className="run-command-bar">
           <div className="run-context">
+            <Link className="run-back-link" href={pageBackHref} aria-label={pageBackLabel}>
+              <span aria-hidden="true">←</span>
+              {pageBackLabel}
+            </Link>
             <span className="eyebrow">Selected workflow · #{selectedRun?.github_run_id ?? "—"}</span>
             {selectedRun ? (
               <>
@@ -1492,7 +1966,6 @@ export default function DashboardClient({
             )}
           </div>
           <div className="run-toolbar-actions">
-            <Link className="primary-action" href="/workflows">Browse workflows</Link>
             {selectedRun?.github_run_url && (
               <a href={selectedRun.github_run_url} target="_blank" rel="noreferrer" className="secondary-action">Open in GitHub ↗</a>
             )}
@@ -1521,28 +1994,42 @@ export default function DashboardClient({
             run={selectedRun}
             bundle={bundle}
             documents={documents}
+            documentTotal={documentTotal}
             loading={bundleLoading}
+            documentsLoading={documentsLoading}
+            filters={filters}
+            updateFilters={updateFilters}
+            resetFilters={resetFilters}
+            fullPageHref={queueHref}
             inspectDimension={inspectDimension}
             inspectDocument={inspectDocument}
           />
-        ) : (
-          <DocumentExplorer
+        ) : view === "triage" ? (
+          <TriageGrid
             bundle={bundle}
             documents={documents}
-            documentTotal={documentTotal}
-            documentPage={documentPage}
-            setDocumentPage={setDocumentPage}
-            documentsLoading={documentsLoading}
-            selected={selectedDocument}
-            selectDocument={setSelectedDocument}
-            dimension={dimension}
-            setDimension={(nextDimension) => { setDimension(nextDimension); setDocumentPage(0); }}
-            search={search}
-            setSearch={(nextSearch) => { setSearch(nextSearch); setDocumentPage(0); }}
-            ceiling={ceiling}
-            setCeiling={(nextCeiling) => { setCeiling(nextCeiling); setDocumentPage(0); }}
-            artifact={artifact}
-            caseMetrics={caseMetrics}
+            total={documentTotal}
+            loading={documentsLoading || bundleLoading}
+            filters={filters}
+            updateFilters={updateFilters}
+            resetFilters={resetFilters}
+            onSelect={inspectDocument}
+          />
+        ) : (
+          <DocumentExplorer
+            key={routeCaseResultId ?? "missing-case"}
+            run={selectedRun}
+            selected={displayedDocument}
+            loading={documentDetailsLoading}
+            artifact={displayedArtifact}
+            caseMetrics={displayedCaseMetrics}
+            onBrowseQueue={(trigger) => {
+              queueTriggerRef.current = trigger;
+              setQueueOpen(true);
+            }}
+            previous={previousDocument}
+            next={nextDocument}
+            onNavigate={inspectDocument}
           />
         )
       ) : (
@@ -1554,6 +2041,29 @@ export default function DashboardClient({
               : `Workflow run #${githubRunId} is not in the benchmark index.`}
           />
         </main>
+      )}
+      {selectedRun && view === "inspect" && queueOpen && (
+        <div ref={queueOverlayRef} className="queue-overlay" role="dialog" aria-modal="true" aria-label="Browse triage queue">
+          <div className="queue-overlay-header">
+            <div>
+              <span className="eyebrow">Current filtered queue</span>
+              <strong>Choose another case</strong>
+            </div>
+            <button ref={queueCloseButtonRef} type="button" onClick={() => setQueueOpen(false)} aria-label="Close queue browser">×</button>
+          </div>
+          <TriageGrid
+            bundle={bundle}
+            documents={documents}
+            total={documentTotal}
+            loading={documentsLoading}
+            filters={filters}
+            updateFilters={updateFilters}
+            resetFilters={resetFilters}
+            onSelect={inspectDocument}
+            compact
+            selectedId={routeCaseResultId ?? undefined}
+          />
+        </div>
       )}
       {children}
     </div>

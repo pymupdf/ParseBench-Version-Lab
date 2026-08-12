@@ -10,6 +10,13 @@ const nextConfig: NextConfig = {
         pathname: "/datasets/**/resolve/**",
         search: "",
       },
+      {
+        protocol: "https",
+        hostname: "storage.googleapis.com",
+        port: "",
+        pathname: "/parsebench-thumbnails-457820/**",
+        search: "",
+      },
     ],
   },
 };

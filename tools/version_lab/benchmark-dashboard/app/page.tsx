@@ -19,7 +19,7 @@ export default async function LegacyDashboard({
     redirect("/workflows");
   }
   if (view === "documents") {
-    redirect(`/workflows/${run}/documents`);
+    redirect(`/workflows/${run}/triage`);
   }
   redirect(`/workflows/${run}`);
 }

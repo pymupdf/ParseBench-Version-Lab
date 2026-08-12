@@ -139,6 +139,11 @@ export type RunScoreSummary = {
 
 export type RunScoreIndex = Record<number, RunScoreSummary>;
 
+export type DocumentSort = "lowest" | "highest" | "document";
+
+const CASE_RESULT_SELECT =
+  "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,stats,tags,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,pdf_relative_path,source_relative_path,source_media_type,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))";
+
 function configurationError() {
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
     throw new Error(
@@ -296,25 +301,33 @@ export function loadDocuments(
   options: {
     dimension?: string;
     search?: string;
+    floor?: number;
     ceiling?: number;
+    sort?: DocumentSort;
     limit?: number;
     offset?: number;
   } = {},
   signal?: AbortSignal,
 ) {
   const params = new URLSearchParams({
-    select:
-      "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,stats,tags,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,pdf_relative_path,source_relative_path,source_media_type,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))",
+    select: CASE_RESULT_SELECT,
     "run_dimensions.run_id": `eq.${runId}`,
-    order: "primary_score.asc.nullslast,id.asc",
+    order: options.sort === "highest"
+      ? "primary_score.desc.nullslast,id.asc"
+      : options.sort === "document"
+        ? "benchmark_cases(id).asc,id.asc"
+        : "primary_score.asc.nullslast,id.asc",
     limit: String(options.limit ?? 120),
     offset: String(options.offset ?? 0),
   });
   if (options.dimension && options.dimension !== "all") {
     params.set("run_dimensions.dimension", `eq.${options.dimension}`);
   }
+  if (options.floor != null) {
+    params.append("primary_score", `gte.${Math.max(0, Math.min(1, options.floor))}`);
+  }
   if (options.ceiling != null) {
-    params.set("primary_score", `lte.${Math.max(0, Math.min(1, options.ceiling))}`);
+    params.append("primary_score", `lte.${Math.max(0, Math.min(1, options.ceiling))}`);
   }
   if (options.search?.trim()) {
     const escapedSearch = options.search
@@ -339,16 +352,39 @@ export function loadDocuments(
       signal,
     },
   ).then(async (response) => {
+    const contentRange = response.headers.get("content-range");
+    const totalValue = contentRange?.split("/").at(-1);
+    const rangedTotal = totalValue && totalValue !== "*" ? Number(totalValue) : null;
+    if (response.status === 416 && rangedTotal != null && Number.isFinite(rangedTotal)) {
+      await response.body?.cancel();
+      return { documents: [], total: rangedTotal };
+    }
     if (!response.ok) {
       const detail = await response.text();
       throw new Error(`Could not load case_results (${response.status}): ${detail}`);
     }
-    const contentRange = response.headers.get("content-range");
-    const totalValue = contentRange?.split("/").at(-1);
     const documents = (await response.json()) as CaseResult[];
-    const total = totalValue && totalValue !== "*" ? Number(totalValue) : documents.length;
+    const total = rangedTotal ?? documents.length;
     return { documents, total: Number.isFinite(total) ? total : documents.length };
   });
+}
+
+export async function loadDocument(
+  runId: number,
+  caseResultId: number,
+  signal?: AbortSignal,
+) {
+  const documents = await apiFetch<CaseResult[]>(
+    "case_results",
+    new URLSearchParams({
+      select: CASE_RESULT_SELECT,
+      id: `eq.${caseResultId}`,
+      "run_dimensions.run_id": `eq.${runId}`,
+      limit: "1",
+    }),
+    signal,
+  );
+  return documents[0] ?? null;
 }
 
 export function loadCaseMetrics(caseResultId: number, signal?: AbortSignal) {
@@ -399,6 +435,16 @@ export function sourceAssetKind(result: CaseResult) {
     return "image";
   }
   return "unsupported";
+}
+
+const THUMBNAIL_BUCKET =
+  process.env.NEXT_PUBLIC_THUMBNAIL_BUCKET ?? "parsebench-thumbnails-457820";
+
+export function thumbnailUrl(result: CaseResult) {
+  const revision = result.benchmark_cases.dataset_versions.resolved_sha;
+  const testId = result.benchmark_cases.test_id;
+  if (!revision || !testId) return null;
+  return `https://storage.googleapis.com/${encodeURIComponent(THUMBNAIL_BUCKET)}/${encodePath(`${revision}/docs/${testId}.webp`)}`;
 }
 
 export async function loadArtifact(

@@ -23,8 +23,8 @@ test("finds workflows by commit and opens a selected run", async ({ page }) => {
 test("reopening the selected workflow preserves its evaluation data", async ({ page }) => {
   await page.goto(`/?run=${RUN_ID}&view=overview`);
 
-  await expect(page.locator(".dimension-grid")).toBeVisible();
-  const evaluationCount = await page.locator(".dimension-grid > *").count();
+  await expect(page.locator(".score-profile-grid")).toBeVisible();
+  const evaluationCount = await page.locator(".score-profile-grid > *").count();
   expect(evaluationCount).toBeGreaterThan(0);
 
   await page.getByRole("link", { name: "Workflows", exact: true }).click();
@@ -35,7 +35,7 @@ test("reopening the selected workflow preserves its evaluation data", async ({ p
   await workflow.click();
 
   await expect(page).toHaveURL(new RegExp(`/workflows/${RUN_ID}$`));
-  await expect(page.locator(".dimension-grid > *")).toHaveCount(evaluationCount);
+  await expect(page.locator(".score-profile-grid > *")).toHaveCount(evaluationCount);
   await expect(page.getByText("No evaluation reports")).toHaveCount(0);
 });
 
@@ -49,18 +49,21 @@ test("opens the workflow behind a leading benchmark score", async ({ page }) => 
 
   await expect(page).toHaveURL(/\/workflows\/\d+$/);
   await expect(page.locator(".run-meta")).toContainText("Full · All");
-  await expect(page.locator(".dimension-grid")).toBeVisible();
+  await expect(page.locator(".score-profile-grid")).toBeVisible();
 });
 
-test("mobile document browsing uses a focused list-to-detail flow", async ({ page }) => {
+test("mobile triage browsing uses a focused grid-to-detail flow", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/?run=${RUN_ID}&view=documents`);
 
-  const firstDocument = page.locator(".document-row").first();
+  await expect(page).toHaveURL(new RegExp(`/workflows/${RUN_ID}/triage`));
+  const firstDocument = page.locator(".triage-card").first();
   await expect(firstDocument).toBeVisible();
   await firstDocument.click();
 
-  await expect(page.getByRole("button", { name: "Back to documents" })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/workflows/${RUN_ID}/triage/\\d+`));
+  await expect(page.getByRole("link", { name: "Back to triage queue" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Browse queue" })).toBeVisible();
   await expect(page.locator(".pdf-card")).toBeVisible();
   await page.getByRole("button", { name: "Parsed output" }).click();
   await expect(page.locator(".output-card")).toBeVisible();
