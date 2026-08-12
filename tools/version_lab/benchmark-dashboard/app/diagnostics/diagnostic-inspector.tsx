@@ -1141,6 +1141,266 @@ function FormattingDiagnostic(props: DiagnosticInspectorProps) {
   ) : <EmptyDiagnostics message="No formatting-rule outcomes were retained for this result." />;
 }
 
+type GroundTruthInspectorProps = {
+  dimension: string;
+  diagnostic: DiagnosticArtifact | null;
+  fallbackMarkdown?: string | null;
+};
+
+function TableGroundTruth({
+  diagnostic,
+  fallbackMarkdown,
+}: Pick<GroundTruthInspectorProps, "diagnostic" | "fallbackMarkdown">) {
+  const markdown = diagnostic?.expectations
+    .map((expectation) => expectation.expected_markdown?.trim())
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n") || fallbackMarkdown || "";
+  const tableCount = diagnostic?.expectations.filter(
+    (expectation) => Boolean(expectation.expected_markdown?.trim()),
+  ).length ?? (markdown ? 1 : 0);
+  return (
+    <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
+      <div className="diagnostic-section-heading">
+        <div><span className="diagnostic-eyebrow">Table ground truth</span><h3>Expected table structure and content</h3></div>
+        <span>{tableCount.toLocaleString()} {tableCount === 1 ? "table" : "tables"}</span>
+      </div>
+      <MarkdownEvidence markdown={markdown} empty="No rendered table ground truth is available for this page." />
+    </section>
+  );
+}
+
+function ChartGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
+  const expectations = diagnostic.expectations;
+  if (!expectations.length) return <EmptyDiagnostics message="No chart ground truth was retained for this page." />;
+  return (
+    <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
+      <div className="diagnostic-section-heading">
+        <div><span className="diagnostic-eyebrow">Chart ground truth</span><h3>Expected labels and data points</h3></div>
+        <span>{expectations.length.toLocaleString()} checks</span>
+      </div>
+      <div className="diagnostic-table-scroll">
+        <table className="diagnostic-chart-table">
+          <thead><tr><th>Check</th><th>Labels</th><th>Expected value</th></tr></thead>
+          <tbody>
+            {expectations.map((expectation) => {
+              const rule = asRecord(expectation.rule) ?? {};
+              const labels = Array.isArray(rule.labels)
+                ? rule.labels.map((label) => scalarDisplay(label)).join(" · ")
+                : arrayPreview(rule.data)[0]?.map((label) => scalarDisplay(label)).join(" · ") ?? "—";
+              const matrix = arrayPreview(rule.data);
+              const value = rule.value ?? (matrix.length
+                ? `${Math.max(matrix.length - 1, 0)} data rows × ${matrix[0]?.length ?? 0} columns`
+                : "—");
+              return (
+                <tr key={expectation.id}>
+                  <th scope="row"><strong>{humanize(expectation.type)}</strong></th>
+                  <td>{labels}</td>
+                  <td>
+                    <span>{scalarDisplay(value)}</span>
+                    {matrix.length > 0 && (
+                      <details className="diagnostic-matrix-details">
+                        <summary>View expected data</summary>
+                        <div className="diagnostic-table-scroll">
+                          <table>
+                            <tbody>{matrix.map((row, rowIndex) => (
+                              <tr key={rowIndex}>{row.map((cell, cellIndex) => (
+                                rowIndex === 0
+                                  ? <th scope="col" key={cellIndex}>{scalarDisplay(cell)}</th>
+                                  : <td key={cellIndex}>{scalarDisplay(cell)}</td>
+                              ))}</tr>
+                            ))}</tbody>
+                          </table>
+                        </div>
+                      </details>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function layoutContentSummary(rule: Record<string, unknown>) {
+  const content = asRecord(rule.content);
+  return asString(content?.text) ?? asString(content?.html) ?? scalarDisplay(rule.content);
+}
+
+function layoutBoxSummary(rule: Record<string, unknown>) {
+  const bbox = Array.isArray(rule.bbox) ? rule.bbox.map(asNumber) : [];
+  if (bbox.length !== 4 || bbox.some((value) => value == null)) return "—";
+  return bbox.map((value) => `${((value ?? 0) * 100).toFixed(1)}%`).join(" · ");
+}
+
+function LayoutGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
+  const expectations = diagnostic.expectations;
+  if (!expectations.length) return <EmptyDiagnostics message="No layout ground truth was retained for this page." />;
+  return (
+    <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
+      <div className="diagnostic-section-heading">
+        <div><span className="diagnostic-eyebrow">Layout ground truth</span><h3>Expected elements and reading order</h3></div>
+        <span>{expectations.length.toLocaleString()} elements</span>
+      </div>
+      <div className="diagnostic-table-scroll">
+        <table className="diagnostic-layout-table diagnostic-ground-truth-layout-table">
+          <thead><tr><th>Element</th><th>Expected content</th><th>Bounding box</th><th>Order</th></tr></thead>
+          <tbody>
+            {expectations.map((expectation, index) => {
+              const rule = asRecord(expectation.rule) ?? {};
+              const className = asString(rule.canonical_class) ?? asString(rule.source_label) ?? expectation.type;
+              const readingOrder = asNumber(rule.ro_index) ?? index;
+              return (
+                <tr key={expectation.id}>
+                  <th scope="row">
+                    <strong>{humanize(className)}</strong>
+                    {expectation.page != null && <small>Page {expectation.page}</small>}
+                  </th>
+                  <td>{layoutContentSummary(rule)}</td>
+                  <td><code>{layoutBoxSummary(rule)}</code></td>
+                  <td>{(readingOrder + 1).toLocaleString()}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ExpectationGroups({
+  expectations,
+  groups,
+  groupForType,
+  eyebrow,
+  heading,
+}: {
+  expectations: DiagnosticExpectation[];
+  groups: readonly { key: string; label: string }[];
+  groupForType: (type: string) => string;
+  eyebrow: string;
+  heading: string;
+}) {
+  const [query, setQuery] = useState("");
+  const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
+  const normalizedQuery = query.trim().toLowerCase();
+  const firstPopulatedGroup = groups.find((group) =>
+    expectations.some((expectation) => groupForType(expectation.type) === group.key),
+  )?.key;
+  return (
+    <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
+      <div className="diagnostic-section-heading">
+        <div><span className="diagnostic-eyebrow">{eyebrow}</span><h3>{heading}</h3></div>
+        <span>{expectations.length.toLocaleString()} checks</span>
+      </div>
+      {expectations.length > 8 && (
+        <div className="diagnostic-rule-toolbar diagnostic-ground-truth-toolbar">
+          <input
+            aria-label="Search ground-truth checks"
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder="Search ground truth"
+          />
+        </div>
+      )}
+      <div className="diagnostic-rule-groups">
+        {groups.map((group) => {
+          const grouped = expectations
+            .filter((expectation) => groupForType(expectation.type) === group.key)
+            .filter((expectation) => !normalizedQuery || [
+              expectation.type,
+              expectedRuleSummary(expectation.rule),
+              ...(expectation.tags ?? []),
+            ].some((value) => value.toLowerCase().includes(normalizedQuery)));
+          if (!grouped.length) return null;
+          const visibleLimit = visibleLimits[group.key] ?? 60;
+          const rendered = grouped.slice(0, visibleLimit);
+          return (
+            <details className="diagnostic-rule-group" key={group.key} open={Boolean(normalizedQuery) || group.key === firstPopulatedGroup}>
+              <summary>
+                <span><strong>{group.label}</strong><small>{grouped.length.toLocaleString()} expected checks</small></span>
+              </summary>
+              <div className="diagnostic-rule-list">
+                {rendered.map((expectation) => (
+                  <details className="diagnostic-ground-truth-rule" key={expectation.id}>
+                    <summary>
+                      <span><strong>{humanize(expectation.type)}</strong><small>{expectedRuleSummary(expectation.rule)}</small></span>
+                      {expectation.tags?.length ? <em>{expectation.tags.join(" · ")}</em> : null}
+                    </summary>
+                    <pre><code>{JSON.stringify(expectation.rule, null, 2)}</code></pre>
+                  </details>
+                ))}
+                {rendered.length < grouped.length && (
+                  <button
+                    className="diagnostic-load-more"
+                    type="button"
+                    onClick={() => setVisibleLimits((current) => ({
+                      ...current,
+                      [group.key]: visibleLimit + 60,
+                    }))}
+                  >
+                    Show 60 more · {(grouped.length - rendered.length).toLocaleString()} remaining
+                  </button>
+                )}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+export function GroundTruthInspector({
+  dimension,
+  diagnostic,
+  fallbackMarkdown,
+}: GroundTruthInspectorProps) {
+  if (dimension === "table") {
+    return <TableGroundTruth diagnostic={diagnostic} fallbackMarkdown={fallbackMarkdown} />;
+  }
+  if (!diagnostic) {
+    return <EmptyDiagnostics message="No structured ground truth is available for this historical result." />;
+  }
+  if (dimension === "chart") return <ChartGroundTruth diagnostic={diagnostic} />;
+  if (dimension === "layout") return <LayoutGroundTruth diagnostic={diagnostic} />;
+  if (dimension === "text_content") {
+    return (
+      <ExpectationGroups
+        expectations={diagnostic.expectations}
+        groups={TEXT_GROUPS}
+        groupForType={textGroup}
+        eyebrow="Text-content ground truth"
+        heading="Expected content, completeness and order"
+      />
+    );
+  }
+  if (dimension === "text_formatting") {
+    return (
+      <ExpectationGroups
+        expectations={diagnostic.expectations}
+        groups={FORMATTING_GROUPS}
+        groupForType={formattingGroup}
+        eyebrow="Formatting ground truth"
+        heading="Expected semantic formatting"
+      />
+    );
+  }
+  return (
+    <ExpectationGroups
+      expectations={diagnostic.expectations}
+      groups={[{ key: "all", label: "Expected checks" }]}
+      groupForType={() => "all"}
+      eyebrow="Ground truth"
+      heading="Expected evaluation checks"
+    />
+  );
+}
+
 function GenericDiagnostic({
   diagnostic,
   selectedEvidenceId,

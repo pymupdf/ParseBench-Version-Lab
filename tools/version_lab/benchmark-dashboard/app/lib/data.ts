@@ -124,6 +124,25 @@ export type CaseResult = {
   benchmark_cases: BenchmarkCase;
 };
 
+export type HistoricalBestRun = Pick<
+  BenchmarkRun,
+  | "id"
+  | "github_run_id"
+  | "github_run_url"
+  | "run_name"
+  | "pipeline_name"
+  | "gcs_bucket"
+  | "gcs_prefix"
+  | "head_branch"
+  | "head_sha"
+  | "source_created_at"
+>;
+
+export type HistoricalBestResult = {
+  result: CaseResult;
+  run: HistoricalBestRun;
+};
+
 export type CaseMetric = {
   id: number;
   metric_name: string;
@@ -150,6 +169,9 @@ export type DocumentSort = "lowest" | "highest" | "document";
 
 const CASE_RESULT_SELECT =
   "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,diagnostic_relative_path,diagnostic_schema_version,stats,tags,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,pdf_relative_path,source_relative_path,source_media_type,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))";
+
+const HISTORICAL_BEST_SELECT =
+  "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,diagnostic_relative_path,diagnostic_schema_version,stats,tags,run_dimensions!inner(id,run_id,dimension,benchmark_runs!inner(id,github_run_id,github_run_url,run_name,pipeline_name,gcs_bucket,gcs_prefix,head_branch,head_sha,source_created_at)),benchmark_cases!inner(id,test_id,pdf_relative_path,source_relative_path,source_media_type,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))";
 
 function configurationError() {
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
@@ -416,6 +438,47 @@ export async function loadDocument(
   return documents[0] ?? null;
 }
 
+export async function loadHistoricalBestResult(
+  current: CaseResult,
+  minimumImprovement = 0.1,
+  signal?: AbortSignal,
+): Promise<HistoricalBestResult | null> {
+  const currentScore = current.primary_score;
+  if (currentScore == null || !Number.isFinite(currentScore)) return null;
+  const minimumScore = Math.round((currentScore + minimumImprovement) * 1e12) / 1e12;
+  if (minimumScore > 1) return null;
+
+  type HistoricalBestRow = Omit<CaseResult, "run_dimensions"> & {
+    run_dimensions: CaseResult["run_dimensions"] & {
+      benchmark_runs: HistoricalBestRun;
+    };
+  };
+
+  const params = new URLSearchParams({
+    select: HISTORICAL_BEST_SELECT,
+    benchmark_case_id: `eq.${current.benchmark_cases.id}`,
+    "run_dimensions.dimension": `eq.${current.run_dimensions.dimension}`,
+    primary_score: `gte.${minimumScore}`,
+    order: "primary_score.desc.nullslast,id.desc",
+    limit: "1",
+  });
+  if (current.primary_metric_name) {
+    params.set("primary_metric_name", `eq.${current.primary_metric_name}`);
+  }
+
+  const rows = await apiFetch<HistoricalBestRow[]>("case_results", params, signal);
+  const candidate = rows[0];
+  if (!candidate) return null;
+  const { benchmark_runs: run, ...runDimension } = candidate.run_dimensions;
+  return {
+    result: {
+      ...candidate,
+      run_dimensions: runDimension,
+    },
+    run,
+  };
+}
+
 export function loadCaseMetrics(caseResultId: number, signal?: AbortSignal) {
   return apiFetch<CaseMetric[]>(
     "case_metrics",
@@ -436,7 +499,10 @@ function encodePath(path: string) {
     .join("/");
 }
 
-export function artifactUrl(run: BenchmarkRun, relativePath: string | null) {
+export function artifactUrl(
+  run: Pick<BenchmarkRun, "gcs_bucket" | "gcs_prefix">,
+  relativePath: string | null,
+) {
   if (!run.gcs_bucket || !run.gcs_prefix || !relativePath) return null;
   return `https://storage.googleapis.com/${encodeURIComponent(run.gcs_bucket)}/${encodePath(`${run.gcs_prefix}/${relativePath}`)}`;
 }
@@ -477,7 +543,7 @@ export function thumbnailUrl(result: CaseResult) {
 }
 
 export async function loadArtifact(
-  run: BenchmarkRun,
+  run: Pick<BenchmarkRun, "gcs_bucket" | "gcs_prefix">,
   result: CaseResult,
   signal?: AbortSignal,
 ) {
@@ -504,7 +570,7 @@ export async function loadArtifact(
 }
 
 export async function loadDiagnostic(
-  run: BenchmarkRun,
+  run: Pick<BenchmarkRun, "gcs_bucket" | "gcs_prefix">,
   result: CaseResult,
   signal?: AbortSignal,
 ) {
