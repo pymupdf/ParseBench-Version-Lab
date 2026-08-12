@@ -130,9 +130,20 @@ function formulaDetails(formula: unknown) {
   const record = asRecord(formula);
   if (!record) return { description: null, components: [] as DiagnosticMetricComponent[] };
   const components = metricComponents(record.components);
+  const kind = asString(record.kind);
+  if (kind === "fallback") {
+    const reason = asString(record.reason);
+    const description = reason === "trm_unsupported"
+      ? "GriTS-Con only; table-record matching is not applicable to this document."
+      : reason === "trm_missing"
+        ? "GriTS-Con only; no table-record match score was produced."
+        : reason
+          ? `Fallback score: ${humanize(reason)}`
+          : "Fallback score";
+    return { description, components };
+  }
   const explicit = asString(record.description);
   if (explicit) return { description: explicit, components };
-  const kind = asString(record.kind);
   if (kind === "weighted_mean" && components.length) {
     const terms = components.map((component) => {
       const name = humanize(component.label ?? component.name ?? component.metric_name);
@@ -141,13 +152,6 @@ function formulaDetails(formula: unknown) {
     const weightSum = asNumber(record.weight_sum);
     return {
       description: `${terms.join(" + ")}${weightSum != null && weightSum !== 1 ? ` ÷ ${weightSum.toLocaleString()}` : ""}`,
-      components,
-    };
-  }
-  if (kind === "fallback") {
-    const reason = asString(record.reason);
-    return {
-      description: reason ? `Fallback score: ${reason}` : "Fallback score",
       components,
     };
   }
@@ -389,6 +393,124 @@ function EvidenceButton({
 
 const TABLE_DIFFERENCE_PAGE_SIZE = 60;
 
+type TableScoreBreakdown = {
+  mode: "combined" | "grits_only" | "unknown";
+  gritsScore: number | null;
+  trmScore: number | null;
+  gritsWeight: number | null;
+  trmWeight: number | null;
+  fallbackReason: string | null;
+};
+
+function tableScoreBreakdown(diagnostic: DiagnosticArtifact): TableScoreBreakdown {
+  const primaryFormula = asRecord(diagnostic.primary_metric?.formula);
+  const primaryComponents = metricComponents(diagnostic.primary_metric?.components);
+  const formulaComponents = metricComponents(primaryFormula?.components);
+  const components = primaryComponents.length ? primaryComponents : formulaComponents;
+  const compositeMetric = diagnostic.metrics.find(
+    (metric) => metric.metric_name === "grits_trm_composite",
+  );
+  const gritsComponent = components.find(
+    (component) => (component.metric_name ?? component.name) === "grits_con",
+  );
+  const trmComponent = components.find(
+    (component) => (component.metric_name ?? component.name) === "table_record_match",
+  );
+  const gritsMetric = diagnostic.metrics.find(
+    (metric) => metric.metric_name === "grits_con",
+  );
+  const trmMetric = diagnostic.metrics.find(
+    (metric) => metric.metric_name === "table_record_match",
+  );
+  const fallbackReason = asString(primaryFormula?.reason) ??
+    asString(compositeMetric?.metadata?.reason) ??
+    asString(compositeMetric?.metadata?.fallback);
+  const formulaKind = asString(primaryFormula?.kind);
+  const hasFallback = formulaKind === "fallback" || fallbackReason != null;
+  const hasCombinedFormula = formulaKind === "weighted_mean" ||
+    (!hasFallback && gritsComponent != null && trmComponent != null);
+
+  return {
+    mode: hasFallback ? "grits_only" : hasCombinedFormula ? "combined" : "unknown",
+    gritsScore: gritsComponent?.value ??
+      asNumber(compositeMetric?.metadata?.grits_con) ??
+      gritsMetric?.value ??
+      (hasFallback ? diagnostic.primary_metric?.value ?? null : null),
+    trmScore: trmComponent?.value ??
+      asNumber(compositeMetric?.metadata?.trm) ??
+      trmMetric?.value ??
+      null,
+    gritsWeight: gritsComponent?.weight ?? (hasFallback ? 1 : hasCombinedFormula ? 0.5 : null),
+    trmWeight: trmComponent?.weight ?? (hasCombinedFormula ? 0.5 : null),
+    fallbackReason,
+  };
+}
+
+function tableFallbackExplanation(reason: string | null) {
+  if (reason === "trm_unsupported") {
+    return "Record matching is not reliable for this document’s table structure, so the benchmark excludes it from the headline score.";
+  }
+  if (reason === "trm_missing") {
+    return "No table-record match score was produced for this result, so the benchmark excludes it from the headline score.";
+  }
+  return "The diagnostic artifact marks table-record matching as unavailable, so the headline score uses grid/content similarity alone.";
+}
+
+function TableScoreExplanation({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
+  const breakdown = tableScoreBreakdown(diagnostic);
+  const modeLabel = breakdown.mode === "combined"
+    ? "50 / 50 composite"
+    : breakdown.mode === "grits_only"
+      ? "GriTS-Con only"
+      : "Formula unavailable";
+  return (
+    <section className="diagnostic-table-score-method" aria-labelledby="diagnostic-table-score-method-heading">
+      <div className="diagnostic-section-heading">
+        <div>
+          <span className="diagnostic-eyebrow">Table scoring method</span>
+          <h3 id="diagnostic-table-score-method-heading">How this headline score was calculated</h3>
+        </div>
+        <span className={`diagnostic-table-score-mode diagnostic-table-score-mode-${breakdown.mode}`}>
+          {modeLabel}
+        </span>
+      </div>
+      <p className="diagnostic-table-score-summary">
+        {breakdown.mode === "combined"
+          ? "This page uses the standard table composite: grid/content similarity and record matching contribute equally."
+          : breakdown.mode === "grits_only"
+            ? "This page uses GriTS-Con alone. Table-record match does not contribute to the headline score."
+            : "The benchmark normally averages GriTS-Con and table-record match equally. If record matching is inapplicable or missing, it falls back to GriTS-Con alone; this historical artifact does not retain which path was used."}
+      </p>
+      <div className={`diagnostic-table-score-components${breakdown.mode === "grits_only" ? " diagnostic-table-score-components-single" : ""}`}>
+        <article>
+          <div><span>Grid/content score</span><strong>GriTS-Con</strong></div>
+          <strong>{scorePercent(breakdown.gritsScore)}</strong>
+          <p>Aligns the expected and output row/column grids, then scores their cell text.</p>
+          {breakdown.gritsWeight != null && (
+            <small>{scorePercent(breakdown.gritsWeight)} of the headline score</small>
+          )}
+        </article>
+        {breakdown.mode !== "grits_only" && (
+          <article>
+            <div><span>Record score</span><strong>Table record match</strong></div>
+            <strong>{scorePercent(breakdown.trmScore)}</strong>
+            <p>Uses headers as fields and compares table rows as records, independent of their visual row order.</p>
+            <small>{breakdown.trmWeight != null
+              ? `${scorePercent(breakdown.trmWeight)} of the headline score`
+              : "Contribution unknown"}</small>
+          </article>
+        )}
+      </div>
+      {breakdown.mode === "grits_only" && (
+        <div className="diagnostic-table-score-omission">
+          <strong>Why there is no record-match score</strong>
+          <p>{tableFallbackExplanation(breakdown.fallbackReason)} This is an intentional omission, not a 0% result.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function isTableDifference(recordType: string, cell: Record<string, unknown>) {
   return (asNumber(cell.score) ?? 0) < 0.9995 || recordType !== "matched";
 }
@@ -480,11 +602,13 @@ function TableDifferences({
 function TableMetricDetails({
   metric,
   metricIndex,
+  excludedFromHeadline = false,
   selectedEvidenceId,
   onSelectEvidence,
 }: {
   metric: DiagnosticMetric;
   metricIndex: number;
+  excludedFromHeadline?: boolean;
   selectedEvidenceId?: string | null;
   onSelectEvidence?: (id: string) => void;
 }) {
@@ -494,7 +618,10 @@ function TableMetricDetails({
     <section className="diagnostic-table-metric">
       <div className="diagnostic-section-heading">
         <div><span className="diagnostic-eyebrow">Structured comparison</span><h3>{humanize(metric.metric_name)}</h3></div>
-        <strong>{scorePercent(metric.value)}</strong>
+        <div className="diagnostic-table-metric-score">
+          <strong>{scorePercent(metric.value)}</strong>
+          {excludedFromHeadline && <small>Not used in headline score</small>}
+        </div>
       </div>
       <div className="diagnostic-table-detail-list">
         {tables.map((table, tableIndex) => {
@@ -576,6 +703,7 @@ function TableDiagnostic({
   selectedEvidenceId,
   onSelectEvidence,
 }: DiagnosticInspectorProps) {
+  const scoreBreakdown = tableScoreBreakdown(diagnostic);
   const expectedMarkdown = diagnostic.expectations
     .map((expectation) => expectation.expected_markdown?.trim())
     .filter((markdown): markdown is string => Boolean(markdown))
@@ -593,6 +721,7 @@ function TableDiagnostic({
   const hasStructuredOutput = predictedTables == null || predictedTables > 0;
   return (
     <div className="diagnostic-dimension-view diagnostic-table-view">
+      <TableScoreExplanation diagnostic={diagnostic} />
       <section className="diagnostic-markdown-comparison" aria-label="Ground truth and output table comparison">
         <article>
           <div className="diagnostic-panel-heading"><span className="diagnostic-eyebrow">Expected</span><h3>Ground-truth tables</h3></div>
@@ -613,6 +742,7 @@ function TableDiagnostic({
           key={`${metric.metric_name}-${index}`}
           metric={metric}
           metricIndex={index}
+          excludedFromHeadline={scoreBreakdown.mode === "grits_only" && metric.metric_name === "table_record_match"}
           selectedEvidenceId={selectedEvidenceId}
           onSelectEvidence={onSelectEvidence}
         />
