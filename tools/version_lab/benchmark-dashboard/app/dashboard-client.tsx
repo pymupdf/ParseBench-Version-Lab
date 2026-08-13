@@ -1367,7 +1367,18 @@ function BestResultPanel({
           <p>Compared with the current {scorePercent(current.primary_score)} headline score.</p>
         </div>
         <dl className="best-result-provenance">
-          <div><dt>Workflow</dt><dd>#{run.github_run_id}</dd></div>
+          <div>
+            <dt>Workflow</dt>
+            <dd>
+              <Link
+                className="best-result-workflow-link"
+                href={`/workflows/${run.github_run_id}`}
+                aria-label={`Open workflow ${run.github_run_id} overview`}
+              >
+                #{run.github_run_id} <span aria-hidden="true">↗</span>
+              </Link>
+            </dd>
+          </div>
           <div><dt>Pipeline</dt><dd>{humanize(run.pipeline_name ?? run.run_name)}</dd></div>
           <div><dt>Source</dt><dd>{run.head_branch ?? "Unknown branch"} · <code>{shortSha(run.head_sha)}</code></dd></div>
           <div><dt>Recorded</dt><dd>{formatShortDate(run.source_created_at)}</dd></div>
