@@ -1428,7 +1428,7 @@ function DiagnosticImagePreview({
   title: string;
   boxes: EvidenceOverlayBox[];
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, kind: EvidenceOverlayBox["kind"]) => void;
 }) {
   const [aspectRatio, setAspectRatio] = useState(1);
   return (
@@ -1670,7 +1670,8 @@ function DocumentExplorer({
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("explain");
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-  const [layers, setLayers] = useState({ expected: true, predicted: true, best: false });
+  const [selectedEvidenceKind, setSelectedEvidenceKind] = useState<"current" | "best" | null>(null);
+  const [layers, setLayers] = useState({ expected: false, predicted: false, best: false });
   const selectedSource = selected ? sourceAssetUrl(selected) : null;
   const selectedSourceKind = selected ? sourceAssetKind(selected) : "unsupported";
   const selectedSourceOpenUrl = selectedSourceKind === "pdf" && selected
@@ -1696,11 +1697,16 @@ function DocumentExplorer({
     ],
   );
   const boxes = useMemo(
-    () => allLayoutBoxes.filter((box) => (
-      box.kind === "ground-truth" ? layers.expected :
-        box.kind === "best" ? layers.best : layers.predicted
-    )),
-    [allLayoutBoxes, layers],
+    () => selectedEvidenceId
+      ? allLayoutBoxes.filter((box) => (
+          (selectedEvidenceKind === "best" ? box.kind === "best" : box.kind !== "best") &&
+          (box.id === selectedEvidenceId || box.relatedIds?.includes(selectedEvidenceId) === true)
+        ))
+      : allLayoutBoxes.filter((box) => (
+          box.kind === "ground-truth" ? layers.expected :
+            box.kind === "best" ? layers.best : layers.predicted
+        )),
+    [allLayoutBoxes, layers, selectedEvidenceId, selectedEvidenceKind],
   );
   const layerCounts = useMemo(
     () => allLayoutBoxes.reduce(
@@ -1731,26 +1737,30 @@ function DocumentExplorer({
 
   function toggleLayoutLayer(layer: keyof typeof layers) {
     const enable = !layers[layer];
+    setSelectedEvidenceId(null);
+    setSelectedEvidenceKind(null);
     setLayers((current) => ({ ...current, [layer]: !current[layer] }));
     if (layer === "best" && enable) onLoadHistoricalBest();
   }
 
   function selectDiagnosticEvidence(id: string) {
     setSelectedEvidenceId(id);
+    setSelectedEvidenceKind("current");
     if (isLayoutDimension) {
-      setLayers({ expected: true, predicted: true, best: false });
+      setLayers({ expected: false, predicted: false, best: false });
     }
+  }
+
+  function selectOverlayEvidence(id: string, kind: EvidenceOverlayBox["kind"]) {
+    setSelectedEvidenceId(id);
+    setSelectedEvidenceKind(kind === "best" ? "best" : "current");
+    setLayers({ expected: false, predicted: false, best: false });
   }
 
   function selectInspectorView(value: InspectorTab) {
     setInspectorTab(value);
     setSelectedEvidenceId(null);
-    if (isLayoutDimension) {
-      if (value === "explain") setLayers({ expected: true, predicted: true, best: false });
-      else if (value === "expectations") setLayers({ expected: true, predicted: false, best: false });
-      else if (value === "best") setLayers({ expected: true, predicted: false, best: true });
-      else setLayers({ expected: false, predicted: true, best: false });
-    }
+    setSelectedEvidenceKind(null);
     if (value === "best") onLoadHistoricalBest();
   }
 
@@ -1892,7 +1902,7 @@ function DocumentExplorer({
                       title={`PDF preview for ${selected.benchmark_cases.test_id}`}
                       boxes={boxes}
                       selectedId={selectedEvidenceId}
-                      onSelect={setSelectedEvidenceId}
+                      onSelect={selectOverlayEvidence}
                     />
                   ) : selectedSource && selectedSourceKind === "image" ? (
                     <DiagnosticImagePreview
@@ -1900,7 +1910,7 @@ function DocumentExplorer({
                       title={`Source document ${selected.benchmark_cases.test_id}`}
                       boxes={boxes}
                       selectedId={selectedEvidenceId}
-                      onSelect={setSelectedEvidenceId}
+                      onSelect={selectOverlayEvidence}
                     />
                   ) : selectedSource ? (
                     <EmptyState title="Preview unavailable" body="Open the source asset to inspect this file type." />

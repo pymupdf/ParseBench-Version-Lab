@@ -25,7 +25,7 @@ export default function PdfPreview({
   title: string;
   boxes?: EvidenceOverlayBox[];
   selectedId?: string | null;
-  onSelect?: (id: string) => void;
+  onSelect?: (id: string, kind: EvidenceOverlayBox["kind"]) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);

@@ -22,7 +22,7 @@ export function EvidenceOverlay({
 }: {
   boxes: EvidenceOverlayBox[];
   selectedId?: string | null;
-  onSelect?: (id: string) => void;
+  onSelect?: (id: string, kind: EvidenceOverlayBox["kind"]) => void;
 }) {
   if (!boxes.length) return null;
   return (
@@ -43,7 +43,7 @@ export function EvidenceOverlay({
             aria-label={`${kindLabel} ${box.label}`}
             className={`evidence-box evidence-box-${box.kind} evidence-box-${box.status ?? "neutral"} evidence-box-tone-${box.tone ?? "other"}${selected ? " evidence-box-selected" : ""}`}
             key={`${box.kind}-${box.id}`}
-            onClick={() => onSelect?.(box.id)}
+            onClick={() => onSelect?.(box.id, box.kind)}
             style={{
               height: `${height * 100}%`,
               left: `${left * 100}%`,
