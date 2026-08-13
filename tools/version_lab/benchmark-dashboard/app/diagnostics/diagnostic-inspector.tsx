@@ -440,7 +440,7 @@ function MarkdownEvidence({ markdown, empty }: { markdown: string; empty: string
   );
 }
 
-function structuredTablesOnly(markdown: string) {
+function structuredTableFragments(markdown: string) {
   // Mirror ParseBench's table evaluator: only top-level HTML <table> blocks
   // participate in GriTS/TRM. Markdown pipe tables are deliberately excluded.
   const tables: string[] = [];
@@ -488,7 +488,7 @@ function structuredTablesOnly(markdown: string) {
     tables.push(markdown.slice(start, end));
     searchStart = end;
   }
-  return tables.map((table) => table.trim()).filter(Boolean).join("\n\n");
+  return tables.map((table) => table.trim()).filter(Boolean);
 }
 
 function EvidenceButton({
@@ -727,6 +727,219 @@ function TableDifferences({
   );
 }
 
+type TablePairEvidence = {
+  expectedIndex: number | null;
+  outputIndex: number | null;
+  expectedMarkdown: string | null;
+  outputMarkdown: string | null;
+  outputMarkupReliable: boolean;
+  grits: Record<string, unknown> | null;
+  trm: Record<string, unknown> | null;
+};
+
+function tableIndex(value: unknown) {
+  const number = asNumber(value);
+  return number != null && Number.isInteger(number) && number >= 0 ? number : null;
+}
+
+function tableDetailsByExpected(metric: DiagnosticMetric | null) {
+  const details = new Map<number, Record<string, unknown>>();
+  for (const detail of asRecordArray(metric?.metadata?.per_table_details)) {
+    const expectedIndex = tableIndex(detail.gt_table_index);
+    if (expectedIndex != null) details.set(expectedIndex, detail);
+  }
+  return details;
+}
+
+function tablePairEvidence(
+  expectedMarkdown: string[],
+  outputMarkdown: string[],
+  expectedCount: number | null,
+  outputMappingReliable: boolean,
+  gritsMetric: DiagnosticMetric | null,
+  trmMetric: DiagnosticMetric | null,
+) {
+  const gritsByExpected = tableDetailsByExpected(gritsMetric);
+  const trmByExpected = tableDetailsByExpected(trmMetric);
+  const outputByExpected = new Map<number, number | null>();
+
+  const rawPairing = gritsMetric?.metadata?.pairing;
+  if (Array.isArray(rawPairing)) {
+    for (const entry of rawPairing) {
+      if (!Array.isArray(entry) || entry.length < 2) continue;
+      const expectedIndex = tableIndex(entry[0]);
+      const outputIndex = entry[1] == null ? null : tableIndex(entry[1]);
+      if (expectedIndex != null) outputByExpected.set(expectedIndex, outputIndex);
+    }
+  }
+  for (const details of [gritsByExpected, trmByExpected]) {
+    for (const [expectedIndex, detail] of details) {
+      if (outputByExpected.has(expectedIndex)) continue;
+      outputByExpected.set(
+        expectedIndex,
+        detail.pred_table_index == null ? null : tableIndex(detail.pred_table_index),
+      );
+    }
+  }
+
+  const retainedExpectedCount = Math.max(
+    expectedMarkdown.length,
+    expectedCount ?? 0,
+    ...[...outputByExpected.keys()].map((index) => index + 1),
+  );
+  const pairedOutputIndexes = new Set<number>();
+  const pairs: TablePairEvidence[] = [];
+  for (let expectedIndex = 0; expectedIndex < retainedExpectedCount; expectedIndex += 1) {
+    const outputIndex = outputByExpected.get(expectedIndex) ?? null;
+    if (outputIndex != null) pairedOutputIndexes.add(outputIndex);
+    pairs.push({
+      expectedIndex,
+      outputIndex,
+      expectedMarkdown: expectedMarkdown[expectedIndex] ?? null,
+      outputMarkdown: outputIndex == null || !outputMappingReliable
+        ? null
+        : outputMarkdown[outputIndex] ?? null,
+      outputMarkupReliable: outputMappingReliable &&
+        (outputIndex == null || outputIndex < outputMarkdown.length),
+      grits: gritsByExpected.get(expectedIndex) ?? null,
+      trm: trmByExpected.get(expectedIndex) ?? null,
+    });
+  }
+  if (outputMappingReliable) {
+    outputMarkdown.forEach((markdown, outputIndex) => {
+      if (pairedOutputIndexes.has(outputIndex)) return;
+      pairs.push({
+        expectedIndex: null,
+        outputIndex,
+        expectedMarkdown: null,
+        outputMarkdown: markdown,
+        outputMarkupReliable: true,
+        grits: null,
+        trm: null,
+      });
+    });
+  }
+  return pairs;
+}
+
+function tablePairHeadlineScore(pair: TablePairEvidence, mode: TableScoreBreakdown["mode"]) {
+  const grits = asNumber(pair.grits?.grits_con);
+  const trm = asNumber(pair.trm?.score) ??
+    (pair.expectedIndex != null && pair.outputIndex == null ? 0 : null);
+  if (mode === "grits_only") return grits;
+  if (mode === "combined" && grits != null && trm != null) return (grits + trm) / 2;
+  return null;
+}
+
+function TablePairComparison({
+  pair,
+  pairNumber,
+  scoreMode,
+}: {
+  pair: TablePairEvidence;
+  pairNumber: number;
+  scoreMode: TableScoreBreakdown["mode"];
+}) {
+  const pairScore = tablePairHeadlineScore(pair, scoreMode);
+  const differenceCount = pair.trm ? tableDifferenceCount(pair.trm) : 0;
+  const trmScore = asNumber(pair.trm?.score) ??
+    (pair.expectedIndex != null && pair.outputIndex == null ? 0 : null);
+  const trmReason = asString(pair.trm?.reason) ??
+    (pair.expectedIndex != null && pair.outputIndex == null ? "no prediction" : null);
+  const metricValues = [
+    ["GriTS-Con", asNumber(pair.grits?.grits_con)],
+    ...(scoreMode === "combined" || pair.trm
+      ? [["Table record match", trmScore] as const]
+      : []),
+    ["GriTS precision", asNumber(pair.grits?.grits_precision_con)],
+    ["GriTS recall", asNumber(pair.grits?.grits_recall_con)],
+  ].filter((entry): entry is [string, number] => entry[1] != null);
+  const expectedLabel = pair.expectedIndex == null
+    ? "No expected table"
+    : `Expected table ${pair.expectedIndex + 1}`;
+  const outputLabel = pair.outputIndex == null
+    ? "No output match"
+    : `Output table ${pair.outputIndex + 1}`;
+
+  return (
+    <article className="diagnostic-table-pair">
+      <header className="diagnostic-table-pair-heading">
+        <div>
+          <span className="diagnostic-eyebrow">
+            {pair.expectedIndex == null ? "Unmatched output" : `Table comparison ${pairNumber}`}
+          </span>
+          <h4>{expectedLabel} <span aria-hidden="true">↔</span> {outputLabel}</h4>
+        </div>
+        {pairScore != null && (
+          <div className="diagnostic-table-pair-score">
+            <span>Pair score</span>
+            <strong>{scorePercent(pairScore)}</strong>
+          </div>
+        )}
+      </header>
+      {metricValues.length > 0 && (
+        <dl className="diagnostic-table-pair-metrics">
+          {metricValues.map(([label, value]) => (
+            <div key={label}><dt>{label}</dt><dd>{scorePercent(value)}</dd></div>
+          ))}
+        </dl>
+      )}
+      {(trmReason || asString(pair.grits?.note)) && (
+        <p className="diagnostic-table-pair-reason">
+          {trmReason ? `Table record match: ${humanize(trmReason)}.` : asString(pair.grits?.note)}
+        </p>
+      )}
+      <div className="diagnostic-table-pair-preview">
+        <section>
+          <div className="diagnostic-panel-heading">
+            <span className="diagnostic-eyebrow">Expected</span>
+            <h5>{expectedLabel}</h5>
+          </div>
+          <MarkdownEvidence
+            markdown={pair.expectedMarkdown ?? ""}
+            empty={pair.expectedIndex == null
+              ? "This output table has no expected-table partner."
+              : "Expected table markup was not retained for this indexed table."}
+          />
+        </section>
+        <section>
+          <div className="diagnostic-panel-heading">
+            <span className="diagnostic-eyebrow">Output</span>
+            <h5>{outputLabel}</h5>
+          </div>
+          <MarkdownEvidence
+            markdown={pair.outputMarkdown ?? ""}
+            empty={!pair.outputMarkupReliable
+              ? "Parsing changed the evaluator’s output-table list, so source markup cannot be mapped safely to this comparison. Inspect the complete Output tab instead."
+              : pair.outputIndex == null
+                ? "The evaluator did not pair an output table with this expected table."
+                : "Output table markup was not retained for this indexed table."}
+          />
+        </section>
+      </div>
+      {differenceCount > 0 ? (
+        <TableDifferences table={pair.trm ?? {}} differenceCount={differenceCount} />
+      ) : pair.trm && asRecordArray(pair.trm.record_details).length > 0 ? (
+        <p className="diagnostic-empty diagnostic-empty-compact">
+          No field-level differences were found in the retained table-record-match evidence.
+        </p>
+      ) : trmReason === "no prediction" ? (
+        <p className="diagnostic-empty diagnostic-empty-compact">
+          Field comparison could not run because this expected table has no paired output table.
+        </p>
+      ) : trmReason === "no column matches" ? (
+        <p className="diagnostic-empty diagnostic-empty-compact">
+          Field comparison could not run because table-record matching found no corresponding columns.
+        </p>
+      ) : scoreMode === "grits_only" ? (
+        <p className="diagnostic-empty diagnostic-empty-compact">
+          Table-record matching is not part of this page’s headline score.
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
 function TableMetricDetails({
   metric,
   metricIndex,
@@ -840,6 +1053,8 @@ function TableDiagnostic({
     .map((expectation) => expectation.expected_markdown?.trim())
     .filter((markdown): markdown is string => Boolean(markdown))
     .join("\n\n");
+  const expectedTableFragments = structuredTableFragments(expectedMarkdown);
+  const outputTableFragments = structuredTableFragments(actualMarkdown);
   const structuredMetrics = diagnostic.metrics.filter(
     (metric) => asRecordArray(metric.metadata?.per_table_details).length > 0,
   );
@@ -886,8 +1101,22 @@ function TableDiagnostic({
     asNumber(gritsMetric?.metadata?.tables_matched);
   const unmatchedExpected = metricValue("tables_unmatched_expected");
   const unmatchedOutput = metricValue("tables_unmatched_pred");
-  const hasStructuredOutput = predictedTables == null || predictedTables > 0;
-  const structuredOutput = hasStructuredOutput ? structuredTablesOnly(actualMarkdown) : "";
+  const extractedOutputTables = metricValue("tables_actual");
+  const unparseableOutputTables = metricValue("tables_unparseable_pred");
+  const outputMappingReliable = unparseableOutputTables === 0 &&
+    extractedOutputTables === outputTableFragments.length &&
+    predictedTables === outputTableFragments.length;
+  const tablePairs = tablePairEvidence(
+    expectedTableFragments,
+    outputTableFragments,
+    expectedTables,
+    outputMappingReliable,
+    gritsMetric ?? null,
+    tableMetric ?? null,
+  );
+  const supportingStructuredMetrics = orderedStructuredMetrics.filter(
+    (metric) => !headlineMetricNames.has(metric.metric_name),
+  );
   const alignmentCounts = [
     ["Expected", expectedTables],
     ["Output", predictedTables],
@@ -903,31 +1132,27 @@ function TableDiagnostic({
           <div key={label}><dt>{label}</dt><dd>{value == null ? "—" : value.toLocaleString()}</dd></div>
         ))}
       </dl>
-      <section className="diagnostic-markdown-comparison" aria-label="Ground truth and output table comparison">
-        <article>
-          <div className="diagnostic-panel-heading"><span className="diagnostic-eyebrow">Expected</span><h3>Ground-truth tables</h3></div>
-          <MarkdownEvidence markdown={expectedMarkdown} empty="No rendered table ground truth is available for this result." />
-        </article>
-        <article>
-          <div className="diagnostic-panel-heading"><span className="diagnostic-eyebrow">Observed</span><h3>Extracted tables only</h3></div>
-          <MarkdownEvidence
-            markdown={structuredOutput}
-            empty={predictedTables === 0
-              ? "The evaluator found no structured output table. Flattened page text, if any, remains available in the Output tab."
-              : "No Markdown or HTML table block was found in the page output. Inspect the Output tab for the complete page Markdown."}
-          />
-        </article>
-      </section>
-      {orderedStructuredMetrics.length ? orderedStructuredMetrics.map((metric, index) => (
-        <TableMetricDetails
-          key={`${metric.metric_name}-${index}`}
-          metric={metric}
-          metricIndex={index}
-          impact={headlineMetricNames.has(metric.metric_name) ? "headline" : "supporting"}
-          selectedEvidenceId={selectedEvidenceId}
-          onSelectEvidence={onSelectEvidence}
-        />
-      )) : (
+      {tablePairs.length ? (
+        <section className="diagnostic-table-pairs" aria-labelledby="diagnostic-table-pairs-heading">
+          <div className="diagnostic-section-heading">
+            <div>
+              <span className="diagnostic-eyebrow">Table-by-table evidence</span>
+              <h3 id="diagnostic-table-pairs-heading">Expected and output table comparisons</h3>
+            </div>
+            <span>{tablePairs.length.toLocaleString()} comparisons</span>
+          </div>
+          <div className="diagnostic-table-pair-list">
+            {tablePairs.map((pair, index) => (
+              <TablePairComparison
+                pair={pair}
+                pairNumber={index + 1}
+                scoreMode={scoreBreakdown.mode}
+                key={`${pair.expectedIndex ?? "extra"}-${pair.outputIndex ?? "missing"}`}
+              />
+            ))}
+          </div>
+        </section>
+      ) : (
         <EmptyDiagnostics
           title={predictedTables === 0 ? "No structured table was detected" : "No table alignment available"}
           message={predictedTables === 0
@@ -935,6 +1160,16 @@ function TableDiagnostic({
             : "No expected/output table pair was retained for field-level comparison. Use the expected and predicted counts above to see whether a table was missing or extra."}
         />
       )}
+      {supportingStructuredMetrics.map((metric, index) => (
+        <TableMetricDetails
+          key={`${metric.metric_name}-${index}`}
+          metric={metric}
+          metricIndex={index}
+          impact="supporting"
+          selectedEvidenceId={selectedEvidenceId}
+          onSelectEvidence={onSelectEvidence}
+        />
+      ))}
     </div>
   );
 }
@@ -1627,13 +1862,34 @@ function TableGroundTruth({
     .filter((value): value is string => Boolean(value))
     .join("\n\n") || fallbackMarkdown || "";
   const tableCount = expectedTableCount(diagnostic, markdown);
+  const tables = structuredTableFragments(markdown);
   return (
     <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
       <div className="diagnostic-section-heading">
         <div><span className="diagnostic-eyebrow">Table ground truth</span><h3>Expected table structure and content</h3></div>
         <span>{tableCount.toLocaleString()} {tableCount === 1 ? "table" : "tables"}</span>
       </div>
-      <MarkdownEvidence markdown={markdown} empty="No rendered table ground truth is available for this page." />
+      {tables.length ? (
+        <div className="diagnostic-ground-truth-table-list">
+          {tables.map((table, index) => (
+            <article className="diagnostic-ground-truth-table" key={index}>
+              <div className="diagnostic-panel-heading">
+                <span className="diagnostic-eyebrow">Expected</span>
+                <h4>Table {index + 1}</h4>
+              </div>
+              <MarkdownEvidence
+                markdown={table}
+                empty={`Expected table ${index + 1} could not be rendered.`}
+              />
+            </article>
+          ))}
+        </div>
+      ) : (
+        <MarkdownEvidence
+          markdown={markdown}
+          empty="No rendered table ground truth is available for this page."
+        />
+      )}
     </section>
   );
 }

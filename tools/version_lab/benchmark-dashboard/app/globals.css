@@ -3207,7 +3207,9 @@ code {
 
 .diagnostic-score-line h2,
 .diagnostic-section-heading h3,
-.diagnostic-panel-heading h3 {
+.diagnostic-panel-heading h3,
+.diagnostic-panel-heading h4,
+.diagnostic-panel-heading h5 {
   font-size: 14px;
   letter-spacing: -0.02em;
   margin: 0;
@@ -3478,19 +3480,6 @@ code {
   margin: 3px 0 0;
 }
 
-.diagnostic-markdown-comparison {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.diagnostic-markdown-comparison > article {
-  min-width: 0;
-}
-
-.diagnostic-markdown-comparison > article + article {
-  border-left: 1px solid var(--line);
-}
-
 .diagnostic-panel-heading {
   border-bottom: 1px solid var(--line);
   min-height: 47px;
@@ -3510,11 +3499,6 @@ code {
   padding: 11px;
 }
 
-.diagnostic-markdown-comparison .diagnostic-empty {
-  margin: 0;
-  padding: 18px 12px;
-}
-
 .diagnostic-markdown > :first-child,
 .diagnostic-markdown > :first-child > :first-child {
   margin-top: 0;
@@ -3531,6 +3515,136 @@ code {
 .diagnostic-markdown td {
   border: 1px solid var(--line);
   padding: 4px 6px;
+}
+
+.diagnostic-ground-truth-table-list,
+.diagnostic-table-pair-list {
+  background: var(--surface-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.diagnostic-ground-truth-table,
+.diagnostic-table-pair {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.diagnostic-ground-truth-table .diagnostic-panel-heading {
+  background: var(--surface-soft);
+}
+
+.diagnostic-table-pairs {
+  border-bottom: 1px solid var(--line);
+}
+
+.diagnostic-table-pair-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.diagnostic-table-pair-heading h4 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.diagnostic-table-pair-heading h4 span {
+  color: var(--muted);
+  padding: 0 3px;
+}
+
+.diagnostic-table-pair-score {
+  align-items: flex-end;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+}
+
+.diagnostic-table-pair-score span {
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.diagnostic-table-pair-score strong {
+  font-size: 18px;
+}
+
+.diagnostic-table-pair-metrics {
+  background: var(--surface-soft);
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  margin: 0;
+}
+
+.diagnostic-table-pair-metrics > div {
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.diagnostic-table-pair-metrics > div + div {
+  border-left: 1px solid var(--line);
+}
+
+.diagnostic-table-pair-metrics dt {
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.diagnostic-table-pair-metrics dd {
+  font-size: 12px;
+  font-weight: 740;
+  margin: 2px 0 0;
+}
+
+.diagnostic-table-pair-reason {
+  border-top: 1px solid var(--line);
+  color: var(--critical);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 0;
+  padding: 8px 12px;
+}
+
+.diagnostic-table-pair-preview {
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.diagnostic-table-pair-preview > section {
+  min-width: 0;
+}
+
+.diagnostic-table-pair-preview > section + section {
+  border-left: 1px solid var(--line);
+}
+
+.diagnostic-table-pair-preview .diagnostic-panel-heading {
+  background: var(--surface-soft);
+}
+
+.diagnostic-table-pair-preview .diagnostic-empty {
+  margin: 0;
+  padding: 18px 12px;
+}
+
+.diagnostic-table-pair > .diagnostic-differences,
+.diagnostic-table-pair > .diagnostic-empty {
+  border-top: 1px solid var(--line);
+  margin: 0;
+  padding: 10px 12px;
 }
 
 .diagnostic-table-metric + .diagnostic-table-metric {
@@ -4806,7 +4920,7 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .diagnostic-markdown-comparison {
+  .diagnostic-table-pair-preview {
     grid-template-columns: 1fr;
   }
 
@@ -4818,9 +4932,13 @@ code {
     border-bottom: 1px solid var(--line);
   }
 
-  .diagnostic-markdown-comparison > article + article {
+  .diagnostic-table-pair-preview > section + section {
     border-left: 0;
     border-top: 1px solid var(--line);
+  }
+
+  .diagnostic-table-pair-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
