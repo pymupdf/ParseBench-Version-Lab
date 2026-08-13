@@ -530,6 +530,18 @@ export function sourceAssetUrl(result: CaseResult) {
     : null;
 }
 
+export function sourcePdfPreviewUrl(result: CaseResult) {
+  const path = result.benchmark_cases.source_relative_path;
+  const dataset = result.benchmark_cases.dataset_versions;
+  if (!path || sourceAssetKind(result) !== "pdf") return null;
+  const query = new URLSearchParams({
+    repository: dataset.repository,
+    revision: dataset.resolved_sha,
+    path,
+  });
+  return `/api/source-pdf?${query.toString()}`;
+}
+
 export function sourceAssetKind(result: CaseResult) {
   const { source_media_type: mediaType, source_relative_path: path } =
     result.benchmark_cases;

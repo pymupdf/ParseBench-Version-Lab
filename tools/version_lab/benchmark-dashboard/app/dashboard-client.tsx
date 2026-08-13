@@ -38,6 +38,7 @@ import {
   RunScoreIndex,
   sourceAssetKind,
   sourceAssetUrl,
+  sourcePdfPreviewUrl,
   thumbnailUrl,
 } from "./lib/data";
 import {
@@ -1620,6 +1621,9 @@ function DocumentExplorer({
   const [layers, setLayers] = useState({ expected: false, predicted: true, best: false });
   const selectedSource = selected ? sourceAssetUrl(selected) : null;
   const selectedSourceKind = selected ? sourceAssetKind(selected) : "unsupported";
+  const selectedSourceOpenUrl = selectedSourceKind === "pdf" && selected
+    ? sourcePdfPreviewUrl(selected)
+    : selectedSource;
   const selectedSourceLabel = selectedSourceKind === "pdf" ? "PDF preview" :
     selectedSourceKind === "image" ? "Image preview" : "Source asset";
   const isLayoutDimension = selected?.run_dimensions.dimension === "layout";
@@ -1758,7 +1762,7 @@ function DocumentExplorer({
                         </div>
                       </div>
                     )}
-                    {selectedSource && <a className="simple-link" href={selectedSource} target="_blank" rel="noreferrer">Open source ↗</a>}
+                    {selectedSourceOpenUrl && <a className="simple-link" href={selectedSourceOpenUrl} target="_blank" rel="noreferrer">Open source ↗</a>}
                   </div>
                 </div>
                 {hasLayoutEvidence && (
