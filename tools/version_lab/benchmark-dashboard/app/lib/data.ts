@@ -125,6 +125,19 @@ export type CaseResult = {
   benchmark_cases: BenchmarkCase;
 };
 
+export type TriageCaseResult = Pick<
+  CaseResult,
+  "id" | "success" | "primary_metric_name" | "primary_score"
+> & {
+  run_dimensions: Pick<RunDimension, "id" | "run_id" | "dimension">;
+  benchmark_cases: Pick<
+    BenchmarkCase,
+    "id" | "test_id" | "source_relative_path" | "source_media_type" | "page_number"
+  > & {
+    dataset_versions: Pick<DatasetVersion, "repository" | "resolved_sha">;
+  };
+};
+
 export type HistoricalBestRun = Pick<
   BenchmarkRun,
   | "id"
@@ -180,6 +193,9 @@ export type DocumentSort = "lowest" | "highest" | "document";
 const CASE_RESULT_SELECT =
   "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,diagnostic_relative_path,diagnostic_schema_version,stats,tags,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,pdf_relative_path,source_relative_path,source_media_type,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))";
 
+const CASE_RESULT_LIST_SELECT =
+  "id,success,primary_metric_name,primary_score,run_dimensions!inner(id,run_id,dimension),benchmark_cases!inner(id,test_id,source_relative_path,source_media_type,page_number,dataset_versions!inner(repository,resolved_sha))";
+
 const HISTORICAL_BEST_SELECT =
   "id,success,error,primary_metric_name,primary_score,result_relative_path,raw_relative_path,diagnostic_relative_path,diagnostic_schema_version,stats,tags,run_dimensions!inner(id,run_id,dimension,benchmark_runs!inner(id,github_run_id,github_run_url,run_name,pipeline_name,gcs_bucket,gcs_prefix,head_branch,head_sha,source_created_at)),benchmark_cases!inner(id,test_id,pdf_relative_path,source_relative_path,source_media_type,page_number,inference_group,tags,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))";
 
@@ -211,37 +227,6 @@ async function apiFetch<T>(
     throw new Error(`Could not load ${table} (${response.status}): ${detail}`);
   }
   return (await response.json()) as T;
-}
-
-async function apiCount(
-  table: string,
-  params: URLSearchParams,
-  signal?: AbortSignal,
-) {
-  configurationError();
-  const query = new URLSearchParams(params);
-  query.set("limit", "1");
-  const response = await fetch(
-    `${SUPABASE_URL}/rest/v1/${table}?${query.toString()}`,
-    {
-      headers: {
-        apikey: SUPABASE_PUBLISHABLE_KEY!,
-        Prefer: "count=exact",
-      },
-      signal,
-    },
-  );
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Could not count ${table} (${response.status}): ${detail}`);
-  }
-  const totalValue = response.headers.get("content-range")?.split("/").at(-1);
-  await response.body?.cancel();
-  const total = totalValue && totalValue !== "*" ? Number(totalValue) : null;
-  if (total == null || !Number.isFinite(total)) {
-    throw new Error(`Could not determine the exact ${table} count.`);
-  }
-  return total;
 }
 
 const RUN_CATALOG_PAGE_SIZE = 500;
@@ -385,36 +370,25 @@ export async function loadRunBundle(
       signal,
     ),
   ]);
-  const dimensionById = new Map(dimensions.map((dimension) => [dimension.id, dimension]));
   const headlineMetrics = metrics.filter((metric) => {
-    const dimension = dimensionById.get(metric.run_dimension_id);
+    const dimension = dimensions.find((candidate) => candidate.id === metric.run_dimension_id);
     return dimension != null && metric.metric_name === PRIMARY_METRIC_BY_DIMENSION[dimension.dimension];
   });
-  const metricsWithCoverage = await Promise.all(headlineMetrics.map(async (metric) => {
-    const caseMetricName = metric.metric_name.replace(/^avg_/, "");
-    try {
-      const evaluatedCount = await apiCount(
-        "case_metrics",
-        new URLSearchParams({
-          select: "id,case_results!inner(run_dimension_id)",
-          metric_name: `eq.${caseMetricName}`,
-          "case_results.run_dimension_id": `eq.${metric.run_dimension_id}`,
-        }),
-        signal,
-      );
-      return { ...metric, evaluated_count: evaluatedCount };
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") throw error;
-      return { ...metric, evaluated_count: null };
-    }
-  }));
-  return { dimensions, metrics: metricsWithCoverage, components, errors };
+  return {
+    dimensions,
+    metrics: headlineMetrics.map((metric) => ({
+      ...metric,
+      evaluated_count: dimensions.find((dimension) => dimension.id === metric.run_dimension_id)
+        ?.successful ?? null,
+    })),
+    components,
+    errors,
+  };
 }
 
 export function loadDocuments(
-  runId: number,
+  runDimensionId: number,
   options: {
-    dimension?: string;
     search?: string;
     floor?: number;
     ceiling?: number;
@@ -425,19 +399,16 @@ export function loadDocuments(
   signal?: AbortSignal,
 ) {
   const params = new URLSearchParams({
-    select: CASE_RESULT_SELECT,
-    "run_dimensions.run_id": `eq.${runId}`,
+    select: CASE_RESULT_LIST_SELECT,
+    run_dimension_id: `eq.${runDimensionId}`,
     order: options.sort === "highest"
       ? "primary_score.desc.nullslast,id.asc"
       : options.sort === "document"
-        ? "benchmark_cases(id).asc,id.asc"
+        ? "benchmark_case_id.asc,id.asc"
         : "primary_score.asc.nullslast,id.asc",
     limit: String(options.limit ?? 120),
     offset: String(options.offset ?? 0),
   });
-  if (options.dimension && options.dimension !== "all") {
-    params.set("run_dimensions.dimension", `eq.${options.dimension}`);
-  }
   if (options.floor != null) {
     params.append("primary_score", `gte.${Math.max(0, Math.min(1, options.floor))}`);
   }
@@ -478,7 +449,7 @@ export function loadDocuments(
       const detail = await response.text();
       throw new Error(`Could not load case_results (${response.status}): ${detail}`);
     }
-    const documents = (await response.json()) as CaseResult[];
+    const documents = (await response.json()) as TriageCaseResult[];
     const total = rangedTotal ?? documents.length;
     return { documents, total: Number.isFinite(total) ? total : documents.length };
   });
@@ -572,20 +543,20 @@ export function artifactUrl(
 }
 
 export function datasetFileUrl(
-  dataset: DatasetVersion,
+  dataset: Pick<DatasetVersion, "repository" | "resolved_sha">,
   relativePath: string,
 ) {
   return `https://huggingface.co/datasets/${encodePath(dataset.repository)}/resolve/${encodeURIComponent(dataset.resolved_sha)}/${encodePath(relativePath)}`;
 }
 
-export function sourceAssetUrl(result: CaseResult) {
+export function sourceAssetUrl(result: CaseResult | TriageCaseResult) {
   const path = result.benchmark_cases.source_relative_path;
   return path
     ? datasetFileUrl(result.benchmark_cases.dataset_versions, path)
     : null;
 }
 
-export function sourcePdfPreviewUrl(result: CaseResult) {
+export function sourcePdfPreviewUrl(result: CaseResult | TriageCaseResult) {
   const path = result.benchmark_cases.source_relative_path;
   const dataset = result.benchmark_cases.dataset_versions;
   if (!path || sourceAssetKind(result) !== "pdf") return null;
@@ -597,7 +568,7 @@ export function sourcePdfPreviewUrl(result: CaseResult) {
   return `/api/source-pdf?${query.toString()}`;
 }
 
-export function sourceAssetKind(result: CaseResult) {
+export function sourceAssetKind(result: CaseResult | TriageCaseResult) {
   const { source_media_type: mediaType, source_relative_path: path } =
     result.benchmark_cases;
   const suffix = path?.split(".").at(-1)?.toLowerCase();
@@ -611,7 +582,7 @@ export function sourceAssetKind(result: CaseResult) {
 const THUMBNAIL_BUCKET =
   process.env.NEXT_PUBLIC_THUMBNAIL_BUCKET ?? "parsebench-thumbnails-457820";
 
-export function thumbnailUrl(result: CaseResult) {
+export function thumbnailUrl(result: CaseResult | TriageCaseResult) {
   const revision = result.benchmark_cases.dataset_versions.resolved_sha;
   const testId = result.benchmark_cases.test_id;
   if (!revision || !testId) return null;

@@ -17,6 +17,7 @@ import {
   BenchmarkRun,
   CaseMetric,
   CaseResult,
+  TriageCaseResult,
   DocumentSort,
   DimensionMetric,
   HistoricalBestResult,
@@ -173,7 +174,7 @@ type TriageFilters = {
   page: number;
 };
 
-function documentName(result: CaseResult) {
+function documentName(result: CaseResult | TriageCaseResult) {
   return result.benchmark_cases.test_id.split("/").at(-1) ?? result.benchmark_cases.test_id;
 }
 
@@ -1241,6 +1242,7 @@ function Overview({
   documentTotal,
   loading,
   documentsLoading,
+  documentsError,
   filters,
   updateFilters,
   resetFilters,
@@ -1250,16 +1252,17 @@ function Overview({
 }: {
   run: BenchmarkRun;
   bundle: RunBundle;
-  documents: CaseResult[];
+  documents: TriageCaseResult[];
   documentTotal: number;
   loading: boolean;
   documentsLoading: boolean;
+  documentsError: string | null;
   filters: TriageFilters;
   updateFilters: (updates: Partial<TriageFilters>) => void;
   resetFilters: () => void;
   fullPageHref: string;
   inspectDimension: (dimension: string) => void;
-  inspectDocument: (result: CaseResult, navigationFilters?: TriageFilters) => void;
+  inspectDocument: (result: TriageCaseResult, navigationFilters?: TriageFilters) => void;
 }) {
   const overall = overallScore(bundle);
   const failedFromDimensions = bundle.dimensions.reduce(
@@ -1406,6 +1409,7 @@ function Overview({
           documents={documents}
           total={documentTotal}
           loading={documentsLoading || loading}
+          error={documentsError}
           filters={filters}
           updateFilters={updateFilters}
           resetFilters={resetFilters}
@@ -1667,9 +1671,9 @@ function DocumentExplorer({
   historicalBest: HistoricalBestState;
   onLoadHistoricalBest: () => void;
   onBrowseQueue: (trigger: HTMLButtonElement) => void;
-  previous: CaseResult | null;
-  next: CaseResult | null;
-  onNavigate: (result: CaseResult) => void;
+  previous: TriageCaseResult | null;
+  next: TriageCaseResult | null;
+  onNavigate: (result: TriageCaseResult) => void;
 }) {
   const [markdownMode, setMarkdownMode] = useState<MarkdownMode>("preview");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("explain");
@@ -2027,10 +2031,10 @@ function ThumbnailCard({
   eager,
   onSelect,
 }: {
-  result: CaseResult;
+  result: TriageCaseResult;
   selected?: boolean;
   eager?: boolean;
-  onSelect: (result: CaseResult) => void;
+  onSelect: (result: TriageCaseResult) => void;
 }) {
   const thumbnail = thumbnailUrl(result);
   const sourceFallback = sourceAssetKind(result) === "image" ? sourceAssetUrl(result) : null;
@@ -2272,6 +2276,7 @@ function TriageGrid({
   documents,
   total,
   loading,
+  error,
   filters,
   updateFilters,
   resetFilters,
@@ -2282,13 +2287,14 @@ function TriageGrid({
   selectedId,
 }: {
   bundle: RunBundle;
-  documents: CaseResult[];
+  documents: TriageCaseResult[];
   total: number;
   loading: boolean;
+  error?: string | null;
   filters: TriageFilters;
   updateFilters: (updates: Partial<TriageFilters>) => void;
   resetFilters: () => void;
-  onSelect: (result: CaseResult, navigationFilters?: TriageFilters) => void;
+  onSelect: (result: TriageCaseResult, navigationFilters?: TriageFilters) => void;
   compact?: boolean;
   embedded?: boolean;
   fullPageHref?: string;
@@ -2319,7 +2325,9 @@ function TriageGrid({
         fullPageHref={fullPageHref}
       />
       <section className="triage-results" aria-label="Matching benchmark cases">
-        {loading ? (
+        {error ? (
+          <EmptyState title="Could not load document results" body={error} />
+        ) : loading ? (
           <div className="triage-grid-loading" role="status">Loading document thumbnails…</div>
         ) : documents.length ? (
           <div className="triage-grid">
@@ -2395,9 +2403,10 @@ export default function DashboardClient({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [bundle, setBundle] = useState<RunBundle>(EMPTY_BUNDLE);
   const [bundleLoading, setBundleLoading] = useState(false);
-  const [documents, setDocuments] = useState<CaseResult[]>([]);
+  const [documents, setDocuments] = useState<TriageCaseResult[]>([]);
   const [documentTotal, setDocumentTotal] = useState(0);
   const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [selectedDocument, setSelectedDocument] = useState<CaseResult | null>(null);
   const [documentLoadState, setDocumentLoadState] = useState<{ id: number | null; loading: boolean }>({
     id: null,
@@ -2421,9 +2430,11 @@ export default function DashboardClient({
     ? selectedRunRecord
     : null;
   const selectedRunId = selectedRun?.id ?? null;
-  const activeDimension = bundle.dimensions.some((item) => item.dimension === filters.dimension)
-    ? filters.dimension
-    : bundle.dimensions[0]?.dimension ?? filters.dimension;
+  const activeRunDimensionId = (
+    bundle.dimensions.find(
+      (item) => item.run_id === selectedRunId && item.dimension === filters.dimension,
+    ) ?? bundle.dimensions.find((item) => item.run_id === selectedRunId)
+  )?.id ?? null;
 
   const updateFilters = useCallback((updates: Partial<TriageFilters>) => {
     if (!selectedRun) return;
@@ -2583,14 +2594,18 @@ export default function DashboardClient({
   }, [selectedRunId]);
 
   useEffect(() => {
-    if (selectedRunId == null || selectedRun?.artifact_state !== "complete") return;
+    if (
+      selectedRunId == null ||
+      activeRunDimensionId == null ||
+      selectedRun?.artifact_state !== "complete"
+    ) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setDocumentsLoading(true);
+      setDocumentsError(null);
       loadDocuments(
-        selectedRunId,
+        activeRunDimensionId,
         {
-          dimension: activeDimension,
           search: filters.search,
           floor: filters.minimum / 100,
           ceiling: filters.maximum / 100,
@@ -2608,9 +2623,14 @@ export default function DashboardClient({
           }
           setDocuments(loadedDocuments);
           setDocumentTotal(total);
+          setDocumentsError(null);
         })
         .catch((error: Error) => {
-          if (error.name !== "AbortError") setLoadError(error.message);
+          if (error.name !== "AbortError") {
+            setDocuments([]);
+            setDocumentTotal(0);
+            setDocumentsError(error.message);
+          }
         })
         .finally(() => {
           if (!controller.signal.aborted) setDocumentsLoading(false);
@@ -2621,7 +2641,7 @@ export default function DashboardClient({
       controller.abort();
     };
   }, [
-    activeDimension,
+    activeRunDimensionId,
     filters.maximum,
     filters.minimum,
     filters.page,
@@ -2838,6 +2858,7 @@ export default function DashboardClient({
       setBundle(EMPTY_BUNDLE);
       setDocuments([]);
       setDocumentTotal(0);
+      setDocumentsError(null);
       setSelectedDocument(null);
       setCaseMetrics([]);
       setCaseMetricsResultId(null);
@@ -2862,7 +2883,7 @@ export default function DashboardClient({
     router.push(`/workflows/${selectedRun.github_run_id}/triage${query}`);
   }
 
-  function inspectDocument(result: CaseResult, navigationFilters: TriageFilters = filters) {
+  function inspectDocument(result: TriageCaseResult, navigationFilters: TriageFilters = filters) {
     if (!selectedRun) return;
     setQueueOpen(false);
     setSelectedDocument(null);
@@ -3021,6 +3042,7 @@ export default function DashboardClient({
             documentTotal={documentTotal}
             loading={bundleLoading}
             documentsLoading={documentsLoading}
+            documentsError={documentsError}
             filters={filters}
             updateFilters={updateFilters}
             resetFilters={resetFilters}
@@ -3034,6 +3056,7 @@ export default function DashboardClient({
             documents={documents}
             total={documentTotal}
             loading={documentsLoading || bundleLoading}
+            error={documentsError}
             filters={filters}
             updateFilters={updateFilters}
             resetFilters={resetFilters}
@@ -3094,6 +3117,7 @@ export default function DashboardClient({
             documents={documents}
             total={documentTotal}
             loading={documentsLoading}
+            error={documentsError}
             filters={filters}
             updateFilters={updateFilters}
             resetFilters={resetFilters}
