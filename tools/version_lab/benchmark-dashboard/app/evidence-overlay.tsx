@@ -2,6 +2,7 @@
 
 export type EvidenceOverlayBox = {
   id: string;
+  relatedIds?: string[];
   label: string;
   x: number;
   y: number;
@@ -9,7 +10,7 @@ export type EvidenceOverlayBox = {
   height: number;
   kind: "ground-truth" | "prediction" | "best";
   tone?: EvidenceOverlayTone;
-  status?: "passed" | "partial" | "failed" | "neutral";
+  status?: "passed" | "partial" | "failed" | "unknown" | "neutral" | "ignored" | "reference";
 };
 
 export type EvidenceOverlayTone = "section" | "text" | "table" | "visual" | "other";
@@ -36,10 +37,11 @@ export function EvidenceOverlay({
           : box.kind === "best"
             ? "Best result"
             : "Output";
+        const selected = selectedId === box.id || box.relatedIds?.includes(selectedId ?? "") === true;
         return (
           <button
             aria-label={`${kindLabel} ${box.label}`}
-            className={`evidence-box evidence-box-${box.kind} evidence-box-${box.status ?? "neutral"} evidence-box-tone-${box.tone ?? "other"}${selectedId === box.id ? " evidence-box-selected" : ""}`}
+            className={`evidence-box evidence-box-${box.kind} evidence-box-${box.status ?? "neutral"} evidence-box-tone-${box.tone ?? "other"}${selected ? " evidence-box-selected" : ""}`}
             key={`${box.kind}-${box.id}`}
             onClick={() => onSelect?.(box.id)}
             style={{

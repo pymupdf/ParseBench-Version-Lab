@@ -416,6 +416,11 @@ jobs:
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
         run: .venv/bin/python "$WORKFLOW_SCRIPTS/benchmark.py" report
 
+      - name: Prepare dashboard diagnostics
+        env:
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+        run: python3 "$WORKFLOW_SCRIPTS/prepare_dashboard_diagnostics.py"
+
       - name: Add aggregate results to workflow summary
         env:
           GROUP: ${{ steps.config.outputs.group }}

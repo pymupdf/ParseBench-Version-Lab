@@ -11,9 +11,7 @@ import pytest
 VERSION_LAB_SRC = Path(__file__).parents[1] / "src"
 WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-parsebench.yml"
 INDEX_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-index.yml"
-RECONCILE_WORKFLOW = (
-    Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-reconcile.yml"
-)
+RECONCILE_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-reconcile.yml"
 ENVIRONMENT_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-environment.yml"
 sys.path.insert(0, str(VERSION_LAB_SRC))
 
@@ -93,6 +91,13 @@ def test_github_indexing_is_independent_from_the_benchmark_outcome() -> None:
     assert "SOURCE_WORKFLOW: pymupdf-source-stack-parsebench.yml" in index_workflow
     assert "PARSEBENCH_SUPABASE_SECRET_KEY" in index_workflow
     assert 'run: python3 "$WORKFLOW_SCRIPTS/index_results.py"' in index_workflow
+    assert 'run: python3 "$WORKFLOW_SCRIPTS/prepare_dashboard_diagnostics.py"' in benchmark_workflow
+    assert benchmark_workflow.index("Prepare dashboard diagnostics") > benchmark_workflow.index(
+        "Generate ParseBench reports"
+    )
+    assert benchmark_workflow.index("Prepare dashboard diagnostics") < benchmark_workflow.index(
+        "Upload source-stack GitHub artifact"
+    )
     assert "github-token: ${{ github.token }}" in index_workflow
     assert "The scheduled reconciliation will retry from GitHub and then GCS." in index_workflow
     assert "schedule:" not in index_workflow

@@ -10,6 +10,7 @@ import pytest
 VERSION_LAB_SRC = Path(__file__).parents[1] / "src"
 sys.path.insert(0, str(VERSION_LAB_SRC))
 
+from parsebench_version_lab.benchmark_index import LocalArtifactReader  # noqa: E402
 from parsebench_version_lab.diagnostic_backfill import (  # noqa: E402
     DiagnosticDimension,
     DiagnosticRun,
@@ -35,14 +36,6 @@ class CandidateDatabase:
                     "github_run_attempt": 2,
                     "gcs_bucket": "benchmark-results",
                     "gcs_prefix": "runs/123/parsebench-output",
-                    "dataset_version_id": 4,
-                }
-            ]
-        if table == "dataset_versions":
-            return [
-                {
-                    "repository": "owner/dataset",
-                    "resolved_sha": "a" * 40,
                 }
             ]
         if table == "run_dimensions":
@@ -78,8 +71,6 @@ def diagnostic_run() -> DiagnosticRun:
         github_run_attempt=2,
         bucket="benchmark-results",
         prefix="runs/123/parsebench-output",
-        dataset_repository="owner/dataset",
-        dataset_sha="a" * 40,
         dimensions=(
             DiagnosticDimension(
                 id=9,
@@ -92,7 +83,7 @@ def diagnostic_run() -> DiagnosticRun:
     )
 
 
-@pytest.mark.parametrize("existing_schema_version", [None, 1])
+@pytest.mark.parametrize("existing_schema_version", [None, 1, 2])
 def test_discovers_missing_and_outdated_diagnostic_locators(
     existing_schema_version: int | None,
 ) -> None:
@@ -105,43 +96,43 @@ def test_discovers_missing_and_outdated_diagnostic_locators(
 
 
 def test_discovery_skips_current_diagnostic_locators() -> None:
-    assert discover_diagnostic_runs(
-        CandidateDatabase(2),  # type: ignore[arg-type]
-        github_repository="owner/repository",
-    ) == []
+    assert (
+        discover_diagnostic_runs(
+            CandidateDatabase(3),  # type: ignore[arg-type]
+            github_repository="owner/repository",
+        )
+        == []
+    )
 
 
-def test_generation_requires_report_and_database_test_ids_to_match(tmp_path: Path) -> None:
+def test_generation_requires_v2_and_database_test_ids_to_match(tmp_path: Path) -> None:
     run = diagnostic_run()
-    report_dir = tmp_path / "reports" / "9"
-    report_dir.mkdir(parents=True)
-    report = {
-        "total_examples": 1,
-        "successful": 1,
-        "failed": 0,
-        "skipped": 0,
-        "per_example_results": [
+    source = tmp_path / "source"
+    index_path = source / "pipeline/table/_diagnostics/v2/index.json"
+    index_path.parent.mkdir(parents=True)
+    index_path.write_text(
+        json.dumps(
             {
-                "test_id": "table/different",
-                "example_id": "different",
-                "pipeline_name": "pipeline",
-                "product_type": "parse",
-                "success": True,
+                "schema_version": 2,
+                "dimension": "table",
+                "diagnostics": {
+                    "table/different": {
+                        "relative_path": "_diagnostics/v2/different.json",
+                        "schema_version": 2,
+                    }
+                },
             }
-        ],
-    }
-    (report_dir / "_evaluation_report.json").write_text(json.dumps(report), encoding="utf-8")
-    dataset_dir = tmp_path / "datasets" / ("a" * 40)
-    dataset_dir.mkdir(parents=True)
-    (dataset_dir / "table.jsonl").write_text("", encoding="utf-8")
+        ),
+        encoding="utf-8",
+    )
 
     with pytest.raises(ValueError, match="do not match Supabase"):
-        _generate_dimension(run, run.dimensions[0], tmp_path, dataset_dir, lambda _command: None)
+        _generate_dimension(run.dimensions[0], tmp_path, LocalArtifactReader(source))
 
 
 def test_publish_uploads_sidecars_before_the_discovery_index(tmp_path: Path) -> None:
     run = diagnostic_run()
-    index_path = tmp_path / "_diagnostics" / "v2" / "index.json"
+    index_path = tmp_path / "_diagnostics" / "v3" / "index.json"
     index_path.parent.mkdir(parents=True)
     index_path.write_text("{}", encoding="utf-8")
     commands: list[list[str]] = []
@@ -149,10 +140,10 @@ def test_publish_uploads_sidecars_before_the_discovery_index(tmp_path: Path) -> 
     _publish_dimension(run, run.dimensions[0], index_path, lambda command: commands.append(list(command)))
 
     assert commands[0][0:3] == ["gcloud", "storage", "rsync"]
-    assert commands[0][4].endswith("/_diagnostics/v2")
+    assert commands[0][4].endswith("/_diagnostics/v3")
     assert "--exclude" in commands[0]
     assert commands[1][0:3] == ["gcloud", "storage", "cp"]
-    assert commands[1][4].endswith("/_diagnostics/v2/index.json")
+    assert commands[1][4].endswith("/_diagnostics/v3/index.json")
 
 
 class DiagnosticStorage:
@@ -165,21 +156,19 @@ class DiagnosticStorage:
         return self.payload
 
 
-def test_remote_completion_uses_only_the_versioned_v2_index() -> None:
+def test_remote_completion_uses_only_the_versioned_v3_index() -> None:
     storage = DiagnosticStorage(
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "dimension": "table",
             "diagnostics": {
                 "table/example": {
-                    "relative_path": "_diagnostics/v2/example.json",
-                    "schema_version": 2,
+                    "relative_path": "_diagnostics/v3/example.json",
+                    "schema_version": 3,
                 }
             },
         }
     )
 
     assert _remote_dimension_is_complete(storage, diagnostic_run(), diagnostic_run().dimensions[0])
-    assert storage.object_names == [
-        "runs/123/parsebench-output/pipeline/table/_diagnostics/v2/index.json"
-    ]
+    assert storage.object_names == ["runs/123/parsebench-output/pipeline/table/_diagnostics/v3/index.json"]

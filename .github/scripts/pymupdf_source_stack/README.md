@@ -25,6 +25,11 @@ an overall aggregate plus category headline scores directly to the GitHub run
 summary. `_benchmark_scores.json` records the same values in the uploaded
 artifact.
 
+After canonical reporting completes, `prepare_dashboard_diagnostics.py`
+copies the immutable evaluator diagnostic evidence into a separately versioned
+dashboard schema. The dashboard metadata records metric identity and score
+contribution semantics without changing benchmark rules, reports, or scores.
+
 Each adapter is a small command with one responsibility. `resolve_dataset.py`
 resolves the `current` Hugging Face branch or validates a user-supplied full
 commit SHA. `resolve_layout_source.py` resolves a PyMuPDF Layout selection

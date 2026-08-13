@@ -365,40 +365,31 @@ def _diagnostic_locators(
     report_path: str,
     dimension: str,
 ) -> dict[str, tuple[str, int]]:
-    """Read safe diagnostic paths, preferring the current versioned index."""
+    """Read safe dashboard schema-v3 diagnostic paths."""
     report_directory = PurePosixPath(report_path).parent
-    candidates = (
-        (PurePosixPath("_diagnostics/v2/index.json"), 2, PurePosixPath("_diagnostics/v2")),
-        (PurePosixPath("_diagnostics/index.json"), 1, PurePosixPath("_diagnostics")),
-    )
-    for relative_index_path, expected_version, expected_directory in candidates:
-        index_path = (report_directory / relative_index_path).as_posix()
-        index = _object(reader.read_json(index_path))
-        index_version = _coerce_integer(index.get("schema_version"))
-        index_dimension = index.get("dimension")
-        if (
-            index_version != expected_version
-            or (index_dimension is not None and index_dimension != dimension)
-        ):
-            continue
+    expected_version = 3
+    expected_directory = PurePosixPath("_diagnostics/v3")
+    index_path = (report_directory / expected_directory / "index.json").as_posix()
+    index = _object(reader.read_json(index_path))
+    index_version = _coerce_integer(index.get("schema_version"))
+    if index_version != expected_version or index.get("dimension") != dimension:
+        return {}
 
-        locators: dict[str, tuple[str, int]] = {}
-        for test_id, value in _object(index.get("diagnostics")).items():
-            if not test_id:
-                continue
-            entry = _object(value)
-            relative_path = _normalized_source_path(entry.get("relative_path"))
-            entry_version = _coerce_integer(entry.get("schema_version"))
-            schema_version = index_version if entry_version is None else entry_version
-            if relative_path is None or schema_version != expected_version:
-                continue
-            path = PurePosixPath(relative_path)
-            if path.parent != expected_directory or path.suffix != ".json":
-                continue
-            locators[test_id] = ((report_directory / path).as_posix(), schema_version)
-        if locators:
-            return locators
-    return {}
+    locators: dict[str, tuple[str, int]] = {}
+    for test_id, value in _object(index.get("diagnostics")).items():
+        if not test_id:
+            continue
+        entry = _object(value)
+        relative_path = _normalized_source_path(entry.get("relative_path"))
+        entry_version = _coerce_integer(entry.get("schema_version"))
+        schema_version = index_version if entry_version is None else entry_version
+        if relative_path is None or schema_version != expected_version:
+            continue
+        path = PurePosixPath(relative_path)
+        if path.parent != expected_directory or path.suffix != ".json":
+            continue
+        locators[test_id] = ((report_directory / path).as_posix(), schema_version)
+    return locators
 
 
 def _pipeline_from_run_name(run: Mapping[str, Any]) -> str | None:
@@ -458,6 +449,8 @@ def _primary_metric(dimension: str, metrics: list[dict[str, Any]]) -> tuple[str 
     preferred = DEFAULT_METRICS.get(dimension, "rule_pass_rate")
     if values.get(preferred) is not None:
         return preferred, values[preferred]
+    if values.get("rule_pass_rate") is not None:
+        return "rule_pass_rate", values["rule_pass_rate"]
     for name in sorted(values):
         if values[name] is not None:
             return name, values[name]
@@ -701,9 +694,7 @@ class BenchmarkIndexer:
         if root_report:
             fallback = str(requested_group) if requested_group in KNOWN_DIMENSIONS else None
             resolved_dimension = report_dimension(root_report, fallback)
-            if resolved_dimension in KNOWN_DIMENSIONS and not any(
-                value[0] == resolved_dimension for value in reports
-            ):
+            if resolved_dimension in KNOWN_DIMENSIONS and not any(value[0] == resolved_dimension for value in reports):
                 reports.append((resolved_dimension, root_path, root_report))
         return reports
 
@@ -827,6 +818,20 @@ class BenchmarkIndexer:
 
         example_rows = [_object(value) for value in _array(report.get("per_example_results"))]
         diagnostic_locators = _diagnostic_locators(reader, report_path, dimension)
+        expected_diagnostic_ids = [
+            test_id for example in example_rows if isinstance((test_id := example.get("test_id")), str) and test_id
+        ]
+        if len(expected_diagnostic_ids) != len(example_rows) or len(expected_diagnostic_ids) != len(
+            set(expected_diagnostic_ids)
+        ):
+            raise ValueError(f"Report {report_path} contains missing or duplicate benchmark test IDs")
+        if set(diagnostic_locators) != set(expected_diagnostic_ids):
+            missing = sorted(set(expected_diagnostic_ids) - set(diagnostic_locators))[:5]
+            extra = sorted(set(diagnostic_locators) - set(expected_diagnostic_ids))[:5]
+            raise ValueError(
+                f"Dashboard schema-v3 diagnostics are incomplete for {report_path}; "
+                f"missing={missing!r}, extra={extra!r}"
+            )
         legacy_assets: dict[str, str] | None = None
         case_rows: list[dict[str, Any]] = []
         for example in example_rows:

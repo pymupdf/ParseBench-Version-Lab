@@ -6,6 +6,25 @@ type DiagnosticDimension =
   | "text_formatting"
   | (string & {});
 
+export const DIAGNOSTIC_EVALUATION_KINDS = [
+  "chart_rules",
+  "layout_elements",
+  "layout_mixed",
+  "layout_order",
+  "layout_rules",
+  "rules",
+  "table_comparison",
+  "text_content",
+  "text_formatting",
+] as const;
+
+export type DiagnosticEvaluationKind = typeof DIAGNOSTIC_EVALUATION_KINDS[number];
+
+export function isDiagnosticEvaluationKind(value: unknown): value is DiagnosticEvaluationKind {
+  return typeof value === "string" &&
+    (DIAGNOSTIC_EVALUATION_KINDS as readonly string[]).includes(value);
+}
+
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
@@ -71,8 +90,22 @@ export type DiagnosticOutcome = {
   [key: string]: JsonValue | undefined;
 };
 
+type DiagnosticHeadlineContribution = {
+  primary_metric_name: string | null;
+  kind: "component" | "diagnostic" | "primary";
+  contributes: boolean;
+  weight: number | null;
+  normalized_weight: number | null;
+};
+
+type DiagnosticSummary = {
+  headline_contribution: DiagnosticHeadlineContribution;
+  [key: string]: JsonValue;
+};
+
 export type DiagnosticArtifact = {
-  schema_version: 1 | 2 | "1" | "2";
+  schema_version: 3;
+  evaluation_kind: DiagnosticEvaluationKind;
   test_id: string;
   dimension: DiagnosticDimension;
   source: DiagnosticSource | null;
@@ -80,6 +113,6 @@ export type DiagnosticArtifact = {
   primary_metric: DiagnosticPrimaryMetric | null;
   metrics: DiagnosticMetric[];
   expectations: DiagnosticExpectation[];
-  summary: JsonObject;
+  summary: DiagnosticSummary;
   outcomes?: DiagnosticOutcome[] | null;
 };

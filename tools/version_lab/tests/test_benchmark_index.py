@@ -404,7 +404,7 @@ def test_reconciliation_scans_every_run_newer_than_its_cursor(
     assert reconciliation["checkpoint"] == {"github_run_id": 105, "github_run_attempt": 1}
 
 
-def test_indexer_extracts_document_scores_and_artifact_locators(tmp_path: Path) -> None:
+def test_indexer_extracts_document_scores_and_requires_v3_diagnostic_locators(tmp_path: Path) -> None:
     pipeline = "pymupdf4llm_markdown"
     write_json(
         tmp_path / "_github_run.json",
@@ -442,16 +442,16 @@ def test_indexer_extracts_document_scores_and_artifact_locators(tmp_path: Path) 
             ],
         },
     )
-    diagnostic_index_path = tmp_path / pipeline / "table" / "_diagnostics" / "index.json"
+    diagnostic_index_path = tmp_path / pipeline / "table" / "_diagnostics" / "v3" / "index.json"
     write_json(
         diagnostic_index_path,
         {
-            "schema_version": 1,
+            "schema_version": 3,
             "dimension": "table",
             "diagnostics": {
                 "table/invoice": {
-                    "relative_path": "_diagnostics/0123456789abcdef0123456789abcdef.json",
-                    "schema_version": 1,
+                    "relative_path": "_diagnostics/v3/0123456789abcdef0123456789abcdef.json",
+                    "schema_version": 3,
                 }
             },
         },
@@ -476,35 +476,33 @@ def test_indexer_extracts_document_scores_and_artifact_locators(tmp_path: Path) 
         "pymupdf4llm_markdown/table/invoice.result.json"
     )
     assert database.rows["case_results"][0]["diagnostic_relative_path"] == (
-        "pymupdf4llm_markdown/table/_diagnostics/0123456789abcdef0123456789abcdef.json"
+        "pymupdf4llm_markdown/table/_diagnostics/v3/0123456789abcdef0123456789abcdef.json"
     )
-    assert database.rows["case_results"][0]["diagnostic_schema_version"] == 1
+    assert database.rows["case_results"][0]["diagnostic_schema_version"] == 3
     assert database.rows["case_metrics"][0]["passed_count"] == 3
 
     diagnostic_index_path.unlink()
     historical_database = FakeDatabase()
-    BenchmarkIndexer(historical_database, FakeGithub()).index_run(  # type: ignore[arg-type]
-        github_run, LocalArtifactReader(tmp_path)
-    )
-
-    assert "diagnostic_relative_path" not in historical_database.rows["case_results"][0]
-    assert "diagnostic_schema_version" not in historical_database.rows["case_results"][0]
+    with pytest.raises(ValueError, match="schema-v3 diagnostics are incomplete"):
+        BenchmarkIndexer(historical_database, FakeGithub()).index_run(  # type: ignore[arg-type]
+            github_run, LocalArtifactReader(tmp_path)
+        )
 
 
 def test_diagnostic_index_rejects_unsafe_or_incompatible_locators(tmp_path: Path) -> None:
-    index_path = tmp_path / "pipeline" / "table" / "_diagnostics" / "index.json"
+    index_path = tmp_path / "pipeline" / "table" / "_diagnostics" / "v3" / "index.json"
     write_json(
         index_path,
         {
-            "schema_version": 1,
+            "schema_version": 3,
             "dimension": "table",
             "diagnostics": {
-                "table/safe": {"relative_path": "_diagnostics/safe.json"},
+                "table/safe": {"relative_path": "_diagnostics/v3/safe.json"},
                 "table/escape": {"relative_path": "../../escape.json"},
                 "table/outside": {"relative_path": "results/outside.json"},
                 "table/version": {
-                    "relative_path": "_diagnostics/version.json",
-                    "schema_version": 0,
+                    "relative_path": "_diagnostics/v3/version.json",
+                    "schema_version": 2,
                 },
             },
         },
@@ -516,7 +514,7 @@ def test_diagnostic_index_rejects_unsafe_or_incompatible_locators(tmp_path: Path
         "table",
     )
 
-    assert locators == {"table/safe": ("pipeline/table/_diagnostics/safe.json", 1)}
+    assert locators == {"table/safe": ("pipeline/table/_diagnostics/v3/safe.json", 3)}
     assert (
         benchmark_index_module._diagnostic_locators(
             LocalArtifactReader(tmp_path),
@@ -527,7 +525,7 @@ def test_diagnostic_index_rejects_unsafe_or_incompatible_locators(tmp_path: Path
     )
 
 
-def test_diagnostic_index_prefers_versioned_v2_over_immutable_v1(tmp_path: Path) -> None:
+def test_diagnostic_index_ignores_legacy_indexes(tmp_path: Path) -> None:
     write_json(
         tmp_path / "pipeline" / "table" / "_diagnostics" / "index.json",
         {
@@ -555,33 +553,80 @@ def test_diagnostic_index_prefers_versioned_v2_over_immutable_v1(tmp_path: Path)
         },
     )
 
+    assert (
+        benchmark_index_module._diagnostic_locators(
+            LocalArtifactReader(tmp_path),
+            "pipeline/table/_evaluation_report.json",
+            "table",
+        )
+        == {}
+    )
+
+
+def test_diagnostic_index_consumes_only_dashboard_v3(tmp_path: Path) -> None:
+    for version in (2, 3):
+        write_json(
+            tmp_path / "pipeline" / "layout" / "_diagnostics" / f"v{version}" / "index.json",
+            {
+                "schema_version": version,
+                "dimension": "layout",
+                "diagnostics": {
+                    "layout/example": {
+                        "relative_path": f"_diagnostics/v{version}/case.json",
+                        "schema_version": version,
+                    }
+                },
+            },
+        )
+
     assert benchmark_index_module._diagnostic_locators(
         LocalArtifactReader(tmp_path),
-        "pipeline/table/_evaluation_report.json",
-        "table",
-    ) == {"table/example": ("pipeline/table/_diagnostics/v2/compact.json", 2)}
+        "pipeline/layout/_evaluation_report.json",
+        "layout",
+    ) == {"layout/example": ("pipeline/layout/_diagnostics/v3/case.json", 3)}
+
+    (tmp_path / "pipeline/layout/_diagnostics/v3/index.json").unlink()
+    assert (
+        benchmark_index_module._diagnostic_locators(
+            LocalArtifactReader(tmp_path),
+            "pipeline/layout/_evaluation_report.json",
+            "layout",
+        )
+        == {}
+    )
+
+
+def test_primary_metric_fallback_prefers_general_rule_pass_rate() -> None:
+    name, value = benchmark_index_module._primary_metric(
+        "text_formatting",
+        [
+            {"metric_name": "rule_is_italic_pass_rate", "value": 1.0},
+            {"metric_name": "rule_pass_rate", "value": 0.5},
+            {"metric_name": "rule_is_underline_pass_rate", "value": 0.0},
+        ],
+    )
+
+    assert (name, value) == ("rule_pass_rate", 0.5)
 
 
 @pytest.mark.parametrize(
     (
         "existing_version",
         "existing_has_path",
-        "artifact_version",
         "expected_path",
         "expected_upserts",
     ),
     [
-        (2, True, 1, "pipeline/table/_diagnostics/v2/persisted.json", 1),
-        (2, False, 1, None, 1),
-        (1, True, 2, "pipeline/table/_diagnostics/v2/upgrade.json", 2),
-        (2, False, 2, "pipeline/table/_diagnostics/v2/upgrade.json", 2),
+        (2, True, "pipeline/table/_diagnostics/v3/upgrade.json", 2),
+        (3, False, "pipeline/table/_diagnostics/v3/upgrade.json", 2),
+        (3, True, "pipeline/table/_diagnostics/v3/persisted.json", 1),
+        (4, True, "pipeline/table/_diagnostics/v4/persisted.json", 1),
     ],
 )
-def test_indexer_never_downgrades_a_persisted_diagnostic_locator(
+def test_indexer_applies_v3_locator_without_downgrading_newer_persisted_locator(
     tmp_path: Path,
     existing_version: int,
     existing_has_path: bool,
-    artifact_version: int,
     expected_path: str | None,
     expected_upserts: int,
 ) -> None:
@@ -617,17 +662,17 @@ def test_indexer_never_downgrades_a_persisted_diagnostic_locator(
                     )
             return records
 
-    diagnostic_directory = "_diagnostics" if artifact_version == 1 else "_diagnostics/v2"
-    diagnostic_filename = "artifact.json" if artifact_version == 1 else "upgrade.json"
+    diagnostic_directory = "_diagnostics/v3"
+    diagnostic_filename = "upgrade.json"
     write_json(
         tmp_path / "pipeline" / "table" / diagnostic_directory / "index.json",
         {
-            "schema_version": artifact_version,
+            "schema_version": 3,
             "dimension": "table",
             "diagnostics": {
                 "table/example": {
                     "relative_path": f"{diagnostic_directory}/{diagnostic_filename}",
-                    "schema_version": artifact_version,
+                    "schema_version": 3,
                 }
             },
         },
@@ -663,7 +708,7 @@ def test_indexer_never_downgrades_a_persisted_diagnostic_locator(
     )
 
     result = database.rows["case_results"][0]
-    assert result["diagnostic_schema_version"] == max(existing_version, artifact_version)
+    assert result["diagnostic_schema_version"] == max(existing_version, 3)
     assert result["diagnostic_relative_path"] == expected_path
     assert database.case_result_upserts == expected_upserts
     if expected_upserts == 2:

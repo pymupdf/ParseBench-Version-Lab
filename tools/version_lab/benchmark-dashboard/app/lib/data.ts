@@ -1,4 +1,4 @@
-import type { DiagnosticArtifact } from "../diagnostics";
+import { isDiagnosticEvaluationKind, type DiagnosticArtifact } from "../diagnostics";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY =
@@ -75,6 +75,7 @@ export type DimensionMetric = {
   run_dimension_id: number;
   metric_name: string;
   metric_value: number;
+  evaluated_count?: number | null;
 };
 
 export type RunComponent = {
@@ -210,6 +211,37 @@ async function apiFetch<T>(
     throw new Error(`Could not load ${table} (${response.status}): ${detail}`);
   }
   return (await response.json()) as T;
+}
+
+async function apiCount(
+  table: string,
+  params: URLSearchParams,
+  signal?: AbortSignal,
+) {
+  configurationError();
+  const query = new URLSearchParams(params);
+  query.set("limit", "1");
+  const response = await fetch(
+    `${SUPABASE_URL}/rest/v1/${table}?${query.toString()}`,
+    {
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY!,
+        Prefer: "count=exact",
+      },
+      signal,
+    },
+  );
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Could not count ${table} (${response.status}): ${detail}`);
+  }
+  const totalValue = response.headers.get("content-range")?.split("/").at(-1);
+  await response.body?.cancel();
+  const total = totalValue && totalValue !== "*" ? Number(totalValue) : null;
+  if (total == null || !Number.isFinite(total)) {
+    throw new Error(`Could not determine the exact ${table} count.`);
+  }
+  return total;
 }
 
 const RUN_CATALOG_PAGE_SIZE = 500;
@@ -353,7 +385,30 @@ export async function loadRunBundle(
       signal,
     ),
   ]);
-  return { dimensions, metrics, components, errors };
+  const dimensionById = new Map(dimensions.map((dimension) => [dimension.id, dimension]));
+  const headlineMetrics = metrics.filter((metric) => {
+    const dimension = dimensionById.get(metric.run_dimension_id);
+    return dimension != null && metric.metric_name === PRIMARY_METRIC_BY_DIMENSION[dimension.dimension];
+  });
+  const metricsWithCoverage = await Promise.all(headlineMetrics.map(async (metric) => {
+    const caseMetricName = metric.metric_name.replace(/^avg_/, "");
+    try {
+      const evaluatedCount = await apiCount(
+        "case_metrics",
+        new URLSearchParams({
+          select: "id,case_results!inner(run_dimension_id)",
+          metric_name: `eq.${caseMetricName}`,
+          "case_results.run_dimension_id": `eq.${metric.run_dimension_id}`,
+        }),
+        signal,
+      );
+      return { ...metric, evaluated_count: evaluatedCount };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      return { ...metric, evaluated_count: null };
+    }
+  }));
+  return { dimensions, metrics: metricsWithCoverage, components, errors };
 }
 
 export function loadDocuments(
@@ -635,11 +690,11 @@ export async function loadDiagnostic(
 ) {
   const url = artifactUrl(run, result.diagnostic_relative_path);
   if (!url || result.diagnostic_schema_version == null) {
-    return { url: null, diagnostic: null };
+    throw new Error("Dashboard schema-v3 diagnostic locator is missing for this benchmark case.");
   }
-  if (![1, 2].includes(result.diagnostic_schema_version)) {
+  if (result.diagnostic_schema_version !== 3) {
     throw new Error(
-      `Diagnostic schema ${result.diagnostic_schema_version} is not supported by this dashboard.`,
+      `Diagnostic schema ${result.diagnostic_schema_version} is obsolete; this dashboard requires schema v3.`,
     );
   }
 
@@ -649,7 +704,9 @@ export async function loadDiagnostic(
   }
   const diagnostic = (await response.json()) as DiagnosticArtifact;
   if (
-    Number(diagnostic.schema_version) !== result.diagnostic_schema_version ||
+    diagnostic.schema_version !== 3 ||
+    !isDiagnosticEvaluationKind(diagnostic.evaluation_kind) ||
+    typeof diagnostic.summary?.headline_contribution?.contributes !== "boolean" ||
     diagnostic.test_id !== result.benchmark_cases.test_id ||
     diagnostic.dimension !== result.run_dimensions.dimension
   ) {

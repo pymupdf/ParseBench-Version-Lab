@@ -1,32 +1,33 @@
-"""Reconstruct and publish per-case diagnostics for indexed historical runs."""
+"""Upgrade and publish dashboard diagnostics for indexed historical runs."""
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from parse_bench.evaluation.diagnostics import DIAGNOSTIC_SCHEMA_VERSION, write_diagnostic_artifacts
-from parse_bench.schemas.evaluation import EvaluationSummary
-
 from .benchmark_index import (
     BenchmarkIndexer,
     GcsArtifactReader,
     GcsClient,
     GithubClient,
+    JsonArtifactReader,
     SupabaseRestClient,
     _now_expression_payload,
     gcloud_access_token,
     gh_access_token,
 )
+from .dashboard_diagnostics import (
+    DASHBOARD_DIAGNOSTIC_DIRECTORY,
+    DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION,
+    write_dashboard_diagnostics,
+)
 
 PAGE_SIZE = 1000
-DATASET_REVISION_PATTERN = re.compile(r"[0-9a-f]{40}")
 CommandRunner = Callable[[Sequence[str]], None]
 
 
@@ -43,7 +44,7 @@ class DiagnosticDimension:
 
 @dataclass(frozen=True)
 class DiagnosticRun:
-    """A historical run with at least one missing diagnostic locator."""
+    """A historical run with at least one outdated dashboard diagnostic."""
 
     id: int
     github_repository: str
@@ -51,8 +52,6 @@ class DiagnosticRun:
     github_run_attempt: int
     bucket: str
     prefix: str
-    dataset_repository: str
-    dataset_sha: str
     dimensions: tuple[DiagnosticDimension, ...]
 
     @property
@@ -107,10 +106,7 @@ def _dimension_case_rows(database: SupabaseRestClient, run_dimension_id: int) ->
         database,
         "case_results",
         {
-            "select": (
-                "id,diagnostic_relative_path,diagnostic_schema_version,"
-                "benchmark_cases!inner(test_id)"
-            ),
+            "select": ("id,diagnostic_relative_path,diagnostic_schema_version,benchmark_cases!inner(test_id)"),
             "run_dimension_id": f"eq.{run_dimension_id}",
             "order": "id.asc",
         },
@@ -131,7 +127,7 @@ def _all_case_rows(database: SupabaseRestClient) -> list[dict[str, Any]]:
                     "benchmark_cases!inner(test_id)"
                 ),
                 "order": "id.asc",
-                    "limit": str(PAGE_SIZE),
+                "limit": str(PAGE_SIZE),
                 "offset": str(offset),
             },
         )
@@ -154,17 +150,13 @@ def discover_diagnostic_runs(
     github_repository: str,
     github_run_ids: Sequence[int] = (),
 ) -> list[DiagnosticRun]:
-    """Find indexed runs with reconstructable reports and missing locators."""
+    """Find indexed runs whose dashboard diagnostics need a v3 upgrade."""
 
     run_query = {
-        "select": (
-            "id,github_repository,github_run_id,github_run_attempt,gcs_bucket,gcs_prefix,"
-            "dataset_version_id"
-        ),
+        "select": ("id,github_repository,github_run_id,github_run_attempt,gcs_bucket,gcs_prefix"),
         "github_repository": f"eq.{github_repository}",
         "gcs_bucket": "not.is.null",
         "gcs_prefix": "not.is.null",
-        "dataset_version_id": "not.is.null",
         "order": "github_run_id.asc,github_run_attempt.asc",
     }
     selected_ids = sorted(set(github_run_ids))
@@ -176,28 +168,9 @@ def discover_diagnostic_runs(
         dimension_id = _integer(case_row.get("run_dimension_id"), "case_results.run_dimension_id")
         case_rows_by_dimension.setdefault(dimension_id, []).append(case_row)
 
-    dataset_cache: dict[int, tuple[str, str]] = {}
     candidates: list[DiagnosticRun] = []
     for run in _select_all(database, "benchmark_runs", run_query):
         database_run_id = _integer(run.get("id"), "benchmark_runs.id")
-        dataset_id = _integer(run.get("dataset_version_id"), "benchmark_runs.dataset_version_id")
-        if dataset_id not in dataset_cache:
-            dataset_rows = database.select(
-                "dataset_versions",
-                {
-                    "select": "repository,resolved_sha",
-                    "id": f"eq.{dataset_id}",
-                    "limit": "1",
-                },
-            )
-            if len(dataset_rows) != 1:
-                raise ValueError(f"Dataset version {dataset_id} was not found")
-            dataset_repository = _string(dataset_rows[0].get("repository"), "dataset_versions.repository")
-            dataset_sha = _string(dataset_rows[0].get("resolved_sha"), "dataset_versions.resolved_sha")
-            if DATASET_REVISION_PATTERN.fullmatch(dataset_sha) is None:
-                raise ValueError(f"Dataset version {dataset_id} is not pinned to a full commit SHA")
-            dataset_cache[dataset_id] = dataset_repository, dataset_sha
-
         dimensions: list[DiagnosticDimension] = []
         dimension_rows = _select_all(
             database,
@@ -216,7 +189,7 @@ def discover_diagnostic_runs(
                 row
                 for row in case_rows
                 if not row.get("diagnostic_relative_path")
-                or row.get("diagnostic_schema_version") != DIAGNOSTIC_SCHEMA_VERSION
+                or row.get("diagnostic_schema_version") != DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION
             ]
             if not missing:
                 continue
@@ -236,7 +209,6 @@ def discover_diagnostic_runs(
                 )
             )
         if dimensions:
-            dataset_repository, dataset_sha = dataset_cache[dataset_id]
             candidates.append(
                 DiagnosticRun(
                     id=database_run_id,
@@ -248,8 +220,6 @@ def discover_diagnostic_runs(
                     ),
                     bucket=_string(run.get("gcs_bucket"), "benchmark_runs.gcs_bucket"),
                     prefix=_artifact_path(run.get("gcs_prefix"), "benchmark_runs.gcs_prefix"),
-                    dataset_repository=dataset_repository,
-                    dataset_sha=dataset_sha,
                     dimensions=tuple(dimensions),
                 )
             )
@@ -269,88 +239,19 @@ def _run_checked(command: Sequence[str]) -> None:
     subprocess.run(list(command), check=True)
 
 
-def _ensure_dataset(
-    run: DiagnosticRun,
-    workspace: Path,
-    command_runner: CommandRunner,
-) -> Path:
-    destination = workspace / "datasets" / run.dataset_sha
-    required = {dimension.dimension for dimension in run.dimensions}
-    missing = [dimension for dimension in required if not (destination / f"{dimension}.jsonl").is_file()]
-    if missing:
-        destination.mkdir(parents=True, exist_ok=True)
-        command_runner(
-            [
-                "hf",
-                "download",
-                run.dataset_repository,
-                *(f"{dimension}.jsonl" for dimension in sorted(required)),
-                "--repo-type",
-                "dataset",
-                "--revision",
-                run.dataset_sha,
-                "--local-dir",
-                str(destination),
-            ]
-        )
-    still_missing = sorted(
-        dimension for dimension in required if not (destination / f"{dimension}.jsonl").is_file()
-    )
-    if still_missing:
-        raise FileNotFoundError(
-            f"Pinned dataset {run.dataset_repository}@{run.dataset_sha} is missing: " + ", ".join(still_missing)
-        )
-    return destination
-
-
-def _report_path(
-    run: DiagnosticRun,
-    dimension: DiagnosticDimension,
-    workspace: Path,
-    command_runner: CommandRunner,
-) -> Path:
-    report_path = workspace / "reports" / str(dimension.id) / "_evaluation_report.json"
-    if not report_path.is_file():
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        remote = f"gs://{run.bucket}/{run.prefix.rstrip('/')}/{dimension.report_relative_path}"
-        command_runner(["gcloud", "storage", "cp", remote, str(report_path)])
-    return report_path
-
-
 def _generate_dimension(
-    run: DiagnosticRun,
     dimension: DiagnosticDimension,
     workspace: Path,
-    dataset_dir: Path,
-    command_runner: CommandRunner,
+    reader: JsonArtifactReader,
 ) -> Path:
-    report_path = _report_path(run, dimension, workspace, command_runner)
-    summary = EvaluationSummary.model_validate_json(report_path.read_text(encoding="utf-8"))
-    report_test_ids = [result.test_id for result in summary.per_example_results]
-    if len(report_test_ids) != len(set(report_test_ids)):
-        raise ValueError(f"Report for run dimension {dimension.id} contains duplicate test IDs")
     expected_ids = set(dimension.test_ids)
-    actual_ids = set(report_test_ids)
-    if expected_ids != actual_ids:
-        missing = sorted(expected_ids - actual_ids)[:5]
-        extra = sorted(actual_ids - expected_ids)[:5]
-        raise ValueError(
-            f"Report test IDs do not match Supabase for run dimension {dimension.id}; "
-            f"missing={missing!r}, extra={extra!r}"
-        )
-
     generated_dir = workspace / "generated" / str(dimension.id)
-    cached_index_path = (
-        generated_dir
-        / "_diagnostics"
-        / f"v{DIAGNOSTIC_SCHEMA_VERSION}"
-        / "index.json"
-    )
+    cached_index_path = generated_dir / DASHBOARD_DIAGNOSTIC_DIRECTORY / "index.json"
     if cached_index_path.is_file():
         cached_index = json.loads(cached_index_path.read_text(encoding="utf-8"))
         cached_entries = cached_index.get("diagnostics")
         if (
-            cached_index.get("schema_version") == DIAGNOSTIC_SCHEMA_VERSION
+            cached_index.get("schema_version") == DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION
             and cached_index.get("dimension") == dimension.dimension
             and isinstance(cached_entries, dict)
             and set(cached_entries) == expected_ids
@@ -363,16 +264,16 @@ def _generate_dimension(
         ):
             return cached_index_path
 
-    index_path = write_diagnostic_artifacts(
-        summary,
-        generated_dir,
-        test_cases_dir=dataset_dir,
+    index_path = write_dashboard_diagnostics(
+        reader,
+        dimension.report_relative_path,
         dimension=dimension.dimension,
-        verified_only=summary.verified_only,
+        expected_test_ids=dimension.test_ids,
+        output_root=generated_dir,
     )
     index = json.loads(index_path.read_text(encoding="utf-8"))
     index_ids = set(index.get("diagnostics", {}))
-    if index.get("schema_version") != DIAGNOSTIC_SCHEMA_VERSION or index_ids != expected_ids:
+    if index.get("schema_version") != DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION or index_ids != expected_ids:
         raise ValueError(f"Generated diagnostic index failed validation for run dimension {dimension.id}")
     for entry in index["diagnostics"].values():
         relative_path = _artifact_path(entry.get("relative_path"), "diagnostic relative_path")
@@ -388,10 +289,7 @@ def _publish_dimension(
     command_runner: CommandRunner,
 ) -> None:
     report_parent = PurePosixPath(dimension.report_relative_path).parent.as_posix()
-    destination = (
-        f"gs://{run.bucket}/{run.prefix.rstrip('/')}/{report_parent}/"
-        f"_diagnostics/v{DIAGNOSTIC_SCHEMA_VERSION}"
-    )
+    destination = f"gs://{run.bucket}/{run.prefix.rstrip('/')}/{report_parent}/{DASHBOARD_DIAGNOSTIC_DIRECTORY}"
     # The index is the publication boundary: consumers cannot discover partial
     # output because it is copied only after every immutable sidecar succeeds.
     command_runner(
@@ -429,16 +327,13 @@ def _remote_dimension_is_complete(
     """Treat a valid published index as the durable completion boundary."""
 
     report_parent = PurePosixPath(dimension.report_relative_path).parent.as_posix()
-    object_name = (
-        f"{run.prefix.rstrip('/')}/{report_parent}/"
-        f"_diagnostics/v{DIAGNOSTIC_SCHEMA_VERSION}/index.json"
-    )
+    object_name = f"{run.prefix.rstrip('/')}/{report_parent}/{DASHBOARD_DIAGNOSTIC_DIRECTORY}/index.json"
     index = storage.read_json(run.bucket, object_name)
     if not isinstance(index, Mapping):
         return False
     entries = index.get("diagnostics")
     if (
-        index.get("schema_version") != DIAGNOSTIC_SCHEMA_VERSION
+        index.get("schema_version") != DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION
         or index.get("dimension") != dimension.dimension
         or not isinstance(entries, Mapping)
         or set(entries) != set(dimension.test_ids)
@@ -452,10 +347,8 @@ def _remote_dimension_is_complete(
         except ValueError:
             return False
         if (
-            PurePosixPath(relative_path).parent
-            != PurePosixPath(f"_diagnostics/v{DIAGNOSTIC_SCHEMA_VERSION}")
-            or entry.get("schema_version", DIAGNOSTIC_SCHEMA_VERSION)
-            != DIAGNOSTIC_SCHEMA_VERSION
+            PurePosixPath(relative_path).parent != PurePosixPath(DASHBOARD_DIAGNOSTIC_DIRECTORY)
+            or entry.get("schema_version", DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION) != DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION
         ):
             return False
     return True
@@ -474,7 +367,7 @@ def _record_job(
     database.upsert_one(
         "ingestion_jobs",
         {
-            "source": "github_diagnostic_backfill",
+            "source": "github_dashboard_diagnostic_backfill",
             "source_key": f"{run.github_repository}:{run.github_run_id}:{run.github_run_attempt}",
             "status": status,
             "runs_seen": 1,
@@ -499,7 +392,7 @@ def _verify_run(database: SupabaseRestClient, run: DiagnosticRun) -> None:
             _case_test_id(row)
             for row in rows
             if not row.get("diagnostic_relative_path")
-            or row.get("diagnostic_schema_version") != DIAGNOSTIC_SCHEMA_VERSION
+            or row.get("diagnostic_schema_version") != DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION
         ]
         if missing:
             raise RuntimeError(
@@ -519,7 +412,7 @@ def backfill_diagnostics(
     dry_run: bool = False,
     command_runner: CommandRunner = _run_checked,
 ) -> dict[str, Any]:
-    """Backfill recoverable diagnostics and idempotently index their locators."""
+    """Upgrade schema-v2 diagnostics and idempotently index v3 locators."""
 
     database = SupabaseRestClient(supabase_url, supabase_secret_key)
     candidates = discover_diagnostic_runs(
@@ -540,7 +433,6 @@ def backfill_diagnostics(
 
     workspace.mkdir(parents=True, exist_ok=True)
     github = GithubClient(github_repository, github_token or gh_access_token())
-    storage = GcsClient(gcs_access_token or gcloud_access_token())
     indexer = BenchmarkIndexer(database, github)
     failures: list[dict[str, Any]] = []
     imported = 0
@@ -549,24 +441,21 @@ def backfill_diagnostics(
         started_at = _now_expression_payload()
         _record_job(database, run, started_at=started_at, status="running")
         try:
+            # OAuth access tokens are typically short-lived. Refresh the CLI
+            # token at each run boundary because a full historical backfill can
+            # outlive a single token while uploading tens of thousands of
+            # immutable sidecars.
+            storage = GcsClient(gcs_access_token or gcloud_access_token())
+            reader = GcsArtifactReader(storage, run.bucket, run.prefix)
             incomplete_dimensions = [
-                dimension
-                for dimension in run.dimensions
-                if not _remote_dimension_is_complete(storage, run, dimension)
+                dimension for dimension in run.dimensions if not _remote_dimension_is_complete(storage, run, dimension)
             ]
-            dataset_dir = (
-                _ensure_dataset(run, workspace, command_runner)
-                if incomplete_dimensions
-                else None
-            )
             for dimension in run.dimensions:
                 if dimension not in incomplete_dimensions:
                     continue
-                assert dataset_dir is not None
-                index_path = _generate_dimension(run, dimension, workspace, dataset_dir, command_runner)
+                index_path = _generate_dimension(dimension, workspace, reader)
                 _publish_dimension(run, dimension, index_path, command_runner)
 
-            reader = GcsArtifactReader(storage, run.bucket, run.prefix)
             github_run = github.run_attempt(run.github_run_id, run.github_run_attempt)
             indexer.index_run(github_run, reader)
             _verify_run(database, run)

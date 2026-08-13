@@ -151,10 +151,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     diagnostics = subparsers.add_parser(
         "backfill-diagnostics",
-        help="Reconstruct per-case diagnostics for indexed historical runs",
+        help="Upgrade per-case dashboard diagnostics for indexed historical runs",
         description=(
-            "Find historical case results without diagnostic locators, reconstruct them from each run's "
-            "pinned dataset and immutable GCS report, publish sidecars, and re-index the locators."
+            "Find historical case results without dashboard schema-v3 diagnostics, transform each run's "
+            "immutable schema-v2 GCS sidecars, publish the v3 tree, and re-index the locators."
         ),
         formatter_class=HelpFormatter,
     )
@@ -173,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     diagnostics.add_argument(
         "--workspace",
         type=Path,
-        help="Ignored cache for pinned datasets, reports, generated diagnostics, and the result manifest",
+        help="Ignored cache for generated dashboard diagnostics and the result manifest",
     )
     diagnostics.add_argument(
         "--dry-run",

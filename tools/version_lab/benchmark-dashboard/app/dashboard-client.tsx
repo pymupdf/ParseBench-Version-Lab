@@ -42,8 +42,11 @@ import {
   thumbnailUrl,
 } from "./lib/data";
 import {
+  diagnosticUsesElementLayout,
   DiagnosticInspector,
   GroundTruthInspector,
+  layoutElementHeadlineStatus,
+  layoutExpectationIgnored,
   type DiagnosticArtifact,
   type DiagnosticMetric,
 } from "./diagnostics";
@@ -256,6 +259,22 @@ function finiteNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function alignedPrimaryMetric(
+  result: Pick<CaseResult, "primary_metric_name" | "primary_score">,
+  diagnostic: DiagnosticArtifact | null,
+) {
+  const diagnosticPrimary = diagnostic?.primary_metric;
+  if (
+    diagnosticPrimary &&
+    diagnosticPrimary.name.trim() &&
+    diagnosticPrimary.value != null &&
+    Number.isFinite(diagnosticPrimary.value)
+  ) {
+    return { name: diagnosticPrimary.name, score: diagnosticPrimary.value };
+  }
+  return { name: result.primary_metric_name, score: result.primary_score };
+}
+
 function normalizedBox(value: unknown) {
   if (!Array.isArray(value) || value.length < 4) return null;
   const coordinates = value.slice(0, 4).map(finiteNumber);
@@ -271,18 +290,6 @@ function normalizedCornerBox(value: unknown) {
   if (coordinates.some((coordinate) => coordinate == null)) return null;
   const [x1, y1, x2, y2] = coordinates as [number, number, number, number];
   return normalizedBox([x1, y1, x2 - x1, y2 - y1]);
-}
-
-function layoutEvidenceStatus(outcome: Record<string, unknown>) {
-  const applicable = [
-    outcome.localization_pass,
-    outcome.classification_pass,
-    outcome.attribution_applicable === true ? outcome.attribution_pass : undefined,
-  ].filter((value): value is boolean => typeof value === "boolean");
-  if (!applicable.length) return "neutral" as const;
-  if (applicable.every(Boolean)) return "passed" as const;
-  if (applicable.some(Boolean)) return "partial" as const;
-  return "failed" as const;
 }
 
 const LAYOUT_REGION_TONES: Array<{ tone: EvidenceOverlayTone; label: string }> = [
@@ -312,8 +319,10 @@ function layoutOverlayBoxes(
   if (!isLayoutDimension) return [];
   const boxes: EvidenceOverlayBox[] = [];
   if (diagnostic?.dimension === "layout") {
+    const referenceOnly = !diagnosticUsesElementLayout(diagnostic);
     for (const expectation of diagnostic.expectations) {
       const rule = objectValue(expectation.rule);
+      const ignored = layoutExpectationIgnored(expectation);
       const expectedClass = typeof rule?.canonical_class === "string"
         ? rule.canonical_class
         : "Expected element";
@@ -323,9 +332,13 @@ function layoutOverlayBoxes(
           ...box,
           id: expectation.id,
           kind: "ground-truth",
-          label: expectedClass,
+          label: referenceOnly
+            ? `Reference only — ${expectedClass}`
+            : ignored
+              ? `Ignored by scoring — ${expectedClass}`
+              : expectedClass,
           tone: layoutRegionTone(expectedClass),
-          status: "neutral",
+          status: referenceOnly ? "reference" : ignored ? "ignored" : "neutral",
         });
       }
     }
@@ -335,7 +348,8 @@ function layoutOverlayBoxes(
     source: DiagnosticArtifact | null,
     kind: "prediction" | "best",
   ) {
-    if (!source || source.dimension !== "layout") return;
+    const appended: EvidenceOverlayBox[] = [];
+    if (!source || source.dimension !== "layout") return appended;
     const compactOutcomes = (source.outcomes ?? [])
       .map(objectValue)
       .filter((value): value is Record<string, unknown> => value != null);
@@ -353,32 +367,67 @@ function layoutOverlayBoxes(
         .find((value): value is string => typeof value === "string");
       if (id) outcomesById.set(id, outcome);
     }
+    const predictionsByRegion = new Map<string, EvidenceOverlayBox>();
 
     for (const expectation of source.expectations) {
       const outcome = outcomesById.get(expectation.id);
       if (!outcome) continue;
       const box = normalizedCornerBox(outcome.best_pred_bbox);
       if (box) {
+        const regionKey = typeof outcome.best_pred_index === "number"
+          ? `index:${outcome.best_pred_index}`
+          : [box.x, box.y, box.width, box.height].map((value) => value.toFixed(6)).join(":");
+        const existing = predictionsByRegion.get(regionKey);
+        if (existing) {
+          existing.relatedIds = [...(existing.relatedIds ?? []), expectation.id];
+          continue;
+        }
         const label = typeof outcome.best_pred_class === "string"
           ? outcome.best_pred_class
           : "Predicted element";
-        boxes.push({
+        const prediction: EvidenceOverlayBox = {
           ...box,
           id: expectation.id,
+          relatedIds: [expectation.id],
           kind,
           label,
           tone: layoutRegionTone(label),
-          status: layoutEvidenceStatus(outcome),
-        });
+          status: layoutElementHeadlineStatus(outcome),
+        };
+        boxes.push(prediction);
+        appended.push(prediction);
+        predictionsByRegion.set(regionKey, prediction);
       }
     }
+    return appended;
+  }
+
+  function intersectionOverUnion(
+    left: Pick<EvidenceOverlayBox, "x" | "y" | "width" | "height">,
+    right: Pick<EvidenceOverlayBox, "x" | "y" | "width" | "height">,
+  ) {
+    const intersectionWidth = Math.max(
+      0,
+      Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x),
+    );
+    const intersectionHeight = Math.max(
+      0,
+      Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y),
+    );
+    const intersection = intersectionWidth * intersectionHeight;
+    const union = left.width * left.height + right.width * right.height - intersection;
+    return union > 0 ? intersection / union : 0;
   }
 
   function appendArtifactBoxes(
     artifactBoxes: ArtifactLayoutBox[],
     kind: "prediction" | "best",
+    matchedBoxes: EvidenceOverlayBox[],
   ) {
     for (const box of artifactBoxes) {
+      // Retain unmatched parser regions, but use evaluator-linked regions for
+      // matched elements so selecting Explain evidence highlights the output.
+      if (matchedBoxes.some((matched) => intersectionOverUnion(box, matched) >= 0.9)) continue;
       boxes.push({
         ...box,
         id: `${kind}-${box.id}`,
@@ -389,10 +438,10 @@ function layoutOverlayBoxes(
     }
   }
 
-  if (outputBoxes.length) appendArtifactBoxes(outputBoxes, "prediction");
-  else appendPredictions(diagnostic, "prediction");
-  if (bestOutputBoxes.length) appendArtifactBoxes(bestOutputBoxes, "best");
-  else appendPredictions(bestDiagnostic, "best");
+  const matchedOutputBoxes = appendPredictions(diagnostic, "prediction");
+  appendArtifactBoxes(outputBoxes, "prediction", matchedOutputBoxes);
+  const matchedBestBoxes = appendPredictions(bestDiagnostic, "best");
+  appendArtifactBoxes(bestOutputBoxes, "best", matchedBestBoxes);
   return boxes;
 }
 
@@ -819,12 +868,17 @@ function DimensionCard({
   onInspect: () => void;
 }) {
   const metric = primaryMetricForDimension(dimension, metrics);
+  const evaluatedCount = metric?.evaluated_count;
+  const totalCount = dimension.total_examples;
+  const coverageLabel = evaluatedCount != null && totalCount != null && evaluatedCount !== totalCount
+    ? `${evaluatedCount.toLocaleString()} of ${totalCount.toLocaleString()} scored`
+    : `${(evaluatedCount ?? totalCount ?? 0).toLocaleString()} records`;
   return (
     <button className="dimension-card" onClick={onInspect} type="button">
       <p>{DIMENSION_LABELS[dimension.dimension] ?? humanize(dimension.dimension)}</p>
       <div className="dimension-score-row">
         <strong>{scorePercent(metric?.metric_value)}</strong>
-        <span>{dimension.total_examples?.toLocaleString() ?? 0} records</span>
+        <span>{coverageLabel}</span>
       </div>
       <ScoreBar score={metric?.metric_value} />
       <span className="metric-caption">
@@ -1415,14 +1469,15 @@ function ResultEvidencePanel({
   artifact: ArtifactState;
 }) {
   const dimension = result.run_dimensions.dimension;
+  const primary = alignedPrimaryMetric(result, diagnostic);
   return (
     <section className="best-result-evidence" aria-label={`${label} scoring evidence`}>
       <header className="best-result-evidence-heading">
         <div>
           <span className="diagnostic-eyebrow">{label}</span>
-          <h3>{humanize(result.primary_metric_name)}</h3>
+          <h3>{humanize(primary.name)}</h3>
         </div>
-        <strong>{scorePercent(result.primary_score)}</strong>
+        <strong>{scorePercent(primary.score)}</strong>
       </header>
       {diagnostic ? (
         <DiagnosticInspector diagnostic={diagnostic} actualMarkdown={artifact.markdown} />
@@ -1475,14 +1530,16 @@ function BestResultPanel({
     return <EmptyState title="Best result unavailable" body={best.error ?? "No substantially better historical result was found."} />;
   }
   const { result, run } = best.data;
-  const improvement = (result.primary_score ?? 0) - (current.primary_score ?? 0);
+  const currentPrimary = alignedPrimaryMetric(current, currentDiagnostic);
+  const bestPrimary = alignedPrimaryMetric(result, best.diagnostic);
+  const improvement = (bestPrimary.score ?? 0) - (currentPrimary.score ?? 0);
   const groundTruthDiagnostic = currentDiagnostic ?? best.diagnostic;
   const groundTruthReference = currentArtifact.reference ?? best.artifact.reference;
   const bestHref = `/workflows/${run.github_run_id}/triage/${result.id}?dimension=${encodeURIComponent(result.run_dimensions.dimension)}&from=triage`;
   const views: Array<{ value: BestComparisonView; label: string; score?: string }> = [
     { value: "ground-truth", label: "Ground truth" },
-    { value: "current", label: "Current", score: scorePercent(current.primary_score) },
-    { value: "best", label: "Best", score: scorePercent(result.primary_score) },
+    { value: "current", label: "Current", score: scorePercent(currentPrimary.score) },
+    { value: "best", label: "Best", score: scorePercent(bestPrimary.score) },
   ];
   function navigateComparisonTabs(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | null = null;
@@ -1503,10 +1560,10 @@ function BestResultPanel({
         <div className="best-result-score">
           <span className="diagnostic-eyebrow">Best observed result</span>
           <div>
-            <h2 id="best-result-heading">{scorePercent(result.primary_score)}</h2>
+            <h2 id="best-result-heading">{scorePercent(bestPrimary.score)}</h2>
             <strong>+{(improvement * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })} points</strong>
           </div>
-          <p>Compared with the current {scorePercent(current.primary_score)} headline score.</p>
+          <p>Compared with the current {scorePercent(currentPrimary.score)} headline score.</p>
         </div>
         <dl className="best-result-provenance">
           <div>
@@ -1618,7 +1675,7 @@ function DocumentExplorer({
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("explain");
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-  const [layers, setLayers] = useState({ expected: false, predicted: true, best: false });
+  const [layers, setLayers] = useState({ expected: true, predicted: true, best: false });
   const selectedSource = selected ? sourceAssetUrl(selected) : null;
   const selectedSourceKind = selected ? sourceAssetKind(selected) : "unsupported";
   const selectedSourceOpenUrl = selectedSourceKind === "pdf" && selected
@@ -1653,10 +1710,12 @@ function DocumentExplorer({
   const layerCounts = useMemo(
     () => allLayoutBoxes.reduce(
       (counts, box) => {
-        counts[box.kind] += 1;
+        if (box.kind === "ground-truth" && box.status === "ignored") counts.ignored += 1;
+        else if (box.kind === "ground-truth" && box.status === "reference") counts.reference += 1;
+        else counts[box.kind] += 1;
         return counts;
       },
-      { "ground-truth": 0, prediction: 0, best: 0 },
+      { "ground-truth": 0, prediction: 0, best: 0, ignored: 0, reference: 0 },
     ),
     [allLayoutBoxes],
   );
@@ -1667,11 +1726,31 @@ function DocumentExplorer({
   const hasLayoutEvidence = isLayoutDimension;
   const hasHistoricalBest = historicalBest.data != null;
   const bestEvidenceLoading = historicalBest.evidenceStatus === "loading";
+  const primary = selected ? alignedPrimaryMetric(selected, diagnostic.data) : null;
 
   function toggleLayoutLayer(layer: keyof typeof layers) {
     const enable = !layers[layer];
     setLayers((current) => ({ ...current, [layer]: !current[layer] }));
     if (layer === "best" && enable) onLoadHistoricalBest();
+  }
+
+  function selectDiagnosticEvidence(id: string) {
+    setSelectedEvidenceId(id);
+    if (isLayoutDimension) {
+      setLayers({ expected: true, predicted: true, best: false });
+    }
+  }
+
+  function selectInspectorView(value: InspectorTab) {
+    setInspectorTab(value);
+    setSelectedEvidenceId(null);
+    if (isLayoutDimension) {
+      if (value === "explain") setLayers({ expected: true, predicted: true, best: false });
+      else if (value === "expectations") setLayers({ expected: true, predicted: false, best: false });
+      else if (value === "best") setLayers({ expected: true, predicted: false, best: true });
+      else setLayers({ expected: false, predicted: true, best: false });
+    }
+    if (value === "best") onLoadHistoricalBest();
   }
 
   return (
@@ -1699,14 +1778,14 @@ function DocumentExplorer({
               </div>
               <div className="inspection-score">
                 <span>Primary score</span>
-                <strong className={`score-${scoreTone(selected.primary_score)}`}>
-                  {scorePercent(selected.primary_score)}
+                <strong className={`score-${scoreTone(primary?.score)}`}>
+                  {scorePercent(primary?.score)}
                 </strong>
-                <small>{humanize(selected.primary_metric_name)}</small>
+                <small>{humanize(primary?.name)}</small>
               </div>
               <div className="metric-strip">
                 {caseMetrics
-                  .filter((metric) => metric.metric_name !== selected.primary_metric_name)
+                  .filter((metric) => metric.metric_name !== primary?.name)
                   .slice(0, 3)
                   .map((metric) => (
                     <div className="metric-chip" key={metric.id}>
@@ -1740,7 +1819,18 @@ function DocumentExplorer({
                         <div className="layer-toggle" aria-label="Layout evidence layers">
                           <button type="button" aria-pressed={layers.expected} onClick={() => toggleLayoutLayer("expected")}>
                             <span>Expected</span>
-                            <strong aria-label={`${layerCounts["ground-truth"]} expected regions`}>{layerCounts["ground-truth"]}</strong>
+                            <strong
+                              aria-label={`${layerCounts["ground-truth"]} scored expected regions${layerCounts.reference ? `; ${layerCounts.reference} reference-only regions` : ""}${layerCounts.ignored ? `; ${layerCounts.ignored} regions ignored by scoring` : ""}`}
+                              title={layerCounts.reference
+                                ? `${layerCounts.reference} region${layerCounts.reference === 1 ? " is" : "s are"} visual context for the scored order rules`
+                                : layerCounts.ignored
+                                  ? `${layerCounts.ignored} additional region${layerCounts.ignored === 1 ? " is" : "s are"} ignored by scoring`
+                                  : undefined}
+                            >
+                              {layerCounts.reference > 0 && layerCounts["ground-truth"] === 0
+                                ? `${layerCounts.reference} ref`
+                                : `${layerCounts["ground-truth"]}${layerCounts.reference ? ` +${layerCounts.reference} ref` : ""}${layerCounts.ignored ? ` +${layerCounts.ignored} ignored` : ""}`}
+                            </strong>
                           </button>
                           <button type="button" aria-pressed={layers.predicted} onClick={() => toggleLayoutLayer("predicted")}>
                             <span>Output</span>
@@ -1775,6 +1865,18 @@ function DocumentExplorer({
                       </span>
                     )) : (
                       <span className="layout-region-legend-empty">No overlay layers selected</span>
+                    )}
+                    {layers.expected && layerCounts.ignored > 0 && (
+                      <span className="layout-region-legend-item">
+                        <i className="layout-region-swatch layout-region-ignored" aria-hidden="true" />
+                        Ignored by scoring ({layerCounts.ignored})
+                      </span>
+                    )}
+                    {layers.expected && layerCounts.reference > 0 && (
+                      <span className="layout-region-legend-item">
+                        <i className="layout-region-swatch layout-region-reference" aria-hidden="true" />
+                        Reference only ({layerCounts.reference})
+                      </span>
                     )}
                     <span className="layout-region-legend-key">
                       Dashed expected · Solid output · Double best
@@ -1823,10 +1925,7 @@ function DocumentExplorer({
                         aria-selected={inspectorTab === value}
                         aria-controls="inspector-panel"
                         className={inspectorTab === value ? "content-tab-active" : ""}
-                        onClick={() => {
-                          setInspectorTab(value);
-                          if (value === "best") onLoadHistoricalBest();
-                        }}
+                        onClick={() => selectInspectorView(value)}
                         type="button"
                         key={value}
                       >
@@ -1850,7 +1949,7 @@ function DocumentExplorer({
                         diagnostic={diagnostic.data}
                         actualMarkdown={artifact.markdown}
                         selectedEvidenceId={selectedEvidenceId}
-                        onSelectEvidence={setSelectedEvidenceId}
+                        onSelectEvidence={selectDiagnosticEvidence}
                       />
                     ) : (
                       <div className="diagnostic-unavailable">

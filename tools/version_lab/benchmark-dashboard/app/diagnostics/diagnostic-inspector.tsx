@@ -13,6 +13,11 @@ import type {
   DiagnosticMetricComponent,
   DiagnosticOutcome,
 } from "./types";
+import {
+  diagnosticUsesElementLayout,
+  layoutElementHeadlineStatus,
+  layoutExpectationIgnored,
+} from "./semantics";
 
 type DiagnosticInspectorProps = {
   diagnostic: DiagnosticArtifact;
@@ -47,6 +52,33 @@ const FORMATTING_GROUPS = [
   { key: "code", label: "Code blocks" },
   { key: "other", label: "Other checks" },
 ] as const;
+
+const CONTENT_HEADLINE_RULE_TYPES = new Set([
+  "missing_word_percent",
+  "unexpected_word_percent",
+  "too_many_word_occurence_percent",
+  "missing_sentence_percent",
+  "unexpected_sentence_percent",
+  "too_many_sentence_occurence_percent",
+  "extra_content",
+  "bag_of_digit_percent",
+  "order",
+]);
+
+const FORMATTING_HEADLINE_RULE_TYPES = new Set([
+  "is_bold",
+  "is_not_bold",
+  "is_strikeout",
+  "is_not_strikeout",
+  "is_sup",
+  "is_not_sup",
+  "is_sub",
+  "is_not_sub",
+  "is_title",
+  "title_hierarchy_percent",
+  "is_latex",
+  "is_code_block",
+]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value != null && typeof value === "object" && !Array.isArray(value)
@@ -142,8 +174,6 @@ function formulaDetails(formula: unknown) {
           : "Fallback score";
     return { description, components };
   }
-  const explicit = asString(record.description);
-  if (explicit) return { description: explicit, components };
   if (kind === "weighted_mean" && components.length) {
     const terms = components.map((component) => {
       const name = humanize(component.label ?? component.name ?? component.metric_name);
@@ -151,11 +181,34 @@ function formulaDetails(formula: unknown) {
     });
     const weightSum = asNumber(record.weight_sum);
     return {
-      description: `${terms.join(" + ")}${weightSum != null && weightSum !== 1 ? ` ÷ ${weightSum.toLocaleString()}` : ""}`,
+      description: weightSum != null && weightSum !== 1
+        ? `(${terms.join(" + ")}) ÷ ${weightSum.toLocaleString()}`
+        : terms.join(" + "),
       components,
     };
   }
+  const explicit = asString(record.description);
+  if (explicit) return { description: explicit, components };
   return { description: null, components };
+}
+
+function metricContract(diagnostic: DiagnosticArtifact) {
+  switch (diagnostic.primary_metric?.name) {
+    case "layout_element_rule_pass_rate":
+      return "An element passes the headline only when localization and classification pass, plus attribution when the element has scorable content. Reading order is reported separately and does not change this score.";
+    case "rule_pass_rate":
+      return "This score is the mean of the individual rule scores shown below; partially matched rules can contribute partial credit.";
+    case "content_faithfulness":
+      return "Content Faithfulness combines normalized content correctness at full weight with reading order at half weight. Supporting checks shown below may help diagnose the page without directly changing the headline.";
+    case "semantic_formatting":
+      return "Semantic Formatting combines only the available headline formatting categories. Supporting rule checks are shown for diagnosis but do not directly change this score.";
+    default:
+      return null;
+  }
+}
+
+function isTableRecordSummary(diagnostic: DiagnosticArtifact) {
+  return asString(diagnostic.summary.source)?.startsWith("table_record_match") === true;
 }
 
 function outcomeId(outcome: DiagnosticOutcome, index: number) {
@@ -163,22 +216,15 @@ function outcomeId(outcome: DiagnosticOutcome, index: number) {
     asString(outcome.element_id) ?? `outcome-${index + 1}`;
 }
 
-function layoutStatus(outcome: DiagnosticOutcome): EvidenceStatus | null {
-  const localization = outcome.localization_pass;
-  const classification = outcome.classification_pass;
-  const attributionApplicable = outcome.attribution_applicable;
-  const attribution = outcome.attribution_pass;
-  const checks = [localization, classification];
-  if (attributionApplicable === true) checks.push(attribution);
-  const booleanChecks = checks.filter((value): value is boolean => typeof value === "boolean");
-  if (!booleanChecks.length) return null;
-  if (booleanChecks.every(Boolean)) return "passed";
-  if (booleanChecks.some(Boolean)) return "partial";
-  return "failed";
-}
-
 function evidenceStatus(outcome: DiagnosticOutcome | null): EvidenceStatus {
   if (!outcome) return "unknown";
+  if (
+    "localization_pass" in outcome ||
+    "classification_pass" in outcome ||
+    "attribution_applicable" in outcome
+  ) {
+    return layoutElementHeadlineStatus(outcome);
+  }
   const status = asString(outcome.status)?.toLowerCase();
   if (status === "pass" || status === "passed" || status === "success") return "passed";
   if (status === "partial" || status === "warning") return "partial";
@@ -188,8 +234,6 @@ function evidenceStatus(outcome: DiagnosticOutcome | null): EvidenceStatus {
     const score = asNumber(outcome.score);
     return score != null && score > 0 ? "partial" : "failed";
   }
-  const layout = layoutStatus(outcome);
-  if (layout) return layout;
   const score = asNumber(outcome.score);
   if (score == null) return "unknown";
   if (score >= 0.9995) return "passed";
@@ -316,6 +360,14 @@ function PrimaryMetricSummary({
       (value == null || ["string", "number", "boolean"].includes(typeof value)),
     )
     .slice(0, 4);
+  const contract = metricContract(diagnostic);
+  const tableBreakdown = diagnostic.dimension === "table"
+    ? tableScoreBreakdown(diagnostic)
+    : null;
+  const showOutcomeCounts = tableBreakdown?.mode !== "grits_only";
+  const recordSummary = isTableRecordSummary(diagnostic);
+  const summaryMetricName = asString(diagnostic.summary.source)?.split(".", 1)[0] ?? null;
+  const summaryContributes = diagnostic.summary.headline_contribution.contributes;
 
   return (
     <section className="diagnostic-score-summary" aria-labelledby="diagnostic-score-heading">
@@ -326,6 +378,7 @@ function PrimaryMetricSummary({
           <strong>{scorePercent(primary?.value)}</strong>
         </div>
         {formula.description && <p className="diagnostic-formula">{formula.description}</p>}
+        {contract && <p className="diagnostic-metric-contract">{contract}</p>}
       </div>
       {components.length > 0 && (
         <div className="diagnostic-components" aria-label="Score components">
@@ -334,15 +387,36 @@ function PrimaryMetricSummary({
           ))}
         </div>
       )}
-      <dl className="diagnostic-outcome-counts" aria-label="Evaluation outcomes">
-        <div><dt>Passed</dt><dd>{counts.passed.toLocaleString()}</dd></div>
-        <div><dt>Partial</dt><dd>{counts.partial.toLocaleString()}</dd></div>
-        <div><dt>Failed</dt><dd>{counts.failed.toLocaleString()}</dd></div>
-        {counts.unknown > 0 && <div><dt>Not explained</dt><dd>{counts.unknown.toLocaleString()}</dd></div>}
-        {summaryScalars.map(([key, value]) => (
-          <div key={key}><dt>{humanize(key)}</dt><dd>{scalarDisplay(value)}</dd></div>
-        ))}
-      </dl>
+      {showOutcomeCounts && (
+        <div className="diagnostic-count-summary">
+          {recordSummary && (
+            <p>
+              <strong>Table-record-match pairings</strong>
+              These counts explain the TRM component, not the composite headline score.
+            </p>
+          )}
+          {!recordSummary && !summaryContributes && summaryMetricName && (
+            <p>
+              <strong>Supporting rule outcomes</strong>
+              These counts summarize {humanize(summaryMetricName)}, a diagnostic metric that does not directly determine the {humanize(primary?.name)} headline score.
+            </p>
+          )}
+          <dl className="diagnostic-outcome-counts" aria-label={recordSummary
+            ? "Table-record-match pairing outcomes"
+            : summaryContributes
+              ? "Headline evaluation outcomes"
+              : "Supporting diagnostic outcomes"}
+          >
+            <div><dt>Passed</dt><dd>{counts.passed.toLocaleString()}</dd></div>
+            <div><dt>Partial</dt><dd>{counts.partial.toLocaleString()}</dd></div>
+            <div><dt>Failed</dt><dd>{counts.failed.toLocaleString()}</dd></div>
+            {counts.unknown > 0 && <div><dt>Not explained</dt><dd>{counts.unknown.toLocaleString()}</dd></div>}
+            {summaryScalars.map(([key, value]) => (
+              <div key={key}><dt>{humanize(key)}</dt><dd>{scalarDisplay(value)}</dd></div>
+            ))}
+          </dl>
+        </div>
+      )}
     </section>
   );
 }
@@ -361,6 +435,57 @@ function MarkdownEvidence({ markdown, empty }: { markdown: string; empty: string
       </ReactMarkdown>
     </div>
   );
+}
+
+function structuredTablesOnly(markdown: string) {
+  // Mirror ParseBench's table evaluator: only top-level HTML <table> blocks
+  // participate in GriTS/TRM. Markdown pipe tables are deliberately excluded.
+  const tables: string[] = [];
+  const lower = markdown.toLowerCase();
+  let searchStart = 0;
+  while (searchStart < lower.length) {
+    const start = lower.indexOf("<table", searchStart);
+    if (start === -1) break;
+    const tagNameEnd = start + "<table".length;
+    if (tagNameEnd < lower.length && ![">", " ", "\t", "\n", "\r"].includes(lower[tagNameEnd])) {
+      searchStart = start + 1;
+      continue;
+    }
+
+    let depth = 0;
+    let position = start;
+    let end = -1;
+    while (position < lower.length) {
+      const nextOpen = lower.indexOf("<table", position + 1);
+      const nextClose = lower.indexOf("</table>", position + 1);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        const nestedNameEnd = nextOpen + "<table".length;
+        if (
+          nestedNameEnd < lower.length &&
+          ![">", " ", "\t", "\n", "\r"].includes(lower[nestedNameEnd])
+        ) {
+          position = nextOpen;
+          continue;
+        }
+        depth += 1;
+        position = nextOpen;
+      } else if (depth === 0) {
+        end = nextClose + "</table>".length;
+        break;
+      } else {
+        depth -= 1;
+        position = nextClose;
+      }
+    }
+    if (end === -1) {
+      tables.push(markdown.slice(start));
+      break;
+    }
+    tables.push(markdown.slice(start, end));
+    searchStart = end;
+  }
+  return tables.map((table) => table.trim()).filter(Boolean).join("\n\n");
 }
 
 function EvidenceButton({
@@ -629,6 +754,7 @@ function TableMetricDetails({
           const predictionIndex = asNumber(table.pred_table_index);
           const standaloneTableIndex = asNumber(table.table_index);
           const describesOutputStructure = gtIndex == null && predictionIndex == null && standaloneTableIndex != null;
+          const retainedRecordEvidence = asRecordArray(table.record_details).length > 0;
           const differenceCount = tableDifferenceCount(table);
           const tableId = `table-${metricIndex}-${gtIndex ?? standaloneTableIndex ?? tableIndex}`;
           const metricValues = Object.entries(table)
@@ -686,7 +812,9 @@ function TableMetricDetails({
                     ? table.consistent === true
                       ? "Rows and columns are structurally consistent."
                       : `Structural consistency failed${table.row_inconsistency === true ? " for rows" : ""}${table.row_inconsistency === true && table.col_inconsistency === true ? " and" : ""}${table.col_inconsistency === true ? " for columns" : ""}.`
-                    : "No field-level differences were reported for this table."}
+                    : retainedRecordEvidence && predictionIndex != null
+                      ? "No field-level differences were found in the retained table-record-match evidence."
+                      : "No field-level comparison evidence was retained for this table. This does not mean the expected and output tables matched."}
                 </p>
               )}
             </article>
@@ -714,26 +842,53 @@ function TableDiagnostic({
   const tableMetric = diagnostic.metrics.find(
     (metric) => metric.metric_name === "table_record_match",
   );
+  const gritsMetric = diagnostic.metrics.find(
+    (metric) => metric.metric_name === "grits_con",
+  );
+  const metricValue = (name: string) => diagnostic.metrics.find(
+    (metric) => metric.metric_name === name,
+  )?.value ?? null;
   const predictedTables = asNumber(tableMetric?.metadata?.n_pred_tables) ??
+    asNumber(gritsMetric?.metadata?.tables_found_actual) ??
+    metricValue("tables_actual") ??
     asNumber(diagnostic.summary.predicted);
   const expectedTables = asNumber(tableMetric?.metadata?.n_gt_tables) ??
+    asNumber(gritsMetric?.metadata?.tables_found_expected) ??
+    metricValue("tables_expected") ??
     asNumber(diagnostic.summary.expected);
+  const pairedTables = metricValue("tables_paired") ??
+    asNumber(gritsMetric?.metadata?.tables_matched);
+  const unmatchedExpected = metricValue("tables_unmatched_expected");
+  const unmatchedOutput = metricValue("tables_unmatched_pred");
   const hasStructuredOutput = predictedTables == null || predictedTables > 0;
+  const structuredOutput = hasStructuredOutput ? structuredTablesOnly(actualMarkdown) : "";
+  const alignmentCounts = [
+    ["Expected", expectedTables],
+    ["Output", predictedTables],
+    ["Paired", pairedTables],
+    ["Unmatched expected", unmatchedExpected],
+    ["Unmatched output", unmatchedOutput],
+  ] as const;
   return (
     <div className="diagnostic-dimension-view diagnostic-table-view">
       <TableScoreExplanation diagnostic={diagnostic} />
+      <dl className="diagnostic-table-alignment" aria-label="Expected and output table alignment">
+        {alignmentCounts.map(([label, value]) => (
+          <div key={label}><dt>{label}</dt><dd>{value == null ? "—" : value.toLocaleString()}</dd></div>
+        ))}
+      </dl>
       <section className="diagnostic-markdown-comparison" aria-label="Ground truth and output table comparison">
         <article>
           <div className="diagnostic-panel-heading"><span className="diagnostic-eyebrow">Expected</span><h3>Ground-truth tables</h3></div>
           <MarkdownEvidence markdown={expectedMarkdown} empty="No rendered table ground truth is available for this result." />
         </article>
         <article>
-          <div className="diagnostic-panel-heading"><span className="diagnostic-eyebrow">Observed</span><h3>Structured table output</h3></div>
+          <div className="diagnostic-panel-heading"><span className="diagnostic-eyebrow">Observed</span><h3>Extracted tables only</h3></div>
           <MarkdownEvidence
-            markdown={hasStructuredOutput ? actualMarkdown : ""}
+            markdown={structuredOutput}
             empty={predictedTables === 0
               ? "The evaluator found no structured output table. Flattened page text, if any, remains available in the Output tab."
-              : "The parser did not produce Markdown for this document."}
+              : "No Markdown or HTML table block was found in the page output. Inspect the Output tab for the complete page Markdown."}
           />
         </article>
       </section>
@@ -766,6 +921,60 @@ function arrayPreview(value: unknown): unknown[][] {
     .map((row) => row.slice(0, 12));
 }
 
+function chartScoringDescription(type: string, rule: Record<string, unknown>) {
+  const configuredMaxDiffs = asNumber(rule.max_diffs);
+  if (type === "chart_data_point") {
+    const tolerance = asNumber(rule.relative_tolerance) ?? 0.01;
+    const maxDiffs = configuredMaxDiffs ?? 0;
+    const normalizeNumbers = rule.normalize_numbers !== false;
+    return [
+      "Value and every label must be associated in one table",
+      `number normalization ${normalizeNumbers ? "on" : "off"}`,
+      normalizeNumbers ? `numeric tolerance ${scorePercent(tolerance)}` : null,
+      `text edit allowance ${maxDiffs.toLocaleString()}`,
+    ].filter(Boolean).join(" · ");
+  }
+  if (type === "chart_data_array_labels") {
+    return [
+      "Mean label similarity",
+      rule.x_axis_shuffle === true ? "column order may change" : "column order must match",
+      "best row/column orientation is used",
+      configuredMaxDiffs == null
+        ? null
+        : `stored max_diffs ${configuredMaxDiffs.toLocaleString()} (not used by this array scorer)`,
+    ].filter(Boolean).join(" · ");
+  }
+  if (type === "chart_data_array_data") {
+    const normalizeNumbers = rule.normalize_numbers !== false;
+    const order = [
+      rule.x_axis_shuffle === true ? "columns may reorder" : "columns stay ordered",
+      rule.y_axis_shuffle === true ? "rows may reorder" : "rows stay ordered",
+    ].join(" · ");
+    return [
+      "Mean data-cell similarity",
+      order,
+      `number normalization ${normalizeNumbers ? "on" : "off"}`,
+      configuredMaxDiffs == null
+        ? null
+        : `stored max_diffs ${configuredMaxDiffs.toLocaleString()} (not used by this array scorer)`,
+    ].filter(Boolean).join(" · ");
+  }
+  return "Evaluated as a structured chart rule against a Markdown or HTML table.";
+}
+
+function ChartScoringContract() {
+  return (
+    <aside className="diagnostic-contract-note">
+      <strong>What the chart score measures</strong>
+      <p>
+        The evaluator looks only inside structured Markdown or HTML tables. A label or value that appears
+        elsewhere in ordinary page text does not satisfy a chart check. The headline is the mean of the
+        per-rule scores below, so array rules can earn partial credit.
+      </p>
+    </aside>
+  );
+}
+
 function ChartDiagnostic({
   diagnostic,
   selectedEvidenceId,
@@ -779,9 +988,10 @@ function ChartDiagnostic({
         <div><span className="diagnostic-eyebrow">Chart extraction</span><h3 id="diagnostic-chart-heading">Expected data and outcomes</h3></div>
         <span>{items.length.toLocaleString()} checks</span>
       </div>
+      <ChartScoringContract />
       <div className="diagnostic-table-scroll">
         <table className="diagnostic-chart-table">
-          <thead><tr><th>Check</th><th>Labels</th><th>Expected</th><th>Result</th></tr></thead>
+          <thead><tr><th>Check</th><th>Labels</th><th>Expected</th><th>Matching rule</th><th>Result</th></tr></thead>
           <tbody>
             {items.map((item) => {
               const rule = asRecord(item.expectation?.rule) ?? {};
@@ -826,6 +1036,7 @@ function ChartDiagnostic({
                       </details>
                     )}
                   </td>
+                  <td className="diagnostic-method-cell">{chartScoringDescription(item.type, rule)}</td>
                   <td>
                     <div className="diagnostic-result-cell">
                       <StatusPill status={status} />
@@ -853,6 +1064,45 @@ function metricByName(metrics: DiagnosticMetric[], name: string) {
   return metrics.find((metric) => metric.metric_name === name) ?? null;
 }
 
+function layoutMetricCount(metric: DiagnosticMetric | null) {
+  const passed = asNumber(metric?.metadata?.passed);
+  const total = asNumber(metric?.metadata?.total);
+  return passed != null && total != null
+    ? `${passed.toLocaleString()} of ${total.toLocaleString()} passed`
+    : null;
+}
+
+function layoutMatchDetail(outcome: DiagnosticOutcome, kind: "localization" | "classification" | "attribution" | "order") {
+  if (kind === "localization") {
+    const values = [
+      asNumber(outcome.best_pred_iou) != null ? `IoU ${scorePercent(asNumber(outcome.best_pred_iou))}` : null,
+      asNumber(outcome.best_pred_ioa_gt) != null ? `GT overlap ${scorePercent(asNumber(outcome.best_pred_ioa_gt))}` : null,
+    ].filter(Boolean);
+    return values.join(" · ") || humanize(asString(outcome.localization_reason));
+  }
+  if (kind === "classification") {
+    const expected = asString(outcome.gt_class) ?? asString(outcome.gt_class_norm);
+    const predicted = asString(outcome.best_pred_class) ?? asString(outcome.best_pred_class_norm);
+    return expected && predicted
+      ? `${humanize(expected)} → ${humanize(predicted)}`
+      : humanize(asString(outcome.classification_reason));
+  }
+  if (kind === "attribution") {
+    const f1 = asNumber(outcome.token_f1);
+    const threshold = asNumber(outcome.attribution_threshold);
+    if (f1 != null) {
+      return `Token F1 ${scorePercent(f1)}${threshold != null ? ` · needs ${scorePercent(threshold)}` : ""}`;
+    }
+    return humanize(asString(outcome.attribution_reason));
+  }
+  const expectedOrder = asNumber(outcome.gt_ro_index);
+  const predictedOrder = asNumber(outcome.matched_pred_order_index);
+  if (expectedOrder != null && predictedOrder != null) {
+    return `Expected ${expectedOrder + 1} · output ${predictedOrder + 1}`;
+  }
+  return humanize(asString(outcome.reading_order_reason));
+}
+
 function LayoutDiagnostic({
   diagnostic,
   selectedEvidenceId,
@@ -863,10 +1113,17 @@ function LayoutDiagnostic({
     ["Localization", "layout_localization_pass_rate"],
     ["Classification", "layout_classification_pass_rate"],
     ["Attribution", "layout_attribution_pass_rate"],
-    ["Reading order", "layout_reading_order_pass_rate"],
   ] as const;
+  const readingOrderMetric = metricByName(diagnostic.metrics, "layout_reading_order_pass_rate");
   return (
     <div className="diagnostic-dimension-view diagnostic-layout-view">
+      <aside className="diagnostic-contract-note diagnostic-layout-contract">
+        <strong>How an element passes</strong>
+        <p>
+          Localization and classification must pass, plus content attribution when it applies. This is an
+          all-required decision for each element, not an average of the three stage percentages.
+        </p>
+      </aside>
       <dl className="diagnostic-layout-summary" aria-label="Layout evaluation stages">
         {categoryMetrics.map(([label, name]) => {
           const metric = metricByName(diagnostic.metrics, name);
@@ -874,13 +1131,22 @@ function LayoutDiagnostic({
             <div key={name}>
               <dt>{label}</dt>
               <dd>{scorePercent(metric?.value)}</dd>
-              {metric?.metadata?.passed != null && metric.metadata.total != null && (
-                <small>{scalarDisplay(metric.metadata.passed)} of {scalarDisplay(metric.metadata.total)} passed</small>
-              )}
+              {layoutMetricCount(metric) && <small>{layoutMetricCount(metric)}</small>}
             </div>
           );
         })}
       </dl>
+      <div className="diagnostic-layout-order-summary">
+        <div>
+          <span className="diagnostic-eyebrow">Separate diagnostic</span>
+          <strong>Reading order</strong>
+          <p>Reported for debugging after matching; it does not change the element headline score.</p>
+        </div>
+        <div>
+          <strong>{scorePercent(readingOrderMetric?.value)}</strong>
+          {layoutMetricCount(readingOrderMetric) && <small>{layoutMetricCount(readingOrderMetric)}</small>}
+        </div>
+      </div>
       {outcomes.length ? (
         <section aria-labelledby="diagnostic-layout-elements-heading">
           <div className="diagnostic-section-heading">
@@ -889,7 +1155,7 @@ function LayoutDiagnostic({
           </div>
           <div className="diagnostic-table-scroll">
             <table className="diagnostic-layout-table">
-              <thead><tr><th>Element</th><th>Localization</th><th>Classification</th><th>Attribution</th><th>Order</th></tr></thead>
+              <thead><tr><th>Element</th><th>Overall</th><th>Localization</th><th>Classification</th><th>Attribution</th><th className="diagnostic-aux-column">Reading order</th></tr></thead>
               <tbody>
                 {outcomes.map((outcome, index) => {
                   const id = outcomeId(outcome, index);
@@ -909,13 +1175,14 @@ function LayoutDiagnostic({
                           <small>{predictedClass === "No matched block" ? predictedClass : `Matched to ${humanize(predictedClass)}`}</small>
                         </EvidenceButton>
                       </th>
-                      <td><StatusPill status={subcheckStatus(outcome, "localization_pass")} /><small>{humanize(asString(outcome.localization_reason))}</small></td>
-                      <td><StatusPill status={subcheckStatus(outcome, "classification_pass")} /><small>{humanize(asString(outcome.classification_reason))}</small></td>
+                      <td><StatusPill status={layoutElementHeadlineStatus(outcome)} /></td>
+                      <td><StatusPill status={subcheckStatus(outcome, "localization_pass")} /><small>{layoutMatchDetail(outcome, "localization")}</small></td>
+                      <td><StatusPill status={subcheckStatus(outcome, "classification_pass")} /><small>{layoutMatchDetail(outcome, "classification")}</small></td>
                       <td>
                         <StatusPill status={subcheckStatus(outcome, "attribution_pass", attributionApplicable)} label={attributionApplicable ? undefined : "Not scored"} />
-                        {asNumber(outcome.token_f1) != null && <small>Token F1 {scorePercent(asNumber(outcome.token_f1))}</small>}
+                        <small>{layoutMatchDetail(outcome, "attribution")}</small>
                       </td>
-                      <td><StatusPill status={subcheckStatus(outcome, "reading_order_pass", outcome.reading_order_eligible === true)} label={outcome.reading_order_eligible === true ? undefined : "Not scored"} /><small>{humanize(asString(outcome.reading_order_reason))}</small></td>
+                      <td className="diagnostic-aux-column"><StatusPill status={subcheckStatus(outcome, "reading_order_pass", outcome.reading_order_eligible === true)} label={outcome.reading_order_eligible === true ? undefined : "Not scored"} /><small>{layoutMatchDetail(outcome, "order")}</small></td>
                     </tr>
                   );
                 })}
@@ -924,6 +1191,42 @@ function LayoutDiagnostic({
           </div>
         </section>
       ) : <EmptyDiagnostics message="No element-level layout evidence was retained for this result." />}
+    </div>
+  );
+}
+
+function HybridLayoutDiagnostic(props: DiagnosticInspectorProps) {
+  const scoredItems = buildEvidenceItems(props.diagnostic).filter((item) => item.type !== "layout");
+  const referenceCount = props.diagnostic.expectations.filter((expectation) => expectation.type === "layout").length;
+  return (
+    <div className="diagnostic-dimension-view diagnostic-layout-order-view">
+      <aside className="diagnostic-contract-note">
+        <strong>This is a reading-order evaluation with layout references</strong>
+        <p>
+          The {referenceCount.toLocaleString()} layout annotations identify regions on the source page, but
+          they are not scored as detected elements in this result. Only the {scoredItems.length.toLocaleString()}
+          {" "}reading-order {scoredItems.length === 1 ? "check contributes" : "checks contribute"} to the headline.
+        </p>
+      </aside>
+      {scoredItems.length ? (
+        <section aria-labelledby="diagnostic-layout-order-heading">
+          <div className="diagnostic-section-heading">
+            <div>
+              <span className="diagnostic-eyebrow">Scored evidence</span>
+              <h3 id="diagnostic-layout-order-heading">Expected sequence in extracted content</h3>
+            </div>
+            <span>{scoredItems.length.toLocaleString()} checks</span>
+          </div>
+          <RuleGroups
+            items={scoredItems}
+            groups={[{ key: "order", label: "Reading-order checks" }]}
+            groupForType={() => "order"}
+            selectedEvidenceId={props.selectedEvidenceId}
+            onSelectEvidence={props.onSelectEvidence}
+            impactForType={() => "headline"}
+          />
+        </section>
+      ) : <EmptyDiagnostics message="No scored reading-order outcomes were retained for this result." />}
     </div>
   );
 }
@@ -945,6 +1248,29 @@ function formattingGroup(type: string) {
     return "styling";
   }
   return "other";
+}
+
+type RuleImpact = "headline" | "supporting";
+
+function ruleImpact(diagnostic: DiagnosticArtifact, type: string): RuleImpact {
+  const primaryName = diagnostic.primary_metric?.name;
+  if (primaryName === "rule_pass_rate") return "headline";
+  if (primaryName === `rule_${type}_pass_rate`) return "headline";
+  if (primaryName === "content_faithfulness") {
+    return CONTENT_HEADLINE_RULE_TYPES.has(type) ? "headline" : "supporting";
+  }
+  if (primaryName === "semantic_formatting") {
+    return FORMATTING_HEADLINE_RULE_TYPES.has(type) ? "headline" : "supporting";
+  }
+  return "supporting";
+}
+
+function RuleImpactLabel({ impact }: { impact: RuleImpact }) {
+  return (
+    <span className={`diagnostic-rule-impact diagnostic-rule-impact-${impact}`}>
+      {impact === "headline" ? "Headline input" : "Supporting diagnostic"}
+    </span>
+  );
 }
 
 function ruleValueSummary(value: unknown) {
@@ -971,7 +1297,6 @@ function expectedRuleSummary(value: unknown) {
     : `Expected: ${scalarDisplay(value)}`;
   const ignored = new Set([
     "id", "type", "page", "tags", "layout_id", "layout_ids", "layout_bindings",
-    "max_diffs", "normalize_numbers",
   ]);
   const values = Object.entries(rule)
     .filter(([key, value]) => !ignored.has(key) && value != null)
@@ -986,12 +1311,16 @@ function RuleGroups({
   groupForType,
   selectedEvidenceId,
   onSelectEvidence,
+  impactForType,
+  advisoryForItem,
 }: {
   items: EvidenceItem[];
   groups: readonly { key: string; label: string }[];
   groupForType: (type: string) => string;
   selectedEvidenceId?: string | null;
   onSelectEvidence?: (id: string) => void;
+  impactForType?: (type: string) => RuleImpact;
+  advisoryForItem?: (item: EvidenceItem) => string | null;
 }) {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(items.length <= 10);
@@ -1063,6 +1392,7 @@ function RuleGroups({
               {renderedItems.map((item) => {
                 const status = evidenceStatus(item.outcome);
                 const explanation = outcomeExplanation(item.outcome);
+                const advisory = advisoryForItem?.(item);
                 return (
                   <EvidenceButton
                     key={item.id}
@@ -1072,9 +1402,13 @@ function RuleGroups({
                     className="diagnostic-rule-row"
                   >
                     <span className="diagnostic-rule-main">
-                      <strong>{humanize(item.type)}</strong>
+                      <span className="diagnostic-rule-title">
+                        <strong>{humanize(item.type)}</strong>
+                        {impactForType && <RuleImpactLabel impact={impactForType(item.type)} />}
+                      </span>
                       <small>{expectedRuleSummary(item.expectation?.rule)}</small>
                       {explanation && <span title={explanation}>{explanation}</span>}
+                      {advisory && <span className="diagnostic-rule-advisory">{advisory}</span>}
                     </span>
                     <span className="diagnostic-rule-result">
                       <StatusPill status={status} />
@@ -1103,6 +1437,35 @@ function RuleGroups({
   );
 }
 
+function normalizeInlineText(value: string) {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, "$1")
+    .replace(/[\s*_~`]+/g, " ")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function underlineSpanAdvisory(item: EvidenceItem, actualMarkdown: string) {
+  if (item.type !== "is_underline" || evidenceStatus(item.outcome) !== "failed") return null;
+  const expected = asString(asRecord(item.expectation?.rule)?.text);
+  if (!expected || !actualMarkdown) return null;
+  const normalizedExpected = normalizeInlineText(expected);
+  if (!normalizedExpected) return null;
+
+  const underlinePattern = /<(u|ins)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi;
+  for (const match of actualMarkdown.matchAll(underlinePattern)) {
+    const normalizedSpan = normalizeInlineText(match[2] ?? "");
+    if (
+      normalizedSpan !== normalizedExpected &&
+      normalizedSpan.includes(normalizedExpected)
+    ) {
+      return "Advisory: the expected text appears inside a larger underline span. The score above remains the benchmark result; its exact-span matcher may explain this failure.";
+    }
+  }
+  return null;
+}
+
 function TextDiagnostic(props: DiagnosticInspectorProps) {
   const items = buildEvidenceItems(props.diagnostic);
   return items.length ? (
@@ -1111,12 +1474,21 @@ function TextDiagnostic(props: DiagnosticInspectorProps) {
         <div><span className="diagnostic-eyebrow">Content evidence</span><h3 id="diagnostic-text-heading">Completeness, accuracy and order</h3></div>
         <span>{items.length.toLocaleString()} checks</span>
       </div>
+      <aside className="diagnostic-contract-note diagnostic-contract-note-compact">
+        <strong>Headline inputs and supporting checks</strong>
+        <p>
+          Content completeness, unexpected content, duplicates, digits, and reading order feed Content
+          Faithfulness. Other checks remain visible as supporting diagnostics. If this historical result uses
+          Rule Pass Rate as its primary metric, every displayed rule contributes instead.
+        </p>
+      </aside>
       <RuleGroups
         items={items}
         groups={TEXT_GROUPS}
         groupForType={textGroup}
         selectedEvidenceId={props.selectedEvidenceId}
         onSelectEvidence={props.onSelectEvidence}
+        impactForType={(type) => ruleImpact(props.diagnostic, type)}
       />
     </section>
   ) : <EmptyDiagnostics message="No text-content rule outcomes were retained for this result." />;
@@ -1130,12 +1502,22 @@ function FormattingDiagnostic(props: DiagnosticInspectorProps) {
         <div><span className="diagnostic-eyebrow">Formatting evidence</span><h3 id="diagnostic-formatting-heading">Semantic formatting checks</h3></div>
         <span>{items.length.toLocaleString()} checks</span>
       </div>
+      <aside className="diagnostic-contract-note diagnostic-contract-note-compact">
+        <strong>Headline inputs and supporting checks</strong>
+        <p>
+          {props.diagnostic.primary_metric?.name === "rule_pass_rate"
+            ? "This historical result uses Rule Pass Rate, so every displayed formatting rule contributes to the headline."
+            : "The badges below identify which rules feed this result’s primary metric. In Semantic Formatting, title, bold, strikeout, superscript, subscript, LaTeX, and code categories contribute; underline, italic, and mark checks in historical artifacts are supporting diagnostics."}
+        </p>
+      </aside>
       <RuleGroups
         items={items}
         groups={FORMATTING_GROUPS}
         groupForType={formattingGroup}
         selectedEvidenceId={props.selectedEvidenceId}
         onSelectEvidence={props.onSelectEvidence}
+        impactForType={(type) => ruleImpact(props.diagnostic, type)}
+        advisoryForItem={(item) => underlineSpanAdvisory(item, props.actualMarkdown)}
       />
     </section>
   ) : <EmptyDiagnostics message="No formatting-rule outcomes were retained for this result." />;
@@ -1147,6 +1529,28 @@ type GroundTruthInspectorProps = {
   fallbackMarkdown?: string | null;
 };
 
+function expectedTableCount(diagnostic: DiagnosticArtifact | null, markdown: string) {
+  if (diagnostic) {
+    const preferredMetrics = [
+      "table_record_match",
+      "grits_con",
+      "grits_trm_composite",
+      "teds",
+    ];
+    for (const metricName of preferredMetrics) {
+      const metric = diagnostic.metrics.find((candidate) => candidate.metric_name === metricName);
+      const count = asNumber(metric?.metadata?.n_gt_tables) ??
+        asNumber(metric?.metadata?.tables_found_expected);
+      if (count != null) return count;
+    }
+    const countMetric = diagnostic.metrics.find((metric) => metric.metric_name === "tables_expected");
+    if (countMetric?.value != null) return countMetric.value;
+    const summaryCount = asNumber(diagnostic.summary.expected);
+    if (summaryCount != null) return summaryCount;
+  }
+  return markdown.match(/<table(?:\s|>)/gi)?.length ?? (markdown ? 1 : 0);
+}
+
 function TableGroundTruth({
   diagnostic,
   fallbackMarkdown,
@@ -1155,9 +1559,7 @@ function TableGroundTruth({
     .map((expectation) => expectation.expected_markdown?.trim())
     .filter((value): value is string => Boolean(value))
     .join("\n\n") || fallbackMarkdown || "";
-  const tableCount = diagnostic?.expectations.filter(
-    (expectation) => Boolean(expectation.expected_markdown?.trim()),
-  ).length ?? (markdown ? 1 : 0);
+  const tableCount = expectedTableCount(diagnostic, markdown);
   return (
     <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
       <div className="diagnostic-section-heading">
@@ -1178,9 +1580,10 @@ function ChartGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
         <div><span className="diagnostic-eyebrow">Chart ground truth</span><h3>Expected labels and data points</h3></div>
         <span>{expectations.length.toLocaleString()} checks</span>
       </div>
+      <ChartScoringContract />
       <div className="diagnostic-table-scroll">
         <table className="diagnostic-chart-table">
-          <thead><tr><th>Check</th><th>Labels</th><th>Expected value</th></tr></thead>
+          <thead><tr><th>Check</th><th>Labels</th><th>Expected value</th><th>Matching rule</th></tr></thead>
           <tbody>
             {expectations.map((expectation) => {
               const rule = asRecord(expectation.rule) ?? {};
@@ -1214,6 +1617,7 @@ function ChartGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
                       </details>
                     )}
                   </td>
+                  <td className="diagnostic-method-cell">{chartScoringDescription(expectation.type, rule)}</td>
                 </tr>
               );
             })}
@@ -1226,41 +1630,97 @@ function ChartGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
 
 function layoutContentSummary(rule: Record<string, unknown>) {
   const content = asRecord(rule.content);
-  return asString(content?.text) ?? asString(content?.html) ?? scalarDisplay(rule.content);
+  const text = asString(content?.text);
+  if (text) return text;
+  const html = asString(content?.html);
+  if (html) {
+    const rowCount = html.match(/<tr(?:\s|>)/gi)?.length ?? 0;
+    const firstRow = html.match(/<tr(?:\s|>)[\s\S]*?<\/tr>/i)?.[0] ?? "";
+    const columnCount = firstRow.match(/<t[dh](?:\s|>)/gi)?.length ?? 0;
+    return `HTML table${rowCount ? ` · ${rowCount.toLocaleString()} rows` : ""}${columnCount ? ` × ${columnCount.toLocaleString()} columns` : ""}`;
+  }
+  return "No text content expected";
 }
 
 function layoutBoxSummary(rule: Record<string, unknown>) {
   const bbox = Array.isArray(rule.bbox) ? rule.bbox.map(asNumber) : [];
   if (bbox.length !== 4 || bbox.some((value) => value == null)) return "—";
-  return bbox.map((value) => `${((value ?? 0) * 100).toFixed(1)}%`).join(" · ");
+  return ["x", "y", "w", "h"]
+    .map((label, index) => `${label} ${((bbox[index] ?? 0) * 100).toFixed(1)}%`)
+    .join(" · ");
 }
 
-function LayoutGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
-  const expectations = diagnostic.expectations;
+function sortedLayoutExpectations(expectations: DiagnosticExpectation[]) {
+  return expectations
+    .map((expectation, sourceIndex) => ({ expectation, sourceIndex }))
+    .sort((left, right) => {
+      const pageDifference = (left.expectation.page ?? 0) - (right.expectation.page ?? 0);
+      if (pageDifference) return pageDifference;
+      const leftOrder = asNumber(asRecord(left.expectation.rule)?.ro_index) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = asNumber(asRecord(right.expectation.rule)?.ro_index) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || left.sourceIndex - right.sourceIndex;
+    })
+    .map(({ expectation }) => expectation);
+}
+
+function LayoutGroundTruth({
+  diagnostic,
+  expectations = diagnostic.expectations.filter((expectation) => expectation.type === "layout"),
+  referenceOnly = false,
+}: {
+  diagnostic: DiagnosticArtifact;
+  expectations?: DiagnosticExpectation[];
+  referenceOnly?: boolean;
+}) {
   if (!expectations.length) return <EmptyDiagnostics message="No layout ground truth was retained for this page." />;
+  const sortedExpectations = sortedLayoutExpectations(expectations);
+  const ignoredCount = sortedExpectations.filter(layoutExpectationIgnored).length;
+  const scoredCount = sortedExpectations.length - ignoredCount;
   return (
     <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
       <div className="diagnostic-section-heading">
-        <div><span className="diagnostic-eyebrow">Layout ground truth</span><h3>Expected elements and reading order</h3></div>
-        <span>{expectations.length.toLocaleString()} elements</span>
+        <div>
+          <span className="diagnostic-eyebrow">{referenceOnly ? "Layout references" : "Layout ground truth"}</span>
+          <h3>{referenceOnly ? "Regions referenced by the scored order checks" : "Expected elements and reading order"}</h3>
+        </div>
+        <span>
+          {referenceOnly
+            ? `${sortedExpectations.length.toLocaleString()} reference ${sortedExpectations.length === 1 ? "element" : "elements"}`
+            : `${scoredCount.toLocaleString()} scored ${scoredCount === 1 ? "element" : "elements"}${ignoredCount > 0 ? ` · ${ignoredCount.toLocaleString()} reference only` : ""}`}
+        </span>
       </div>
+      <aside className="diagnostic-contract-note diagnostic-contract-note-compact">
+        <strong>{referenceOnly ? "Visual context, not element-detection ground truth" : "How to read the coordinates"}</strong>
+        <p>
+          {referenceOnly
+            ? "These regions ground the sequence checks shown below; this result does not evaluate their localization or classification. "
+            : ""}
+          Boxes are normalized to the page: x and y locate the top-left corner; w and h are width and height. Reading order is shown as a human-friendly 1-based position.
+        </p>
+      </aside>
       <div className="diagnostic-table-scroll">
         <table className="diagnostic-layout-table diagnostic-ground-truth-layout-table">
-          <thead><tr><th>Element</th><th>Expected content</th><th>Bounding box</th><th>Order</th></tr></thead>
+          <thead><tr><th>Element</th><th>Expected content</th><th>Bounding box (x, y, width, height)</th><th>Reading order</th></tr></thead>
           <tbody>
-            {expectations.map((expectation, index) => {
+            {sortedExpectations.map((expectation) => {
               const rule = asRecord(expectation.rule) ?? {};
               const className = asString(rule.canonical_class) ?? asString(rule.source_label) ?? expectation.type;
-              const readingOrder = asNumber(rule.ro_index) ?? index;
+              const readingOrder = asNumber(rule.ro_index);
+              const ignored = referenceOnly || layoutExpectationIgnored(expectation);
               return (
-                <tr key={expectation.id}>
+                <tr className={ignored ? "diagnostic-layout-reference-row" : undefined} key={expectation.id}>
                   <th scope="row">
                     <strong>{humanize(className)}</strong>
                     {expectation.page != null && <small>Page {expectation.page}</small>}
+                    {ignored && (
+                      <span className="diagnostic-reference-label">
+                        {referenceOnly ? "Reference only · not scored" : "Ignored by scoring"}
+                      </span>
+                    )}
                   </th>
                   <td>{layoutContentSummary(rule)}</td>
                   <td><code>{layoutBoxSummary(rule)}</code></td>
-                  <td>{(readingOrder + 1).toLocaleString()}</td>
+                  <td>{readingOrder == null ? "—" : (readingOrder + 1).toLocaleString()}</td>
                 </tr>
               );
             })}
@@ -1277,12 +1737,16 @@ function ExpectationGroups({
   groupForType,
   eyebrow,
   heading,
+  contract,
+  impactForType,
 }: {
   expectations: DiagnosticExpectation[];
   groups: readonly { key: string; label: string }[];
   groupForType: (type: string) => string;
   eyebrow: string;
   heading: string;
+  contract?: ReactNode;
+  impactForType?: (type: string) => RuleImpact;
 }) {
   const [query, setQuery] = useState("");
   const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
@@ -1296,6 +1760,7 @@ function ExpectationGroups({
         <div><span className="diagnostic-eyebrow">{eyebrow}</span><h3>{heading}</h3></div>
         <span>{expectations.length.toLocaleString()} checks</span>
       </div>
+      {contract && <aside className="diagnostic-contract-note diagnostic-contract-note-compact">{contract}</aside>}
       {expectations.length > 8 && (
         <div className="diagnostic-rule-toolbar diagnostic-ground-truth-toolbar">
           <input
@@ -1328,8 +1793,17 @@ function ExpectationGroups({
                 {rendered.map((expectation) => (
                   <details className="diagnostic-ground-truth-rule" key={expectation.id}>
                     <summary>
-                      <span><strong>{humanize(expectation.type)}</strong><small>{expectedRuleSummary(expectation.rule)}</small></span>
-                      {expectation.tags?.length ? <em>{expectation.tags.join(" · ")}</em> : null}
+                      <span>
+                        <span className="diagnostic-rule-title">
+                          <strong>{humanize(expectation.type)}</strong>
+                          {impactForType && <RuleImpactLabel impact={impactForType(expectation.type)} />}
+                        </span>
+                        <small>{expectedRuleSummary(expectation.rule)}</small>
+                      </span>
+                      <span className="diagnostic-disclosure-meta">
+                        {expectation.tags?.length ? <em>{expectation.tags.join(" · ")}</em> : null}
+                        <span className="diagnostic-disclosure-label">View rule details</span>
+                      </span>
                     </summary>
                     <pre><code>{JSON.stringify(expectation.rule, null, 2)}</code></pre>
                   </details>
@@ -1355,6 +1829,30 @@ function ExpectationGroups({
   );
 }
 
+function HybridLayoutGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
+  const layoutExpectations = diagnostic.expectations.filter((expectation) => expectation.type === "layout");
+  const scoredExpectations = diagnostic.expectations.filter((expectation) => expectation.type !== "layout");
+  return (
+    <div className="diagnostic-ground-truth-stack">
+      <LayoutGroundTruth diagnostic={diagnostic} expectations={layoutExpectations} referenceOnly />
+      <ExpectationGroups
+        expectations={scoredExpectations}
+        groups={[{ key: "order", label: "Scored reading-order checks" }]}
+        groupForType={() => "order"}
+        eyebrow="Reading-order ground truth"
+        heading="Expected sequence between referenced regions"
+        contract={(
+          <>
+            <strong>These are the scored expectations</strong>
+            <p>The layout elements above provide visual references. Only these sequence checks contribute to this result’s headline score.</p>
+          </>
+        )}
+        impactForType={() => "headline"}
+      />
+    </div>
+  );
+}
+
 export function GroundTruthInspector({
   dimension,
   diagnostic,
@@ -1367,7 +1865,11 @@ export function GroundTruthInspector({
     return <EmptyDiagnostics message="No structured ground truth is available for this historical result." />;
   }
   if (dimension === "chart") return <ChartGroundTruth diagnostic={diagnostic} />;
-  if (dimension === "layout") return <LayoutGroundTruth diagnostic={diagnostic} />;
+  if (dimension === "layout") {
+    return diagnosticUsesElementLayout(diagnostic)
+      ? <LayoutGroundTruth diagnostic={diagnostic} />
+      : <HybridLayoutGroundTruth diagnostic={diagnostic} />;
+  }
   if (dimension === "text_content") {
     return (
       <ExpectationGroups
@@ -1376,6 +1878,13 @@ export function GroundTruthInspector({
         groupForType={textGroup}
         eyebrow="Text-content ground truth"
         heading="Expected content, completeness and order"
+        contract={(
+          <>
+            <strong>Ground truth and score contribution</strong>
+            <p>Headline-input badges identify expectations used by Content Faithfulness; supporting checks remain visible for diagnosis.</p>
+          </>
+        )}
+        impactForType={(type) => ruleImpact(diagnostic, type)}
       />
     );
   }
@@ -1387,6 +1896,13 @@ export function GroundTruthInspector({
         groupForType={formattingGroup}
         eyebrow="Formatting ground truth"
         heading="Expected semantic formatting"
+        contract={(
+          <>
+            <strong>Ground truth and score contribution</strong>
+            <p>Headline-input badges identify expectations used by this result’s primary formatting metric; the others are supporting checks.</p>
+          </>
+        )}
+        impactForType={(type) => ruleImpact(diagnostic, type)}
       />
     );
   }
@@ -1452,7 +1968,11 @@ function EmptyDiagnostics({
 }
 
 export function DiagnosticInspector(props: DiagnosticInspectorProps) {
-  const items = buildEvidenceItems(props.diagnostic);
+  const elementLayout = props.diagnostic.dimension === "layout" &&
+    diagnosticUsesElementLayout(props.diagnostic);
+  const items = buildEvidenceItems(props.diagnostic).filter((item) =>
+    props.diagnostic.dimension !== "layout" || elementLayout || item.type !== "layout",
+  );
   let detail: ReactNode;
   switch (props.diagnostic.dimension) {
     case "table":
@@ -1462,7 +1982,9 @@ export function DiagnosticInspector(props: DiagnosticInspectorProps) {
       detail = <ChartDiagnostic {...props} />;
       break;
     case "layout":
-      detail = <LayoutDiagnostic {...props} />;
+      detail = elementLayout
+        ? <LayoutDiagnostic {...props} />
+        : <HybridLayoutDiagnostic {...props} />;
       break;
     case "text_content":
       detail = <TextDiagnostic {...props} />;
