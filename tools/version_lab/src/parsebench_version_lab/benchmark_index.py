@@ -457,16 +457,6 @@ def _primary_metric(dimension: str, metrics: list[dict[str, Any]]) -> tuple[str 
     return None, None
 
 
-def _compact_metric_metadata(value: Any) -> dict[str, Any]:
-    metadata = _object(value)
-    compact: dict[str, Any] = {}
-    for key in ("passed", "total", "score_sum", "score_count", "rule_type", "tp", "fp", "fn"):
-        candidate = metadata.get(key)
-        if isinstance(candidate, (str, int, float, bool)) or candidate is None:
-            compact[key] = candidate
-    return compact
-
-
 def _error_fingerprint(error: Mapping[str, Any]) -> str:
     stable = json.dumps(
         {
@@ -869,7 +859,6 @@ class BenchmarkIndexer:
         result_rows: list[dict[str, Any]] = []
         result_rows_by_case_id: dict[int, dict[str, Any]] = {}
         diagnostic_by_case_id: dict[int, tuple[str, int]] = {}
-        metrics_by_case_id: dict[int, list[dict[str, Any]]] = {}
         for example in example_rows:
             test_id = example.get("test_id")
             if not isinstance(test_id, str) or test_id not in case_ids:
@@ -902,7 +891,6 @@ class BenchmarkIndexer:
             }
             result_rows.append(result_row)
             result_rows_by_case_id[case_id] = result_row
-            metrics_by_case_id[case_id] = metrics
         # First merge ordinary result data without locator columns. PostgREST's
         # merge-duplicates behavior preserves any locator already in Supabase,
         # and return=representation gives us that current schema. Apply artifact
@@ -939,28 +927,6 @@ class BenchmarkIndexer:
                 locator_updates,
                 "run_dimension_id,benchmark_case_id",
             )
-        metric_rows: list[dict[str, Any]] = []
-        for result in result_records:
-            case_id = int(result["benchmark_case_id"])
-            for metric in metrics_by_case_id.get(case_id, []):
-                metric_name = metric.get("metric_name")
-                value = _finite_number(metric.get("value"))
-                if not isinstance(metric_name, str) or value is None:
-                    continue
-                metadata = _compact_metric_metadata(metric.get("metadata"))
-                metric_rows.append(
-                    {
-                        "case_result_id": int(result["id"]),
-                        "metric_name": metric_name,
-                        "metric_value": value,
-                        "passed_count": _integer(metadata.get("passed")),
-                        "total_count": _integer(metadata.get("total")),
-                        "metadata_summary": metadata,
-                        "updated_at": _now_expression_payload(),
-                    }
-                )
-        if metric_rows:
-            self.database.upsert_many("case_metrics", metric_rows, "case_result_id,metric_name")
 
 
 def gcloud_access_token() -> str:

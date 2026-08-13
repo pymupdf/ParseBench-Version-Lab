@@ -125,7 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Index historical GitHub Actions and GCS benchmark runs in Supabase",
         description=(
             "Build a local GCS run inventory and idempotently upsert GitHub workflow metadata, "
-            "scores, document results, metrics, and errors into Supabase."
+            "aggregate and document headline scores, artifact locators, and errors into Supabase."
         ),
         formatter_class=HelpFormatter,
     )

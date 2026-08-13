@@ -891,7 +891,7 @@ code {
   background: var(--neutral-badge-surface);
   border-radius: 999px;
   color: var(--neutral-badge-text);
-  font-size: 9px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 750;
   padding: 3px 6px;
@@ -3292,8 +3292,7 @@ code {
 
 .diagnostic-outcome-counts,
 .diagnostic-layout-summary,
-.diagnostic-inline-metrics,
-.historical-metrics {
+.diagnostic-inline-metrics {
   display: grid;
   gap: 6px;
   grid-column: 1 / -1;
@@ -3303,8 +3302,7 @@ code {
 
 .diagnostic-outcome-counts > div,
 .diagnostic-layout-summary > div,
-.diagnostic-inline-metrics > div,
-.historical-metrics > div {
+.diagnostic-inline-metrics > div {
   border-left: 2px solid var(--line-strong);
   min-width: 0;
   padding-left: 7px;
@@ -3312,8 +3310,7 @@ code {
 
 .diagnostic-outcome-counts dt,
 .diagnostic-layout-summary dt,
-.diagnostic-inline-metrics dt,
-.historical-metrics dt {
+.diagnostic-inline-metrics dt {
   color: var(--ink-soft);
   font-size: 10px;
   line-height: 1.35;
@@ -3321,8 +3318,7 @@ code {
 
 .diagnostic-outcome-counts dd,
 .diagnostic-layout-summary dd,
-.diagnostic-inline-metrics dd,
-.historical-metrics dd {
+.diagnostic-inline-metrics dd {
   font-size: 12px;
   font-weight: 760;
   margin: 2px 0 0;
@@ -3638,6 +3634,32 @@ code {
 .diagnostic-table-pair-preview .diagnostic-empty {
   margin: 0;
   padding: 18px 12px;
+}
+
+.diagnostic-table-reconstruction-note {
+  background: var(--surface-strong);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 8px 12px;
+}
+
+.diagnostic-table-reconstruction-note strong {
+  color: var(--ink);
+}
+
+.diagnostic-derived-badge {
+  background: var(--neutral-badge-surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--neutral-badge-text);
+  font-size: 9px;
+  font-weight: 760;
+  margin-left: auto;
+  padding: 3px 6px;
+  text-transform: uppercase;
 }
 
 .diagnostic-table-pair > .diagnostic-differences,
@@ -4155,11 +4177,6 @@ code {
 .diagnostic-unavailable .empty-state,
 .raw-artifacts-view .empty-state {
   min-height: 180px;
-}
-
-.historical-metrics {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: 12px;
 }
 
 .expectation-list {
@@ -4915,8 +4932,7 @@ code {
   }
 
   .diagnostic-outcome-counts,
-  .diagnostic-layout-summary,
-  .historical-metrics {
+  .diagnostic-layout-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

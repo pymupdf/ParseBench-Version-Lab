@@ -194,8 +194,9 @@ uv run --project tools/version_lab version-lab backfill-index \
 The command paginates GCS without printing object names. It saves its complete
 manifest and final checkpoint under the ignored directory
 `.version-lab/benchmark-index-backfill/`, then idempotently upserts runs,
-document-level scores, metrics, artifact locators, and errors into Supabase.
-Re-running it safely refreshes existing rows.
+document-level headline scores, artifact locators, and errors into Supabase.
+Detailed per-document metrics remain in the GCS diagnostic artifacts. Re-running
+the command safely refreshes the lightweight index without writing `case_metrics`.
 
 ## Run Observatory
 

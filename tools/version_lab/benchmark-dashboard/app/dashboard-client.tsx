@@ -15,7 +15,6 @@ import {
   artifactUrl,
   ArtifactLayoutBox,
   BenchmarkRun,
-  CaseMetric,
   CaseResult,
   TriageCaseResult,
   DocumentSort,
@@ -23,11 +22,9 @@ import {
   HistoricalBestResult,
   humanize,
   loadArtifact,
-  loadCaseMetrics,
   loadDiagnostic,
   loadDocument,
   loadDocuments,
-  loadGroundTruth,
   loadHistoricalBestResult,
   loadRun,
   loadRunBundle,
@@ -67,7 +64,6 @@ type ArtifactState = {
   loading: boolean;
   markdown: string;
   layoutBoxes: ArtifactLayoutBox[];
-  reference: string | null;
   url: string | null;
   error: string | null;
 };
@@ -104,7 +100,6 @@ const EMPTY_ARTIFACT: ArtifactState = {
   loading: false,
   markdown: "",
   layoutBoxes: [],
-  reference: null,
   url: null,
   error: null,
 };
@@ -1538,7 +1533,6 @@ function BestResultPanel({
   const bestPrimary = alignedPrimaryMetric(result, best.diagnostic);
   const improvement = (bestPrimary.score ?? 0) - (currentPrimary.score ?? 0);
   const groundTruthDiagnostic = currentDiagnostic ?? best.diagnostic;
-  const groundTruthReference = currentArtifact.reference ?? best.artifact.reference;
   const bestHref = `/workflows/${run.github_run_id}/triage/${result.id}?dimension=${encodeURIComponent(result.run_dimensions.dimension)}&from=triage`;
   const views: Array<{ value: BestComparisonView; label: string; score?: string }> = [
     { value: "ground-truth", label: "Ground truth" },
@@ -1624,7 +1618,6 @@ function BestResultPanel({
           <GroundTruthInspector
             dimension={result.run_dimensions.dimension}
             diagnostic={groundTruthDiagnostic}
-            fallbackMarkdown={groundTruthReference}
           />
         ) : comparisonView === "current" ? (
           <ResultEvidencePanel
@@ -1654,7 +1647,6 @@ function DocumentExplorer({
   loading,
   artifact,
   diagnostic,
-  caseMetrics,
   historicalBest,
   onLoadHistoricalBest,
   onBrowseQueue,
@@ -1667,7 +1659,6 @@ function DocumentExplorer({
   loading: boolean;
   artifact: ArtifactState;
   diagnostic: DiagnosticState;
-  caseMetrics: CaseMetric[];
   historicalBest: HistoricalBestState;
   onLoadHistoricalBest: () => void;
   onBrowseQueue: (trigger: HTMLButtonElement) => void;
@@ -1731,6 +1722,12 @@ function DocumentExplorer({
   const hasHistoricalBest = historicalBest.data != null;
   const bestEvidenceLoading = historicalBest.evidenceStatus === "loading";
   const primary = selected ? alignedPrimaryMetric(selected, diagnostic.data) : null;
+  const detailedMetrics = useMemo(
+    () => [...(diagnostic.data?.metrics ?? [])]
+      .filter((metric) => metric.value != null && Number.isFinite(metric.value))
+      .sort((left, right) => left.metric_name.localeCompare(right.metric_name)),
+    [diagnostic.data],
+  );
 
   function toggleLayoutLayer(layer: keyof typeof layers) {
     const enable = !layers[layer];
@@ -1788,13 +1785,13 @@ function DocumentExplorer({
                 <small>{humanize(primary?.name)}</small>
               </div>
               <div className="metric-strip">
-                {caseMetrics
+                {detailedMetrics
                   .filter((metric) => metric.metric_name !== primary?.name)
                   .slice(0, 3)
                   .map((metric) => (
-                    <div className="metric-chip" key={metric.id}>
+                    <div className="metric-chip" key={metric.metric_name}>
                       <span title={humanize(metric.metric_name)}>{humanize(metric.metric_name)}</span>
-                      <strong>{metricDisplay(metric.metric_name, metric.metric_value)}</strong>
+                      <strong>{diagnosticMetricDisplay(metric)}</strong>
                     </div>
                   ))}
               </div>
@@ -1959,15 +1956,8 @@ function DocumentExplorer({
                       <div className="diagnostic-unavailable">
                         <EmptyState
                           title="Detailed evidence unavailable"
-                          body={diagnostic.error ?? "This historical result predates per-case diagnostic artifacts. The stored case metrics remain available below."}
+                          body={diagnostic.error ?? "The per-case diagnostic artifact could not be loaded from GCS."}
                         />
-                        {caseMetrics.length > 0 && (
-                          <dl className="historical-metrics">
-                            {caseMetrics.map((metric) => (
-                              <div key={metric.id}><dt>{humanize(metric.metric_name)}</dt><dd>{metricDisplay(metric.metric_name, metric.metric_value)}</dd></div>
-                            ))}
-                          </dl>
-                        )}
                       </div>
                     )
                   ) : inspectorTab === "output" ? (
@@ -1987,7 +1977,6 @@ function DocumentExplorer({
                       <GroundTruthInspector
                         dimension={selected.run_dimensions.dimension}
                         diagnostic={diagnostic.data}
-                        fallbackMarkdown={artifact.reference}
                       />
                     )
                   ) : inspectorTab === "best" ? (
@@ -2412,8 +2401,6 @@ export default function DashboardClient({
     id: null,
     loading: false,
   });
-  const [caseMetrics, setCaseMetrics] = useState<CaseMetric[]>([]);
-  const [caseMetricsResultId, setCaseMetricsResultId] = useState<number | null>(null);
   const [artifact, setArtifact] = useState<ArtifactState>(EMPTY_ARTIFACT);
   const [artifactResultId, setArtifactResultId] = useState<number | null>(null);
   const [diagnostic, setDiagnostic] = useState<DiagnosticState>(EMPTY_DIAGNOSTIC);
@@ -2685,15 +2672,12 @@ export default function DashboardClient({
     const controller = new AbortController();
     // This reset intentionally belongs to the selected-document synchronization.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCaseMetrics([]);
-    setCaseMetricsResultId(selectedDocument.id);
     setArtifactResultId(selectedDocument.id);
     setDiagnosticResultId(selectedDocument.id);
     setArtifact({
       loading: true,
       markdown: "",
       layoutBoxes: [],
-      reference: null,
       url: artifactUrl(selectedRun, selectedDocument.result_relative_path),
       error: null,
     });
@@ -2710,7 +2694,6 @@ export default function DashboardClient({
           loading: false,
           markdown: loadedArtifact.markdown,
           layoutBoxes: loadedArtifact.layoutBoxes,
-          reference: null,
           url: loadedArtifact.url,
           error: null,
         });
@@ -2720,11 +2703,6 @@ export default function DashboardClient({
           setArtifact((current) => ({ ...current, loading: false, error: error.message }));
         }
       });
-    loadCaseMetrics(selectedDocument.id, controller.signal)
-      .then((metrics) => {
-        if (!controller.signal.aborted) setCaseMetrics(metrics);
-      })
-      .catch(() => undefined);
     loadDiagnostic(selectedRun, selectedDocument, controller.signal)
       .then((loadedDiagnostic) => {
         if (controller.signal.aborted) return;
@@ -2740,15 +2718,6 @@ export default function DashboardClient({
           setDiagnostic((current) => ({ ...current, loading: false, error: error.message }));
         }
       });
-    if (!selectedDocument.diagnostic_relative_path) {
-      loadGroundTruth(selectedDocument)
-        .then((reference) => {
-          if (!controller.signal.aborted && reference) {
-            setArtifact((current) => ({ ...current, reference }));
-          }
-        })
-        .catch(() => undefined);
-    }
     return () => controller.abort();
   }, [selectedRun, selectedDocument]);
 
@@ -2805,17 +2774,13 @@ export default function DashboardClient({
     // opens the Best result tab. The candidate query remains eager because it
     // determines whether the tab should be shown.
     async function loadBestEvidence() {
-      const [loadedDiagnostic, loadedArtifact, loadedReference] = await Promise.allSettled([
+      const [loadedDiagnostic, loadedArtifact] = await Promise.allSettled([
         loadDiagnostic(bestCandidate.run, bestCandidate.result, controller.signal),
         loadArtifact(bestCandidate.run, bestCandidate.result, controller.signal),
-        loadGroundTruth(bestCandidate.result),
       ]);
       if (controller.signal.aborted) return;
       const diagnosticValue = loadedDiagnostic.status === "fulfilled"
         ? loadedDiagnostic.value.diagnostic
-        : null;
-      const referenceValue = loadedReference.status === "fulfilled"
-        ? loadedReference.value
         : null;
       const diagnosticError = loadedDiagnostic.status === "rejected" &&
         loadedDiagnostic.reason instanceof Error
@@ -2841,7 +2806,6 @@ export default function DashboardClient({
           loading: false,
           markdown: artifactValue.markdown,
           layoutBoxes: artifactValue.layoutBoxes,
-          reference: referenceValue,
           url: artifactValue.url,
           error: artifactError,
         },
@@ -2860,8 +2824,6 @@ export default function DashboardClient({
       setDocumentTotal(0);
       setDocumentsError(null);
       setSelectedDocument(null);
-      setCaseMetrics([]);
-      setCaseMetricsResultId(null);
       setArtifact(EMPTY_ARTIFACT);
       setArtifactResultId(null);
       setDiagnostic(EMPTY_DIAGNOSTIC);
@@ -2888,7 +2850,6 @@ export default function DashboardClient({
     setQueueOpen(false);
     setSelectedDocument(null);
     setDocumentLoadState({ id: result.id, loading: true });
-    setCaseMetricsResultId(null);
     setArtifactResultId(null);
     setDiagnosticResultId(null);
     setHistoricalBestResultId(null);
@@ -2958,7 +2919,6 @@ export default function DashboardClient({
   const displayedArtifact = artifactResultId === routeCaseResultId
     ? artifact
     : { ...EMPTY_ARTIFACT, loading: documentDetailsLoading || displayedDocument != null };
-  const displayedCaseMetrics = caseMetricsResultId === routeCaseResultId ? caseMetrics : [];
   const displayedDiagnostic = diagnosticResultId === routeCaseResultId
     ? diagnostic
     : { ...EMPTY_DIAGNOSTIC, loading: documentDetailsLoading || displayedDocument != null };
@@ -3070,7 +3030,6 @@ export default function DashboardClient({
             loading={documentDetailsLoading}
             artifact={displayedArtifact}
             diagnostic={displayedDiagnostic}
-            caseMetrics={displayedCaseMetrics}
             historicalBest={displayedHistoricalBest}
             onLoadHistoricalBest={() => {
               if (!displayedDocument) return;

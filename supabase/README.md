@@ -1,7 +1,8 @@
 # ParseBench benchmark index
 
-Supabase stores queryable metadata and scores. It does not duplicate source assets,
-ground truth, raw parser output, or evaluation reports.
+Supabase stores queryable workflow metadata, aggregate scores, per-document
+headline scores, and GCS artifact locators. Detailed per-document metrics,
+ground-truth evidence, raw parser output, and evaluation reports remain in GCS.
 
 ## Data model
 
@@ -13,8 +14,11 @@ ground truth, raw parser output, or evaluation reports.
 - `run_components`: exact MuPDF/PyMuPDF/PyMuPDF Layout/PyMuPDF4LLM revisions.
 - `run_dimensions` and `run_dimension_metrics`: per-dimension aggregate totals
   and scores.
-- `case_results` and `case_metrics`: granular per-document outcomes and metric
-  values used for ranking and run-to-run comparisons.
+- `case_results`: per-document headline outcomes and artifact locators used for
+  filtering, ranking, and run-to-run comparisons.
+- `case_metrics`: retained legacy data. Dashboard clients and ingestion jobs no
+  longer read or refresh this table; it can be removed separately after an
+  operational observation period.
 - `run_errors`: normalized inference and GitHub Actions failures.
 - `metric_definitions`: UI labels, defaults, and score direction.
 - `ingestion_jobs`: backfill checkpoint and failure summary.

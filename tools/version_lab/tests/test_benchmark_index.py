@@ -479,7 +479,7 @@ def test_indexer_extracts_document_scores_and_requires_v3_diagnostic_locators(tm
         "pymupdf4llm_markdown/table/_diagnostics/v3/0123456789abcdef0123456789abcdef.json"
     )
     assert database.rows["case_results"][0]["diagnostic_schema_version"] == 3
-    assert database.rows["case_metrics"][0]["passed_count"] == 3
+    assert "case_metrics" not in database.rows
 
     diagnostic_index_path.unlink()
     historical_database = FakeDatabase()

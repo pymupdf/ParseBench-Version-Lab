@@ -7,10 +7,20 @@ markdown.
 
 ## Data sources
 
-- Supabase provides the read-only run, score, case, metric, and error index.
-- Google Cloud Storage provides result JSON artifacts.
-- The pinned Hugging Face dataset revision provides PDFs and table reference
-  markdown.
+- Supabase provides the read-only workflow, case, aggregate score,
+  per-document headline score, artifact locator, and error index.
+- Google Cloud Storage provides independently fetchable per-document result and
+  diagnostic JSON. Detailed metrics, outcomes, and the ground-truth rows used by
+  each evaluation are read from those diagnostic objects.
+- The pinned Hugging Face dataset revision provides source PDFs and images.
+
+When ParseBench deterministically separates an ambiguous, side-by-side output
+table before scoring, the dashboard reconstructs those table segments in the
+browser from the stored result, ground truth, evaluator configuration, and
+pairing metadata. The reconstruction is displayed only when its table counts
+and pairing indexes agree with the retained diagnostic; otherwise the UI fails
+closed and directs the user to the complete output. No reconstructed table data
+is persisted in Supabase or GCS.
 
 The browser uses a Supabase publishable key protected by SELECT-only grants and
 RLS policies. It never receives the workflow's Supabase secret key and cannot

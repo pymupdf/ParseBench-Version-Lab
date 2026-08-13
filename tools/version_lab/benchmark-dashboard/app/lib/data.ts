@@ -166,14 +166,6 @@ export type ArtifactLayoutBox = {
   height: number;
 };
 
-export type CaseMetric = {
-  id: number;
-  metric_name: string;
-  metric_value: number;
-  passed_count: number | null;
-  total_count: number | null;
-};
-
 export type RunBundle = {
   dimensions: RunDimension[];
   metrics: DimensionMetric[];
@@ -514,19 +506,6 @@ export async function loadHistoricalBestResult(
   };
 }
 
-export function loadCaseMetrics(caseResultId: number, signal?: AbortSignal) {
-  return apiFetch<CaseMetric[]>(
-    "case_metrics",
-    new URLSearchParams({
-      select: "id,metric_name,metric_value,passed_count,total_count",
-      case_result_id: `eq.${caseResultId}`,
-      order: "metric_name.asc",
-      limit: "120",
-    }),
-    signal,
-  );
-}
-
 function encodePath(path: string) {
   return path
     .split("/")
@@ -684,49 +663,6 @@ export async function loadDiagnostic(
     throw new Error("Diagnostic artifact does not match this benchmark case.");
   }
   return { url, diagnostic };
-}
-
-const tableGroundTruthCache = new Map<string, Promise<Map<string, string>>>();
-
-async function tableGroundTruthIndex(dataset: DatasetVersion) {
-  const cacheKey = `${dataset.repository}@${dataset.resolved_sha}`;
-  const existing = tableGroundTruthCache.get(cacheKey);
-  if (existing) return existing;
-  const pending = fetch(datasetFileUrl(dataset, "table.jsonl"))
-    .then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`Ground truth returned ${response.status}`);
-      }
-      const text = await response.text();
-      const index = new Map<string, string>();
-      for (const line of text.split("\n")) {
-        if (!line.trim()) continue;
-        const record = JSON.parse(line) as {
-          pdf?: string;
-          expected_markdown?: string;
-        };
-        if (record.pdf && record.expected_markdown) {
-          index.set(record.pdf, record.expected_markdown);
-        }
-      }
-      return index;
-    })
-    .catch((error) => {
-      tableGroundTruthCache.delete(cacheKey);
-      throw error;
-    });
-  tableGroundTruthCache.set(cacheKey, pending);
-  return pending;
-}
-
-export async function loadGroundTruth(result: CaseResult) {
-  if (result.run_dimensions.dimension !== "table") return null;
-  const sourcePath = result.benchmark_cases.source_relative_path;
-  if (!sourcePath) return null;
-  const index = await tableGroundTruthIndex(
-    result.benchmark_cases.dataset_versions,
-  );
-  return index.get(sourcePath) ?? null;
 }
 
 export function primaryMetricForDimension(

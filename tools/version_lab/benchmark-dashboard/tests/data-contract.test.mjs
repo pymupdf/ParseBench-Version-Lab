@@ -47,7 +47,7 @@ test(
       "case_results",
       new URLSearchParams({
         select:
-          "id,result_relative_path,run_dimensions!inner(run_id,dimension),benchmark_cases!inner(test_id,pdf_relative_path,dataset_versions!inner(repository,resolved_sha))",
+          "id,primary_metric_name,primary_score,result_relative_path,diagnostic_relative_path,diagnostic_schema_version,run_dimensions!inner(run_id,dimension),benchmark_cases!inner(test_id,pdf_relative_path,dataset_versions!inner(repository,resolved_sha))",
         "run_dimensions.run_id": `eq.${run.id}`,
         result_relative_path: "not.is.null",
         order: "primary_score.asc.nullslast,id.asc",
@@ -55,6 +55,8 @@ test(
       }),
     );
     assert.ok(result?.result_relative_path);
+    assert.ok(result?.diagnostic_relative_path);
+    assert.equal(result?.diagnostic_schema_version, 3);
     assert.ok(result?.benchmark_cases?.pdf_relative_path);
 
     const objectPath = `${run.gcs_prefix}/${result.result_relative_path}`
@@ -69,6 +71,25 @@ test(
     assert.equal(artifactResponse.headers.get("access-control-allow-origin"), "*");
     const artifact = await artifactResponse.json();
     assert.equal(typeof artifact?.output?.markdown, "string");
+
+    const diagnosticPath = `${run.gcs_prefix}/${result.diagnostic_relative_path}`
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/");
+    const diagnosticResponse = await fetch(
+      `https://storage.googleapis.com/${run.gcs_bucket}/${diagnosticPath}`,
+      { headers: { Origin: "http://localhost:3000" } },
+    );
+    assert.equal(diagnosticResponse.status, 200);
+    assert.equal(diagnosticResponse.headers.get("access-control-allow-origin"), "*");
+    const diagnostic = await diagnosticResponse.json();
+    assert.equal(diagnostic.schema_version, 3);
+    assert.equal(diagnostic.test_id, result.benchmark_cases.test_id);
+    assert.equal(diagnostic.dimension, result.run_dimensions.dimension);
+    assert.ok(Array.isArray(diagnostic.metrics));
+    assert.ok(diagnostic.metrics.length > 0);
+    assert.equal(diagnostic.primary_metric?.name, result.primary_metric_name);
+    assert.ok(Math.abs(diagnostic.primary_metric?.value - result.primary_score) < 1e-12);
 
     const dataset = result.benchmark_cases.dataset_versions;
     const datasetPath = result.benchmark_cases.pdf_relative_path

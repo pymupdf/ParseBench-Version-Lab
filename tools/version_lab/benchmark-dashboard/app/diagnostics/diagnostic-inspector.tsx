@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -18,6 +18,11 @@ import {
   layoutElementHeadlineStatus,
   layoutExpectationIgnored,
 } from "./semantics";
+import {
+  reconstructSplitTableOutput,
+  structuredTableFragments,
+  type OutputTablePreview,
+} from "./table-output-reconstruction";
 
 type DiagnosticInspectorProps = {
   diagnostic: DiagnosticArtifact;
@@ -440,57 +445,6 @@ function MarkdownEvidence({ markdown, empty }: { markdown: string; empty: string
   );
 }
 
-function structuredTableFragments(markdown: string) {
-  // Mirror ParseBench's table evaluator: only top-level HTML <table> blocks
-  // participate in GriTS/TRM. Markdown pipe tables are deliberately excluded.
-  const tables: string[] = [];
-  const lower = markdown.toLowerCase();
-  let searchStart = 0;
-  while (searchStart < lower.length) {
-    const start = lower.indexOf("<table", searchStart);
-    if (start === -1) break;
-    const tagNameEnd = start + "<table".length;
-    if (tagNameEnd < lower.length && ![">", " ", "\t", "\n", "\r"].includes(lower[tagNameEnd])) {
-      searchStart = start + 1;
-      continue;
-    }
-
-    let depth = 0;
-    let position = start;
-    let end = -1;
-    while (position < lower.length) {
-      const nextOpen = lower.indexOf("<table", position + 1);
-      const nextClose = lower.indexOf("</table>", position + 1);
-      if (nextClose === -1) break;
-      if (nextOpen !== -1 && nextOpen < nextClose) {
-        const nestedNameEnd = nextOpen + "<table".length;
-        if (
-          nestedNameEnd < lower.length &&
-          ![">", " ", "\t", "\n", "\r"].includes(lower[nestedNameEnd])
-        ) {
-          position = nextOpen;
-          continue;
-        }
-        depth += 1;
-        position = nextOpen;
-      } else if (depth === 0) {
-        end = nextClose + "</table>".length;
-        break;
-      } else {
-        depth -= 1;
-        position = nextClose;
-      }
-    }
-    if (end === -1) {
-      tables.push(markdown.slice(start));
-      break;
-    }
-    tables.push(markdown.slice(start, end));
-    searchStart = end;
-  }
-  return tables.map((table) => table.trim()).filter(Boolean);
-}
-
 function EvidenceButton({
   id,
   selected,
@@ -733,6 +687,7 @@ type TablePairEvidence = {
   expectedMarkdown: string | null;
   outputMarkdown: string | null;
   outputMarkupReliable: boolean;
+  outputReconstructed: boolean;
   grits: Record<string, unknown> | null;
   trm: Record<string, unknown> | null;
 };
@@ -751,9 +706,24 @@ function tableDetailsByExpected(metric: DiagnosticMetric | null) {
   return details;
 }
 
+function tablePairing(metric: DiagnosticMetric | null) {
+  const pairing: Array<[number, number | null]> = [];
+  const rawPairing = metric?.metadata?.pairing;
+  if (!Array.isArray(rawPairing)) return pairing;
+  for (const entry of rawPairing) {
+    if (!Array.isArray(entry) || entry.length < 2) continue;
+    const expectedIndex = tableIndex(entry[0]);
+    const outputIndex = entry[1] == null ? null : tableIndex(entry[1]);
+    if (expectedIndex != null && (entry[1] == null || outputIndex != null)) {
+      pairing.push([expectedIndex, outputIndex]);
+    }
+  }
+  return pairing;
+}
+
 function tablePairEvidence(
   expectedMarkdown: string[],
-  outputMarkdown: string[],
+  outputTables: OutputTablePreview[],
   expectedCount: number | null,
   outputMappingReliable: boolean,
   gritsMetric: DiagnosticMetric | null,
@@ -763,14 +733,8 @@ function tablePairEvidence(
   const trmByExpected = tableDetailsByExpected(trmMetric);
   const outputByExpected = new Map<number, number | null>();
 
-  const rawPairing = gritsMetric?.metadata?.pairing;
-  if (Array.isArray(rawPairing)) {
-    for (const entry of rawPairing) {
-      if (!Array.isArray(entry) || entry.length < 2) continue;
-      const expectedIndex = tableIndex(entry[0]);
-      const outputIndex = entry[1] == null ? null : tableIndex(entry[1]);
-      if (expectedIndex != null) outputByExpected.set(expectedIndex, outputIndex);
-    }
+  for (const [expectedIndex, outputIndex] of tablePairing(gritsMetric)) {
+    outputByExpected.set(expectedIndex, outputIndex);
   }
   for (const details of [gritsByExpected, trmByExpected]) {
     for (const [expectedIndex, detail] of details) {
@@ -798,28 +762,94 @@ function tablePairEvidence(
       expectedMarkdown: expectedMarkdown[expectedIndex] ?? null,
       outputMarkdown: outputIndex == null || !outputMappingReliable
         ? null
-        : outputMarkdown[outputIndex] ?? null,
+        : outputTables[outputIndex]?.markdown ?? null,
       outputMarkupReliable: outputMappingReliable &&
-        (outputIndex == null || outputIndex < outputMarkdown.length),
+        (outputIndex == null || outputIndex < outputTables.length),
+      outputReconstructed: outputIndex == null
+        ? false
+        : outputTables[outputIndex]?.reconstructed ?? false,
       grits: gritsByExpected.get(expectedIndex) ?? null,
       trm: trmByExpected.get(expectedIndex) ?? null,
     });
   }
   if (outputMappingReliable) {
-    outputMarkdown.forEach((markdown, outputIndex) => {
+    outputTables.forEach((table, outputIndex) => {
       if (pairedOutputIndexes.has(outputIndex)) return;
       pairs.push({
         expectedIndex: null,
         outputIndex,
         expectedMarkdown: null,
-        outputMarkdown: markdown,
+        outputMarkdown: table.markdown,
         outputMarkupReliable: true,
+        outputReconstructed: table.reconstructed,
         grits: null,
         trm: null,
       });
     });
   }
   return pairs;
+}
+
+function reconstructedTablePairs(diagnostic: DiagnosticArtifact, actualMarkdown: string) {
+  const tableMetric = diagnostic.metrics.find(
+    (metric) => metric.metric_name === "table_record_match",
+  ) ?? null;
+  const gritsMetric = diagnostic.metrics.find(
+    (metric) => metric.metric_name === "grits_con",
+  ) ?? null;
+  const metricValue = (name: string) => diagnostic.metrics.find(
+    (metric) => metric.metric_name === name,
+  )?.value ?? null;
+  const predictedTables = asNumber(tableMetric?.metadata?.n_pred_tables) ??
+    asNumber(gritsMetric?.metadata?.tables_found_actual) ??
+    metricValue("tables_actual") ??
+    asNumber(diagnostic.summary.predicted);
+  const expectedTables = asNumber(tableMetric?.metadata?.n_gt_tables) ??
+    asNumber(gritsMetric?.metadata?.tables_found_expected) ??
+    metricValue("tables_expected") ??
+    asNumber(diagnostic.summary.expected);
+  const extractedOutputTables = metricValue("tables_actual");
+  const unparseableOutputTables = metricValue("tables_unparseable_pred");
+  const expectedMarkdown = diagnostic.expectations
+    .map((expectation) => expectation.expected_markdown?.trim())
+    .find((markdown): markdown is string => Boolean(markdown)) ?? "";
+  const expectedTableFragments = structuredTableFragments(expectedMarkdown);
+  const outputTableFragments = structuredTableFragments(actualMarkdown);
+  const sourceOutputMappingReliable = unparseableOutputTables === 0 &&
+    extractedOutputTables === outputTableFragments.length &&
+    predictedTables === outputTableFragments.length;
+  const splittingAllowed = diagnostic.expectations.reduce((allowed, expectation) => {
+    const configured = asRecord(expectation.rule)?.allow_splitting_ambiguous_merged_tables;
+    return typeof configured === "boolean" ? configured : allowed;
+  }, false);
+  const pairing = tablePairing(gritsMetric);
+  const reconstructedOutputTables = !sourceOutputMappingReliable &&
+    splittingAllowed &&
+    expectedTables != null && Number.isInteger(expectedTables) &&
+    extractedOutputTables != null && Number.isInteger(extractedOutputTables) &&
+    predictedTables != null && Number.isInteger(predictedTables) &&
+    unparseableOutputTables != null && Number.isInteger(unparseableOutputTables)
+    ? reconstructSplitTableOutput({
+        actualMarkdown,
+        expectedMarkdown,
+        expectedTableCount: expectedTables,
+        rawOutputTableCount: extractedOutputTables,
+        scoredOutputTableCount: predictedTables,
+        unparseableOutputTableCount: unparseableOutputTables,
+        pairing,
+      })
+    : null;
+  const outputMappingReliable = sourceOutputMappingReliable || reconstructedOutputTables != null;
+  const outputTablePreviews: OutputTablePreview[] = reconstructedOutputTables ??
+    outputTableFragments.map((markdown) => ({ markdown, reconstructed: false }));
+  return tablePairEvidence(
+    expectedTableFragments,
+    outputTablePreviews,
+    expectedTables,
+    outputMappingReliable,
+    gritsMetric,
+    tableMetric,
+  );
 }
 
 function tablePairHeadlineScore(pair: TablePairEvidence, mode: TableScoreBreakdown["mode"]) {
@@ -906,6 +936,9 @@ function TablePairComparison({
           <div className="diagnostic-panel-heading">
             <span className="diagnostic-eyebrow">Output</span>
             <h5>{outputLabel}</h5>
+            {pair.outputReconstructed && (
+              <span className="diagnostic-derived-badge">Derived segment</span>
+            )}
           </div>
           <MarkdownEvidence
             markdown={pair.outputMarkdown ?? ""}
@@ -1049,12 +1082,6 @@ function TableDiagnostic({
   onSelectEvidence,
 }: DiagnosticInspectorProps) {
   const scoreBreakdown = tableScoreBreakdown(diagnostic);
-  const expectedMarkdown = diagnostic.expectations
-    .map((expectation) => expectation.expected_markdown?.trim())
-    .filter((markdown): markdown is string => Boolean(markdown))
-    .join("\n\n");
-  const expectedTableFragments = structuredTableFragments(expectedMarkdown);
-  const outputTableFragments = structuredTableFragments(actualMarkdown);
   const structuredMetrics = diagnostic.metrics.filter(
     (metric) => asRecordArray(metric.metadata?.per_table_details).length > 0,
   );
@@ -1101,19 +1128,11 @@ function TableDiagnostic({
     asNumber(gritsMetric?.metadata?.tables_matched);
   const unmatchedExpected = metricValue("tables_unmatched_expected");
   const unmatchedOutput = metricValue("tables_unmatched_pred");
-  const extractedOutputTables = metricValue("tables_actual");
-  const unparseableOutputTables = metricValue("tables_unparseable_pred");
-  const outputMappingReliable = unparseableOutputTables === 0 &&
-    extractedOutputTables === outputTableFragments.length &&
-    predictedTables === outputTableFragments.length;
-  const tablePairs = tablePairEvidence(
-    expectedTableFragments,
-    outputTableFragments,
-    expectedTables,
-    outputMappingReliable,
-    gritsMetric ?? null,
-    tableMetric ?? null,
+  const tablePairs = useMemo(
+    () => reconstructedTablePairs(diagnostic, actualMarkdown),
+    [actualMarkdown, diagnostic],
   );
+  const hasReconstructedOutput = tablePairs.some((pair) => pair.outputReconstructed);
   const supportingStructuredMetrics = orderedStructuredMetrics.filter(
     (metric) => !headlineMetricNames.has(metric.metric_name),
   );
@@ -1141,6 +1160,11 @@ function TableDiagnostic({
             </div>
             <span>{tablePairs.length.toLocaleString()} comparisons</span>
           </div>
+          {hasReconstructedOutput && (
+            <p className="diagnostic-table-reconstruction-note">
+              <strong>Derived output segments.</strong> ParseBench split one or more wider source tables at repeated column headers before scoring. These previews reconstruct the corresponding source segments for context; the evaluator can still normalize cells or remove title rows, and the complete original remains in the Output tab.
+            </p>
+          )}
           <div className="diagnostic-table-pair-list">
             {tablePairs.map((pair, index) => (
               <TablePairComparison
@@ -1828,7 +1852,6 @@ function FormattingDiagnostic(props: DiagnosticInspectorProps) {
 type GroundTruthInspectorProps = {
   dimension: string;
   diagnostic: DiagnosticArtifact | null;
-  fallbackMarkdown?: string | null;
 };
 
 function expectedTableCount(diagnostic: DiagnosticArtifact | null, markdown: string) {
@@ -1855,12 +1878,11 @@ function expectedTableCount(diagnostic: DiagnosticArtifact | null, markdown: str
 
 function TableGroundTruth({
   diagnostic,
-  fallbackMarkdown,
-}: Pick<GroundTruthInspectorProps, "diagnostic" | "fallbackMarkdown">) {
+}: Pick<GroundTruthInspectorProps, "diagnostic">) {
   const markdown = diagnostic?.expectations
     .map((expectation) => expectation.expected_markdown?.trim())
     .filter((value): value is string => Boolean(value))
-    .join("\n\n") || fallbackMarkdown || "";
+    .join("\n\n") || "";
   const tableCount = expectedTableCount(diagnostic, markdown);
   const tables = structuredTableFragments(markdown);
   return (
@@ -2250,10 +2272,9 @@ function HybridLayoutGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifac
 export function GroundTruthInspector({
   dimension,
   diagnostic,
-  fallbackMarkdown,
 }: GroundTruthInspectorProps) {
   if (dimension === "table") {
-    return <TableGroundTruth diagnostic={diagnostic} fallbackMarkdown={fallbackMarkdown} />;
+    return <TableGroundTruth diagnostic={diagnostic} />;
   }
   if (!diagnostic) {
     return <EmptyDiagnostics message="No structured ground truth is available for this historical result." />;

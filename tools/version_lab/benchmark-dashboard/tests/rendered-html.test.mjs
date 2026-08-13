@@ -31,13 +31,14 @@ test("keeps the standard Next.js dashboard client-only and publishable-key based
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(dashboard, /^"use client";/);
-  assert.match(dashboard, /fallbackMarkdown=\{artifact\.reference\}/);
-  assert.match(dashboard, /const groundTruthReference = currentArtifact\.reference \?\? best\.artifact\.reference/);
+  assert.match(dashboard, /diagnostic\.data\?\.metrics/);
   assert.doesNotMatch(dashboard, /No reference markdown exists/);
   assert.match(dashboard, /dynamic\(\(\) => import\("\.\/pdf-preview"\)/);
   assert.doesNotMatch(`${dashboard}\n${pdfPreview}`, /URL\.createObjectURL|<iframe/);
   assert.match(pdfPreview, /rangeChunkSize: 65_536/);
   assert.match(data, /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/);
+  assert.doesNotMatch(`${dashboard}\n${data}`, /case_metrics|loadCaseMetrics|CaseMetric/);
+  assert.doesNotMatch(data, /table\.jsonl/);
   assert.doesNotMatch(data, /pipeline_name: "not\.is\.null"/);
   assert.doesNotMatch(data, /service_role|SUPABASE_SECRET_KEY/);
   assert.match(packageJson, /"next": "16\.3\.0"/);
