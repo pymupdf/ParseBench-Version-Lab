@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState } from "react";
-import type { CSSProperties, FormEvent, ReactNode } from "react";
+import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -69,10 +69,11 @@ type DiagnosticState = {
 };
 
 type HistoricalBestState = {
-  loading: boolean;
   data: HistoricalBestResult | null;
+  evidenceStatus: "idle" | "loading" | "loaded";
   diagnostic: DiagnosticArtifact | null;
-  reference: string | null;
+  diagnosticError: string | null;
+  artifact: ArtifactState;
   error: string | null;
 };
 
@@ -104,10 +105,11 @@ const EMPTY_DIAGNOSTIC: DiagnosticState = {
 };
 
 const EMPTY_HISTORICAL_BEST: HistoricalBestState = {
-  loading: false,
   data: null,
+  evidenceStatus: "idle",
   diagnostic: null,
-  reference: null,
+  diagnosticError: null,
+  artifact: EMPTY_ARTIFACT,
   error: null,
 };
 
@@ -1339,22 +1341,104 @@ function DiagnosticImagePreview({
   );
 }
 
+type BestComparisonView = "ground-truth" | "current" | "best";
+
+function ResultEvidencePanel({
+  label,
+  result,
+  diagnostic,
+  diagnosticError,
+  artifact,
+}: {
+  label: string;
+  result: CaseResult;
+  diagnostic: DiagnosticArtifact | null;
+  diagnosticError: string | null;
+  artifact: ArtifactState;
+}) {
+  const dimension = result.run_dimensions.dimension;
+  return (
+    <section className="best-result-evidence" aria-label={`${label} scoring evidence`}>
+      <header className="best-result-evidence-heading">
+        <div>
+          <span className="diagnostic-eyebrow">{label}</span>
+          <h3>{humanize(result.primary_metric_name)}</h3>
+        </div>
+        <strong>{scorePercent(result.primary_score)}</strong>
+      </header>
+      {diagnostic ? (
+        <DiagnosticInspector diagnostic={diagnostic} actualMarkdown={artifact.markdown} />
+      ) : artifact.loading && !diagnosticError ? (
+        <div className="artifact-loading">Loading score evidence…</div>
+      ) : (
+        <EmptyState
+          title="Detailed score evidence unavailable"
+          body={diagnosticError ?? "This result does not include a per-case diagnostic artifact."}
+        />
+      )}
+      <section className="best-result-extracted-output" aria-label={`${label} extracted output`}>
+        <div className="diagnostic-section-heading">
+          <div>
+            <span className="diagnostic-eyebrow">Extracted result</span>
+            <h3>{dimension === "table" ? "Extracted table Markdown" : "Extracted Markdown"}</h3>
+          </div>
+          {artifact.url && <a href={artifact.url} target="_blank" rel="noreferrer">Open JSON ↗</a>}
+        </div>
+        {artifact.loading ? (
+          <div className="artifact-loading">Loading extracted output…</div>
+        ) : artifact.error ? (
+          <EmptyState title="Extracted output unavailable" body={artifact.error} />
+        ) : artifact.markdown ? (
+          <MarkdownPanel markdown={artifact.markdown} />
+        ) : (
+          <EmptyState title="No extracted Markdown" body="This result does not contain a rendered Markdown payload." />
+        )}
+      </section>
+    </section>
+  );
+}
+
 function BestResultPanel({
   current,
-  best,
+  currentArtifact,
   currentDiagnostic,
+  currentDiagnosticError,
+  best,
 }: {
   current: CaseResult;
-  best: HistoricalBestState;
+  currentArtifact: ArtifactState;
   currentDiagnostic: DiagnosticArtifact | null;
+  currentDiagnosticError: string | null;
+  best: HistoricalBestState;
 }) {
+  const [comparisonView, setComparisonView] = useState<BestComparisonView>("best");
+  const comparisonId = useId();
   if (!best.data) {
     return <EmptyState title="Best result unavailable" body={best.error ?? "No substantially better historical result was found."} />;
   }
   const { result, run } = best.data;
   const improvement = (result.primary_score ?? 0) - (current.primary_score ?? 0);
-  const groundTruthDiagnostic = best.diagnostic ?? currentDiagnostic;
+  const groundTruthDiagnostic = currentDiagnostic ?? best.diagnostic;
+  const groundTruthReference = currentArtifact.reference ?? best.artifact.reference;
   const bestHref = `/workflows/${run.github_run_id}/triage/${result.id}?dimension=${encodeURIComponent(result.run_dimensions.dimension)}&from=triage`;
+  const views: Array<{ value: BestComparisonView; label: string; score?: string }> = [
+    { value: "ground-truth", label: "Ground truth" },
+    { value: "current", label: "Current", score: scorePercent(current.primary_score) },
+    { value: "best", label: "Best", score: scorePercent(result.primary_score) },
+  ];
+  function navigateComparisonTabs(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % views.length;
+    if (event.key === "ArrowLeft") nextIndex = (index - 1 + views.length) % views.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = views.length - 1;
+    if (nextIndex == null) return;
+    event.preventDefault();
+    const nextView = views[nextIndex];
+    setComparisonView(nextView.value);
+    const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[role='tab']");
+    tabs?.[nextIndex]?.focus();
+  }
   return (
     <div className="best-result-view">
       <section className="best-result-summary" aria-labelledby="best-result-heading">
@@ -1387,19 +1471,60 @@ function BestResultPanel({
           Open best result <span aria-hidden="true">→</span>
         </Link>
       </section>
-      <div className="best-result-ground-truth-note">
-        <strong>Ground truth used for this comparison</strong>
-        <span>The page, dataset revision, dimension, and headline metric are identical in both runs.</span>
+      <div className="best-result-comparison-intro">
+        <div>
+          <strong>Compare the evidence behind both scores</strong>
+          <span>The page, dataset revision, dimension, headline metric, and ground truth are identical.</span>
+        </div>
+        <div className="best-result-comparison-tabs" role="tablist" aria-label="Historical best comparison views">
+          {views.map((view, index) => (
+            <button
+              id={`${comparisonId}-${view.value}-tab`}
+              type="button"
+              role="tab"
+              aria-selected={comparisonView === view.value}
+              aria-controls={`${comparisonId}-panel`}
+              tabIndex={comparisonView === view.value ? 0 : -1}
+              onClick={() => setComparisonView(view.value)}
+              onKeyDown={(event) => navigateComparisonTabs(event, index)}
+              key={view.value}
+            >
+              <span>{view.label}</span>
+              {view.score && <strong>{view.score}</strong>}
+            </button>
+          ))}
+        </div>
       </div>
-      {best.error && !groundTruthDiagnostic && !best.reference ? (
-        <EmptyState title="Ground truth unavailable" body={best.error} />
-      ) : (
-        <GroundTruthInspector
-          dimension={result.run_dimensions.dimension}
-          diagnostic={groundTruthDiagnostic}
-          fallbackMarkdown={best.reference}
-        />
-      )}
+      <div
+        className="best-result-comparison-panel"
+        id={`${comparisonId}-panel`}
+        role="tabpanel"
+        aria-labelledby={`${comparisonId}-${comparisonView}-tab`}
+      >
+        {comparisonView === "ground-truth" ? (
+          <GroundTruthInspector
+            dimension={result.run_dimensions.dimension}
+            diagnostic={groundTruthDiagnostic}
+            fallbackMarkdown={groundTruthReference}
+          />
+        ) : comparisonView === "current" ? (
+          <ResultEvidencePanel
+            label="Current page result"
+            result={current}
+            diagnostic={currentDiagnostic}
+            diagnosticError={currentDiagnosticError}
+            artifact={currentArtifact}
+          />
+        ) : (
+          <ResultEvidencePanel
+            label="Best historical result"
+            result={result}
+            diagnostic={best.diagnostic}
+            diagnosticError={best.diagnosticError}
+            artifact={best.artifact}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -1412,6 +1537,7 @@ function DocumentExplorer({
   diagnostic,
   caseMetrics,
   historicalBest,
+  onLoadHistoricalBest,
   onBrowseQueue,
   previous,
   next,
@@ -1424,6 +1550,7 @@ function DocumentExplorer({
   diagnostic: DiagnosticState;
   caseMetrics: CaseMetric[];
   historicalBest: HistoricalBestState;
+  onLoadHistoricalBest: () => void;
   onBrowseQueue: (trigger: HTMLButtonElement) => void;
   previous: CaseResult | null;
   next: CaseResult | null;
@@ -1557,7 +1684,10 @@ function DocumentExplorer({
                         aria-selected={inspectorTab === value}
                         aria-controls="inspector-panel"
                         className={inspectorTab === value ? "content-tab-active" : ""}
-                        onClick={() => setInspectorTab(value)}
+                        onClick={() => {
+                          setInspectorTab(value);
+                          if (value === "best") onLoadHistoricalBest();
+                        }}
                         type="button"
                         key={value}
                       >
@@ -1621,8 +1751,10 @@ function DocumentExplorer({
                   ) : inspectorTab === "best" ? (
                     <BestResultPanel
                       current={selected}
-                      best={historicalBest}
+                      currentArtifact={artifact}
                       currentDiagnostic={diagnostic.data}
+                      currentDiagnosticError={diagnostic.error}
+                      best={historicalBest}
                     />
                   ) : (
                     <div className="raw-artifacts-view">
@@ -2041,6 +2173,7 @@ export default function DashboardClient({
   const [diagnosticResultId, setDiagnosticResultId] = useState<number | null>(null);
   const [historicalBest, setHistoricalBest] = useState<HistoricalBestState>(EMPTY_HISTORICAL_BEST);
   const [historicalBestResultId, setHistoricalBestResultId] = useState<number | null>(null);
+  const [historicalBestEvidenceResultId, setHistoricalBestEvidenceResultId] = useState<number | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const queueOverlayRef = useRef<HTMLDivElement>(null);
   const queueCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -2367,7 +2500,8 @@ export default function DashboardClient({
     // result cannot appear while the next page is loading.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setHistoricalBestResultId(document.id);
-    setHistoricalBest({ ...EMPTY_HISTORICAL_BEST, loading: true });
+    setHistoricalBestEvidenceResultId(null);
+    setHistoricalBest(EMPTY_HISTORICAL_BEST);
 
     async function loadBest() {
       try {
@@ -2382,27 +2516,9 @@ export default function DashboardClient({
           return;
         }
 
-        const [loadedDiagnostic, loadedReference] = await Promise.allSettled([
-          loadDiagnostic(candidate.run, candidate.result, controller.signal),
-          loadGroundTruth(candidate.result),
-        ]);
-        if (controller.signal.aborted) return;
-        const diagnosticValue = loadedDiagnostic.status === "fulfilled"
-          ? loadedDiagnostic.value.diagnostic
-          : null;
-        const referenceValue = loadedReference.status === "fulfilled"
-          ? loadedReference.value
-          : null;
-        const diagnosticError = loadedDiagnostic.status === "rejected" &&
-          loadedDiagnostic.reason instanceof Error
-          ? loadedDiagnostic.reason.message
-          : null;
         setHistoricalBest({
-          loading: false,
+          ...EMPTY_HISTORICAL_BEST,
           data: candidate,
-          diagnostic: diagnosticValue,
-          reference: referenceValue,
-          error: diagnosticError,
         });
       } catch (error) {
         if (!controller.signal.aborted && error instanceof Error && error.name !== "AbortError") {
@@ -2414,6 +2530,62 @@ export default function DashboardClient({
     void loadBest();
     return () => controller.abort();
   }, [selectedDocument]);
+
+  useEffect(() => {
+    const candidate = historicalBest.data;
+    if (
+      !selectedDocument ||
+      !candidate ||
+      historicalBest.evidenceStatus !== "loading" ||
+      historicalBestEvidenceResultId !== selectedDocument.id
+    ) return;
+    const bestCandidate = candidate;
+    const controller = new AbortController();
+    // Historical artifacts can be large, so fetch them only after the user
+    // opens the Best result tab. The candidate query remains eager because it
+    // determines whether the tab should be shown.
+    async function loadBestEvidence() {
+      const [loadedDiagnostic, loadedArtifact, loadedReference] = await Promise.allSettled([
+        loadDiagnostic(bestCandidate.run, bestCandidate.result, controller.signal),
+        loadArtifact(bestCandidate.run, bestCandidate.result, controller.signal),
+        loadGroundTruth(bestCandidate.result),
+      ]);
+      if (controller.signal.aborted) return;
+      const diagnosticValue = loadedDiagnostic.status === "fulfilled"
+        ? loadedDiagnostic.value.diagnostic
+        : null;
+      const referenceValue = loadedReference.status === "fulfilled"
+        ? loadedReference.value
+        : null;
+      const diagnosticError = loadedDiagnostic.status === "rejected" &&
+        loadedDiagnostic.reason instanceof Error
+        ? loadedDiagnostic.reason.message
+        : null;
+      const artifactError = loadedArtifact.status === "rejected" &&
+        loadedArtifact.reason instanceof Error
+        ? loadedArtifact.reason.message
+        : null;
+      const artifactValue = loadedArtifact.status === "fulfilled"
+        ? loadedArtifact.value
+        : { url: artifactUrl(bestCandidate.run, bestCandidate.result.result_relative_path), markdown: "" };
+      setHistoricalBest((current) => ({
+        ...current,
+        evidenceStatus: "loaded",
+        diagnostic: diagnosticValue,
+        diagnosticError,
+        artifact: {
+          loading: false,
+          markdown: artifactValue.markdown,
+          reference: referenceValue,
+          url: artifactValue.url,
+          error: artifactError,
+        },
+      }));
+    }
+
+    void loadBestEvidence();
+    return () => controller.abort();
+  }, [historicalBest.data, historicalBest.evidenceStatus, historicalBestEvidenceResultId, selectedDocument]);
 
   function selectWorkflow(candidate: BenchmarkRun) {
     setLoadError(null);
@@ -2430,6 +2602,7 @@ export default function DashboardClient({
       setDiagnosticResultId(null);
       setHistoricalBest(EMPTY_HISTORICAL_BEST);
       setHistoricalBestResultId(null);
+      setHistoricalBestEvidenceResultId(null);
     }
     setSelectedRunRecord(candidate);
     router.push(`/workflows/${candidate.github_run_id}`);
@@ -2453,6 +2626,7 @@ export default function DashboardClient({
     setArtifactResultId(null);
     setDiagnosticResultId(null);
     setHistoricalBestResultId(null);
+    setHistoricalBestEvidenceResultId(null);
     const query = triageQuery(navigationFilters);
     const origin = view === "overview"
       ? "overview"
@@ -2630,6 +2804,18 @@ export default function DashboardClient({
             diagnostic={displayedDiagnostic}
             caseMetrics={displayedCaseMetrics}
             historicalBest={displayedHistoricalBest}
+            onLoadHistoricalBest={() => {
+              if (!displayedDocument) return;
+              setHistoricalBest((current) => {
+                if (!current.data || current.evidenceStatus !== "idle") return current;
+                return {
+                  ...current,
+                  evidenceStatus: "loading",
+                  artifact: { ...EMPTY_ARTIFACT, loading: true },
+                };
+              });
+              setHistoricalBestEvidenceResultId(displayedDocument.id);
+            }}
             onBrowseQueue={(trigger) => {
               queueTriggerRef.current = trigger;
               setQueueOpen(true);

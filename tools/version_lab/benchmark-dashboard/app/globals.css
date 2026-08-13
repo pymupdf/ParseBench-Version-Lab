@@ -60,7 +60,7 @@
   --markdown-border: var(--line-strong);
   --markdown-header-surface: var(--surface-strong);
   --markdown-header-text: var(--ink);
-  --markdown-quote-border: var(--brand-border-strong);
+  --markdown-quote-border: var(--line-strong);
   --markdown-code-surface: var(--surface-strong);
   --markdown-code-block-surface: var(--ink);
   --markdown-code-block-text: var(--surface-strong);
@@ -90,8 +90,8 @@
   --evidence-critical-surface-strong: color-mix(in srgb, var(--critical) 10%, transparent);
   --evidence-critical-border: color-mix(in srgb, var(--critical) 90%, transparent);
   --evidence-critical-border-strong: color-mix(in srgb, var(--critical) 92%, transparent);
-  --evidence-ground-truth-surface: color-mix(in srgb, var(--brand) 7%, transparent);
-  --evidence-ground-truth-border: color-mix(in srgb, var(--brand) 90%, transparent);
+  --evidence-ground-truth-surface: color-mix(in srgb, var(--ink-soft) 5%, transparent);
+  --evidence-ground-truth-border: color-mix(in srgb, var(--ink-soft) 72%, transparent);
   --evidence-passed-surface: color-mix(in srgb, var(--good) 8%, transparent);
   --evidence-passed-border: color-mix(in srgb, var(--good) 90%, transparent);
   --evidence-partial-surface: color-mix(in srgb, var(--warning) 10%, transparent);
@@ -377,9 +377,9 @@ code {
 }
 
 .artifact-complete {
-  background: var(--brand-soft);
-  border-color: var(--brand-border-soft);
-  color: var(--brand-dark);
+  background: var(--good-soft);
+  border-color: var(--good-border);
+  color: var(--good);
 }
 
 .artifact-partial {
@@ -867,9 +867,9 @@ code {
 }
 
 .workflow-title-line em {
-  background: var(--brand-soft);
+  background: var(--neutral-badge-surface);
   border-radius: 999px;
-  color: var(--brand);
+  color: var(--neutral-badge-text);
   font-size: 9px;
   font-style: normal;
   font-weight: 750;
@@ -2289,7 +2289,7 @@ code {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
-  color: var(--brand);
+  color: var(--ink-soft);
   display: flex;
   font-size: 17px;
   font-weight: 780;
@@ -2553,7 +2553,7 @@ code {
 }
 
 .layer-swatch {
-  border: 2px solid var(--brand);
+  border: 2px solid var(--ink-soft);
   display: inline-block;
   height: 9px;
   width: 9px;
@@ -2633,7 +2633,7 @@ code {
 }
 
 .best-result-score p,
-.best-result-ground-truth-note span {
+.best-result-comparison-intro span {
   color: var(--muted);
   font-size: 9px;
   line-height: 1.45;
@@ -2701,15 +2701,119 @@ code {
   border-color: var(--brand);
 }
 
-.best-result-ground-truth-note {
-  align-items: baseline;
+.best-result-comparison-intro {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--line);
   display: flex;
-  gap: 8px;
-  padding: 0 2px;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 2px 2px 12px;
 }
 
-.best-result-ground-truth-note strong {
+.best-result-comparison-intro > div:first-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.best-result-comparison-intro > div:first-child strong {
   font-size: 10px;
+}
+
+.best-result-comparison-tabs {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  flex: 0 0 auto;
+  gap: 3px;
+  grid-template-columns: repeat(3, minmax(88px, 1fr));
+  padding: 3px;
+}
+
+.best-result-comparison-tabs button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  font-size: 9px;
+  gap: 6px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.best-result-comparison-tabs button strong {
+  color: var(--ink);
+  font-size: 9px;
+}
+
+.best-result-comparison-tabs button[aria-selected="true"] {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-toggle);
+  color: var(--ink);
+  font-weight: 760;
+}
+
+.best-result-comparison-panel,
+.best-result-evidence {
+  min-width: 0;
+}
+
+.best-result-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.best-result-evidence-heading {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.best-result-evidence-heading h3 {
+  font-size: 12px;
+  margin: 0;
+}
+
+.best-result-evidence-heading > strong {
+  color: var(--ink);
+  font-size: 18px;
+  letter-spacing: -0.03em;
+}
+
+.best-result-extracted-output {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.best-result-extracted-output .diagnostic-section-heading a {
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 720;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
+}
+
+.best-result-extracted-output .diagnostic-section-heading a:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+.best-result-extracted-output .markdown-body {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 8px;
+  padding: 12px;
 }
 
 .diagnostic-ground-truth-view {
@@ -3124,15 +3228,15 @@ code {
 }
 
 .diagnostic-table-score-mode-combined {
-  background: var(--brand-soft);
-  border-color: var(--brand-border-soft);
-  color: var(--brand-dark);
+  background: var(--neutral-badge-surface);
+  border-color: var(--line);
+  color: var(--neutral-badge-text);
 }
 
 .diagnostic-table-score-mode-grits_only {
-  background: var(--warning-soft);
-  border-color: var(--warning-border);
-  color: var(--warning);
+  background: var(--neutral-badge-surface);
+  border-color: var(--line);
+  color: var(--neutral-badge-text);
 }
 
 .diagnostic-table-score-summary {
@@ -3196,15 +3300,15 @@ code {
 }
 
 .diagnostic-table-score-omission {
-  background: var(--warning-soft);
-  border: 1px solid var(--warning-border);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
   border-radius: 8px;
   margin-top: 8px;
   padding: 8px 9px;
 }
 
 .diagnostic-table-score-omission strong {
-  color: var(--warning);
+  color: var(--ink);
   display: block;
   font-size: 9px;
   margin-bottom: 3px;
@@ -3225,7 +3329,7 @@ code {
 }
 
 .diagnostic-table-metric-score > small {
-  color: var(--warning);
+  color: var(--muted);
   font-size: 8px;
   font-weight: 700;
 }
@@ -3752,10 +3856,14 @@ code {
     justify-content: space-between;
   }
 
-  .best-result-ground-truth-note {
+  .best-result-comparison-intro {
     align-items: flex-start;
     flex-direction: column;
-    gap: 1px;
+  }
+
+  .best-result-comparison-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
   }
 
   .topbar {
