@@ -2961,16 +2961,17 @@ code {
 }
 
 .diagnostic-ground-truth-layout-table th small {
-  color: var(--muted);
+  color: var(--ink-soft);
   display: block;
-  font-size: 8px;
-  font-weight: 500;
-  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 1.4;
+  margin-top: 3px;
 }
 
 .diagnostic-ground-truth-layout-table code {
-  color: var(--ink-soft);
-  font-size: 8px;
+  color: var(--ink);
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -2989,8 +2990,8 @@ code {
   gap: 12px;
   justify-content: space-between;
   list-style: none;
-  min-height: 46px;
-  padding: 8px 12px;
+  min-height: 54px;
+  padding: 10px 12px;
 }
 
 .diagnostic-ground-truth-rule > summary::-webkit-details-marker {
@@ -3005,29 +3006,32 @@ code {
 }
 
 .diagnostic-ground-truth-rule > summary strong {
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .diagnostic-ground-truth-rule > summary small {
-  color: var(--ink-soft);
-  font-size: 9px;
-  line-height: 1.4;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .diagnostic-ground-truth-rule > summary em {
-  color: var(--muted);
+  color: var(--ink-soft);
   flex: 0 0 auto;
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
+  line-height: 1.4;
 }
 
 .diagnostic-ground-truth-rule pre {
   background: var(--surface-soft);
   border-top: 1px solid var(--line);
-  font-size: 9px;
+  font-size: 11px;
+  line-height: 1.5;
   margin: 0;
   overflow: auto;
-  padding: 10px 12px;
+  padding: 12px;
 }
 
 .diagnostic-inspector {
@@ -3059,7 +3063,7 @@ code {
 .diagnostic-eyebrow {
   color: var(--muted);
   display: block;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 780;
   letter-spacing: 0.09em;
   margin-bottom: 5px;
@@ -3084,7 +3088,7 @@ code {
 .diagnostic-score-line h2,
 .diagnostic-section-heading h3,
 .diagnostic-panel-heading h3 {
-  font-size: 13px;
+  font-size: 14px;
   letter-spacing: -0.02em;
   margin: 0;
 }
@@ -3098,8 +3102,8 @@ code {
 .diagnostic-failure-reason,
 .diagnostic-empty {
   color: var(--ink-soft);
-  font-size: 10px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.55;
   margin: 6px 0 0;
 }
 
@@ -3121,19 +3125,19 @@ code {
 
 .diagnostic-component span {
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .diagnostic-component strong {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .diagnostic-component small {
-  color: var(--muted);
-  font-size: 8px;
+  color: var(--ink-soft);
+  font-size: 9px;
   grid-column: 1 / -1;
 }
 
@@ -3161,8 +3165,9 @@ code {
 .diagnostic-layout-summary dt,
 .diagnostic-inline-metrics dt,
 .historical-metrics dt {
-  color: var(--muted);
-  font-size: 8px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.35;
 }
 
 .diagnostic-outcome-counts dd,
@@ -3189,7 +3194,7 @@ code {
 .diagnostic-section-heading > span,
 .diagnostic-section-heading > strong {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 720;
 }
 
@@ -3199,15 +3204,16 @@ code {
 
 .diagnostic-table-scroll table {
   border-collapse: collapse;
-  font-size: 9px;
+  font-size: 12px;
+  line-height: 1.5;
   width: 100%;
 }
 
 .diagnostic-table-scroll th,
 .diagnostic-table-scroll td {
   border-bottom: 1px solid var(--line);
-  color: var(--ink-soft);
-  padding: 8px 9px;
+  color: var(--ink);
+  padding: 10px;
   text-align: left;
   vertical-align: top;
 }
@@ -3239,10 +3245,10 @@ code {
 .diagnostic-evidence-trigger small,
 .diagnostic-result-cell small,
 .diagnostic-layout-table td small {
-  color: var(--muted);
+  color: var(--ink-soft);
   display: block;
-  font-size: 8px;
-  line-height: 1.35;
+  font-size: 11px;
+  line-height: 1.5;
   margin-top: 4px;
 }
 
@@ -3257,9 +3263,10 @@ code {
   border-radius: 999px;
   color: var(--ink-soft);
   display: inline-flex;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 760;
-  padding: 3px 6px;
+  line-height: 1.2;
+  padding: 4px 7px;
 }
 
 .diagnostic-status-passed {
@@ -3313,8 +3320,8 @@ code {
 
 .diagnostic-markdown {
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.6;
   max-height: 330px;
   overflow: auto;
   padding: 11px;
@@ -3381,8 +3388,8 @@ code {
 
 .diagnostic-table-score-summary {
   color: var(--ink-soft);
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.55;
   margin: 0 0 10px;
 }
 
@@ -3414,13 +3421,13 @@ code {
 
 .diagnostic-table-score-components article > div span,
 .diagnostic-table-score-components article > small {
-  color: var(--muted);
-  font-size: 8px;
+  color: var(--ink-soft);
+  font-size: 10px;
   font-weight: 680;
 }
 
 .diagnostic-table-score-components article > div strong {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .diagnostic-table-score-components article > strong {
@@ -3429,7 +3436,7 @@ code {
 
 .diagnostic-table-score-components article > p {
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   grid-column: 1 / -1;
   line-height: 1.4;
   margin: 0;
@@ -3450,14 +3457,14 @@ code {
 .diagnostic-table-score-omission strong {
   color: var(--ink);
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   margin-bottom: 3px;
 }
 
 .diagnostic-table-score-omission p {
   color: var(--ink-soft);
-  font-size: 9px;
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.5;
   margin: 0;
 }
 
@@ -3469,8 +3476,8 @@ code {
 }
 
 .diagnostic-table-metric-score > small {
-  color: var(--muted);
-  font-size: 8px;
+  color: var(--ink-soft);
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -3496,7 +3503,7 @@ code {
 }
 
 .diagnostic-table-title span {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 720;
 }
 
@@ -3512,7 +3519,7 @@ code {
 .diagnostic-differences > summary,
 .diagnostic-matrix-details > summary {
   cursor: pointer;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 720;
 }
 
@@ -3530,10 +3537,11 @@ code {
 }
 
 .diagnostic-layout-summary small {
-  color: var(--muted);
+  color: var(--ink-soft);
   display: block;
-  font-size: 8px;
-  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.4;
+  margin-top: 4px;
 }
 
 .diagnostic-rule-group + .diagnostic-rule-group {
@@ -3555,8 +3563,8 @@ code {
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   color: var(--ink);
-  font-size: 9px;
-  height: 30px;
+  font-size: 11px;
+  height: 34px;
   min-width: 0;
   padding: 0 9px;
   width: min(230px, 58%);
@@ -3566,8 +3574,8 @@ code {
   cursor: pointer;
   justify-content: space-between;
   list-style: none;
-  min-height: 44px;
-  padding: 7px 12px;
+  min-height: 50px;
+  padding: 9px 12px;
 }
 
 .diagnostic-rule-group > summary::-webkit-details-marker {
@@ -3581,13 +3589,14 @@ code {
 }
 
 .diagnostic-rule-group > summary strong {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .diagnostic-rule-group > summary small,
 .diagnostic-group-counts {
-  color: var(--muted);
-  font-size: 8px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .diagnostic-group-counts {
@@ -3604,7 +3613,8 @@ code {
   border: 0;
   border-bottom: 1px solid var(--line);
   justify-content: space-between;
-  padding: 9px 12px;
+  min-height: 56px;
+  padding: 10px 12px;
 }
 
 .diagnostic-rule-row:hover,
@@ -3620,7 +3630,7 @@ code {
   border-bottom: 1px solid var(--line);
   color: var(--brand);
   cursor: pointer;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 740;
   min-height: 38px;
   width: 100%;
@@ -3644,14 +3654,15 @@ code {
 }
 
 .diagnostic-rule-main strong {
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .diagnostic-rule-main small,
 .diagnostic-rule-main > span {
-  color: var(--muted);
-  font-size: 8px;
-  line-height: 1.35;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .diagnostic-rule-main > span {
@@ -3676,8 +3687,9 @@ code {
 }
 
 .diagnostic-rule-result small {
-  color: var(--ink-soft);
-  font-size: 8px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .diagnostic-empty-state {
@@ -3740,18 +3752,19 @@ code {
 }
 
 .expectation-row summary strong {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .expectation-row summary code {
-  color: var(--muted);
-  font-size: 8px;
+  color: var(--ink-soft);
+  font-size: 10px;
 }
 
 .expectation-row pre {
   background: var(--surface-soft);
   border-top: 1px solid var(--line);
-  font-size: 9px;
+  font-size: 11px;
+  line-height: 1.5;
   margin: 0;
   overflow: auto;
   padding: 10px;
