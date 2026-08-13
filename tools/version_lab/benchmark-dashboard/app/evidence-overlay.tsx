@@ -7,9 +7,12 @@ export type EvidenceOverlayBox = {
   y: number;
   width: number;
   height: number;
-  kind: "ground-truth" | "prediction";
+  kind: "ground-truth" | "prediction" | "best";
+  tone?: EvidenceOverlayTone;
   status?: "passed" | "partial" | "failed" | "neutral";
 };
+
+export type EvidenceOverlayTone = "section" | "text" | "table" | "visual" | "other";
 
 export function EvidenceOverlay({
   boxes,
@@ -28,10 +31,15 @@ export function EvidenceOverlay({
         const top = Math.max(0, Math.min(1, box.y));
         const width = Math.max(0, Math.min(1 - left, box.width));
         const height = Math.max(0, Math.min(1 - top, box.height));
+        const kindLabel = box.kind === "ground-truth"
+          ? "Expected"
+          : box.kind === "best"
+            ? "Best result"
+            : "Output";
         return (
           <button
-            aria-label={`${box.kind === "ground-truth" ? "Expected" : "Predicted"} ${box.label}`}
-            className={`evidence-box evidence-box-${box.kind} evidence-box-${box.status ?? "neutral"}${selectedId === box.id ? " evidence-box-selected" : ""}`}
+            aria-label={`${kindLabel} ${box.label}`}
+            className={`evidence-box evidence-box-${box.kind} evidence-box-${box.status ?? "neutral"} evidence-box-tone-${box.tone ?? "other"}${selectedId === box.id ? " evidence-box-selected" : ""}`}
             key={`${box.kind}-${box.id}`}
             onClick={() => onSelect?.(box.id)}
             style={{
@@ -40,7 +48,7 @@ export function EvidenceOverlay({
               top: `${top * 100}%`,
               width: `${width * 100}%`,
             }}
-            title={`${box.kind === "ground-truth" ? "Expected" : "Predicted"}: ${box.label}`}
+            title={`${kindLabel}: ${box.label}`}
             type="button"
           >
             <span>{box.label}</span>

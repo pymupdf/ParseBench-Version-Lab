@@ -86,16 +86,19 @@
   --badge-surface: color-mix(in srgb, var(--surface) 92%, transparent);
   --badge-surface-strong: color-mix(in srgb, var(--surface) 95%, transparent);
   --badge-border: color-mix(in srgb, var(--line-strong) 92%, transparent);
-  --evidence-critical-surface: color-mix(in srgb, var(--critical) 8%, transparent);
-  --evidence-critical-surface-strong: color-mix(in srgb, var(--critical) 10%, transparent);
+  --evidence-critical-surface: color-mix(in srgb, var(--critical) 10%, transparent);
+  --evidence-critical-surface-strong: color-mix(in srgb, var(--critical) 13%, transparent);
   --evidence-critical-border: color-mix(in srgb, var(--critical) 90%, transparent);
   --evidence-critical-border-strong: color-mix(in srgb, var(--critical) 92%, transparent);
-  --evidence-ground-truth-surface: color-mix(in srgb, var(--ink-soft) 5%, transparent);
-  --evidence-ground-truth-border: color-mix(in srgb, var(--ink-soft) 72%, transparent);
-  --evidence-passed-surface: color-mix(in srgb, var(--good) 8%, transparent);
+  --evidence-passed-surface: color-mix(in srgb, var(--good) 10%, transparent);
   --evidence-passed-border: color-mix(in srgb, var(--good) 90%, transparent);
-  --evidence-partial-surface: color-mix(in srgb, var(--warning) 10%, transparent);
+  --evidence-partial-surface: color-mix(in srgb, var(--warning) 12%, transparent);
   --evidence-partial-border: color-mix(in srgb, var(--warning) 92%, transparent);
+  --layout-region-section: #b33b32;
+  --layout-region-text: #3367a8;
+  --layout-region-table: #08755b;
+  --layout-region-visual: #9a5b0b;
+  --layout-region-other: #6b7280;
   --evidence-highlight-surface: color-mix(in srgb, var(--highlight) 30%, transparent);
   --evidence-selection-inner: color-mix(in srgb, var(--surface) 94%, transparent);
   --evidence-selection-outer: color-mix(in srgb, var(--ink) 72%, transparent);
@@ -1746,7 +1749,7 @@ code {
 
 .evidence-box {
   background: var(--evidence-critical-surface);
-  border: 2px solid var(--evidence-critical-border);
+  border: 3px solid var(--evidence-critical-border);
   border-radius: 2px;
   cursor: pointer;
   min-height: 4px;
@@ -1758,8 +1761,6 @@ code {
 }
 
 .evidence-box-ground-truth {
-  background: var(--evidence-ground-truth-surface);
-  border-color: var(--evidence-ground-truth-border);
   border-style: dashed;
 }
 
@@ -1778,11 +1779,50 @@ code {
   border-color: var(--evidence-critical-border-strong);
 }
 
+.evidence-box-prediction {
+  border-style: solid;
+}
+
+.evidence-box-best {
+  border-style: double;
+  z-index: 3;
+}
+
+.evidence-box-tone-section,
+.layout-region-tone-section {
+  --layout-region-color: var(--layout-region-section);
+}
+
+.evidence-box-tone-text,
+.layout-region-tone-text {
+  --layout-region-color: var(--layout-region-text);
+}
+
+.evidence-box-tone-table,
+.layout-region-tone-table {
+  --layout-region-color: var(--layout-region-table);
+}
+
+.evidence-box-tone-visual,
+.layout-region-tone-visual {
+  --layout-region-color: var(--layout-region-visual);
+}
+
+.evidence-box-tone-other,
+.layout-region-tone-other {
+  --layout-region-color: var(--layout-region-other);
+}
+
+.evidence-box[class*="evidence-box-tone-"] {
+  background: color-mix(in srgb, var(--layout-region-color) 11%, transparent);
+  border-color: color-mix(in srgb, var(--layout-region-color) 94%, transparent);
+}
+
 .evidence-box:hover,
 .evidence-box:focus-visible,
 .evidence-box-selected {
   background: var(--evidence-highlight-surface);
-  border-width: 3px;
+  border-width: 4px;
   box-shadow: 0 0 0 2px var(--evidence-selection-inner), 0 0 0 4px var(--evidence-selection-outer);
   z-index: 4;
 }
@@ -2536,6 +2576,7 @@ code {
 }
 
 .source-toolbar-actions,
+.layer-legend,
 .layer-toggle,
 .raw-artifact-links {
   align-items: center;
@@ -2546,48 +2587,124 @@ code {
   gap: 10px;
 }
 
+.layer-legend {
+  gap: 7px;
+}
+
+.layer-legend-label {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .layer-toggle {
-  background: var(--surface-soft);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  gap: 2px;
-  padding: 2px;
+  background: var(--surface-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  gap: 3px;
+  padding: 3px;
 }
 
 .layer-toggle button {
   align-items: center;
   background: transparent;
-  border: 0;
-  border-radius: 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   color: var(--muted);
   cursor: pointer;
   display: inline-flex;
   font-size: 9px;
   font-weight: 700;
   gap: 5px;
-  min-height: 26px;
-  padding: 0 7px;
+  min-height: 30px;
+  padding: 0 8px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
 .layer-toggle button[aria-pressed="true"] {
+  background: var(--brand-soft);
+  border-color: var(--brand-border-emphasis);
+  box-shadow: inset 0 0 0 1px var(--brand-border-soft);
+  color: var(--brand-dark);
+}
+
+.layer-toggle button[aria-pressed="false"]:hover {
   background: var(--surface);
-  box-shadow: var(--shadow-toggle);
+  border-color: var(--line-strong);
   color: var(--ink);
 }
 
-.layer-swatch {
-  border: 2px solid var(--ink-soft);
+.layer-toggle button > strong {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 8px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 2px 4px;
+}
+
+.layer-toggle button[aria-pressed="true"] > strong {
+  background: var(--surface);
+  border-color: var(--brand-border-soft);
+  color: var(--brand-dark);
+}
+
+.layout-region-legend {
+  align-items: center;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex: 0 0 32px;
+  gap: 12px;
+  min-height: 32px;
+  overflow-x: auto;
+  padding: 0 15px;
+}
+
+.layout-region-legend-title {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.layout-region-legend-item {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 680;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.layout-region-swatch {
+  background: var(--layout-region-color);
+  border: 1px solid color-mix(in srgb, var(--layout-region-color) 82%, var(--ink));
+  border-radius: 2px;
   display: inline-block;
   height: 9px;
   width: 9px;
 }
 
-.layer-swatch-expected {
-  border-style: dashed;
+.layout-region-legend-key,
+.layout-region-legend-empty {
+  color: var(--muted);
+  font-size: 8px;
+  white-space: nowrap;
 }
 
-.layer-swatch-predicted {
-  border-color: var(--critical);
+.layout-region-legend-key {
+  margin-left: auto;
 }
 
 .image-preview {
@@ -3760,6 +3877,24 @@ code {
     grid-column: 2 / -1;
   }
 
+  .source-toolbar {
+    align-items: flex-start;
+    flex-basis: auto;
+    flex-direction: column;
+    height: auto;
+    padding-bottom: 8px;
+    padding-top: 8px;
+  }
+
+  .source-toolbar-actions {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .layer-legend-label {
+    display: none;
+  }
+
 }
 
 @media (min-width: 761px) and (max-width: 1180px) {
@@ -4287,14 +4422,43 @@ code {
   .source-toolbar {
     align-items: flex-start;
     flex-direction: column;
+    flex-basis: auto;
     height: auto;
     padding-bottom: 8px;
     padding-top: 8px;
   }
 
   .source-toolbar-actions {
-    justify-content: space-between;
+    align-items: stretch;
+    flex-direction: column;
     width: 100%;
+  }
+
+  .layer-legend {
+    align-items: flex-start;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .layer-legend-label {
+    display: inline;
+  }
+
+  .layer-toggle {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .layer-toggle button {
+    justify-content: center;
+    min-width: 0;
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+
+  .source-toolbar-actions .simple-link {
+    align-self: flex-end;
   }
 
   .diagnostic-score-summary {

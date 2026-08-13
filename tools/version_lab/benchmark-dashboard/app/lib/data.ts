@@ -143,6 +143,15 @@ export type HistoricalBestResult = {
   run: HistoricalBestRun;
 };
 
+export type ArtifactLayoutBox = {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type CaseMetric = {
   id: number;
   metric_name: string;
@@ -548,12 +557,25 @@ export async function loadArtifact(
   signal?: AbortSignal,
 ) {
   const url = artifactUrl(run, result.result_relative_path);
-  if (!url) return { url: null, markdown: "" };
+  if (!url) return { url: null, markdown: "", layoutBoxes: [] as ArtifactLayoutBox[] };
   const response = await fetch(url, { signal });
   if (!response.ok) {
     throw new Error(`Artifact returned ${response.status}`);
   }
   const artifact = (await response.json()) as {
+    raw_output?: {
+      pages?: Array<{
+        page_index?: number;
+        page_number?: number;
+        width?: number;
+        height?: number;
+        page_boxes?: Array<{
+          index?: number;
+          class?: string;
+          bbox?: number[];
+        }>;
+      }>;
+    };
     output?: {
       markdown?: string;
       pages?: Array<{ markdown?: string }>;
@@ -566,7 +588,32 @@ export async function loadArtifact(
       .filter(Boolean)
       .join("\n\n") ??
     "";
-  return { url, markdown };
+  const pages = artifact.raw_output?.pages ?? [];
+  const requestedPage = result.benchmark_cases.page_number;
+  const layoutPage = pages.find((page) => page.page_number === requestedPage) ?? pages[0];
+  const pageWidth = layoutPage?.width;
+  const pageHeight = layoutPage?.height;
+  const layoutBoxes = pageWidth && pageWidth > 0 && pageHeight && pageHeight > 0
+    ? (layoutPage.page_boxes ?? []).flatMap((box, index): ArtifactLayoutBox[] => {
+      const coordinates = box.bbox?.slice(0, 4);
+      if (
+        !coordinates ||
+        coordinates.length < 4 ||
+        coordinates.some((coordinate) => typeof coordinate !== "number" || !Number.isFinite(coordinate))
+      ) return [];
+      const [x1, y1, x2, y2] = coordinates;
+      if (x2 <= x1 || y2 <= y1) return [];
+      return [{
+        id: `${layoutPage.page_index ?? layoutPage.page_number ?? 0}-${box.index ?? index}`,
+        label: humanize(box.class ?? "Output region"),
+        x: x1 / pageWidth,
+        y: y1 / pageHeight,
+        width: (x2 - x1) / pageWidth,
+        height: (y2 - y1) / pageHeight,
+      }];
+    })
+    : [];
+  return { url, markdown, layoutBoxes };
 }
 
 export async function loadDiagnostic(

@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 
 import {
   artifactUrl,
+  ArtifactLayoutBox,
   BenchmarkRun,
   CaseMetric,
   CaseResult,
@@ -45,7 +46,11 @@ import {
   type DiagnosticArtifact,
   type DiagnosticMetric,
 } from "./diagnostics";
-import { EvidenceOverlay, type EvidenceOverlayBox } from "./evidence-overlay";
+import {
+  EvidenceOverlay,
+  type EvidenceOverlayBox,
+  type EvidenceOverlayTone,
+} from "./evidence-overlay";
 
 type View = "runs" | "overview" | "triage" | "inspect";
 
@@ -56,6 +61,7 @@ const ANY_GROUP = "__any_group__";
 type ArtifactState = {
   loading: boolean;
   markdown: string;
+  layoutBoxes: ArtifactLayoutBox[];
   reference: string | null;
   url: string | null;
   error: string | null;
@@ -92,6 +98,7 @@ const EMPTY_BUNDLE: RunBundle = {
 const EMPTY_ARTIFACT: ArtifactState = {
   loading: false,
   markdown: "",
+  layoutBoxes: [],
   reference: null,
   url: null,
   error: null,
@@ -277,38 +284,38 @@ function layoutEvidenceStatus(outcome: Record<string, unknown>) {
   return "failed" as const;
 }
 
-function layoutOverlayBoxes(
-  diagnostic: DiagnosticArtifact | null,
-  layers: { expected: boolean; predicted: boolean },
-) {
-  if (!diagnostic || diagnostic.dimension !== "layout") return [];
-  const boxes: EvidenceOverlayBox[] = [];
-  const compactOutcomes = (diagnostic.outcomes ?? [])
-    .map(objectValue)
-    .filter((value): value is Record<string, unknown> => value != null);
-  const metricOutcomes = diagnostic.metrics
-    .flatMap((metric) => {
-      const results = objectValue(metric.metadata)?.rule_results;
-      return Array.isArray(results)
-        ? results.map(objectValue).filter((value): value is Record<string, unknown> => value != null)
-        : [];
-    });
-  const outcomes = compactOutcomes.length ? compactOutcomes : metricOutcomes;
-  const outcomesById = new Map<string, Record<string, unknown>>();
-  for (const outcome of outcomes) {
-    const id = [outcome.element_id, outcome.id, outcome.rule_id]
-      .find((value): value is string => typeof value === "string");
-    if (id) outcomesById.set(id, outcome);
-  }
+const LAYOUT_REGION_TONES: Array<{ tone: EvidenceOverlayTone; label: string }> = [
+  { tone: "section", label: "Section" },
+  { tone: "text", label: "Text" },
+  { tone: "table", label: "Table" },
+  { tone: "visual", label: "Picture / chart" },
+  { tone: "other", label: "Other" },
+];
 
-  for (const expectation of diagnostic.expectations) {
-    const rule = objectValue(expectation.rule);
-    const outcome = outcomesById.get(expectation.id);
-    const expectedClass = typeof rule?.canonical_class === "string"
-      ? rule.canonical_class
-      : "Expected element";
-    const status = outcome ? layoutEvidenceStatus(outcome) : "neutral";
-    if (layers.expected) {
+function layoutRegionTone(label: string): EvidenceOverlayTone {
+  const normalized = label.toLowerCase();
+  if (/(section|header|heading)/.test(normalized)) return "section";
+  if (/(table|grid)/.test(normalized)) return "table";
+  if (/(picture|image|figure|chart|graphic)/.test(normalized)) return "visual";
+  if (/(text|caption|footnote|paragraph|list)/.test(normalized)) return "text";
+  return "other";
+}
+
+function layoutOverlayBoxes(
+  isLayoutDimension: boolean,
+  diagnostic: DiagnosticArtifact | null,
+  outputBoxes: ArtifactLayoutBox[],
+  bestDiagnostic: DiagnosticArtifact | null,
+  bestOutputBoxes: ArtifactLayoutBox[],
+) {
+  if (!isLayoutDimension) return [];
+  const boxes: EvidenceOverlayBox[] = [];
+  if (diagnostic?.dimension === "layout") {
+    for (const expectation of diagnostic.expectations) {
+      const rule = objectValue(expectation.rule);
+      const expectedClass = typeof rule?.canonical_class === "string"
+        ? rule.canonical_class
+        : "Expected element";
       const box = normalizedBox(rule?.bbox);
       if (box) {
         boxes.push({
@@ -316,25 +323,75 @@ function layoutOverlayBoxes(
           id: expectation.id,
           kind: "ground-truth",
           label: expectedClass,
-          status,
-        });
-      }
-    }
-    if (layers.predicted && outcome) {
-      const box = normalizedCornerBox(outcome.best_pred_bbox);
-      if (box) {
-        boxes.push({
-          ...box,
-          id: expectation.id,
-          kind: "prediction",
-          label: typeof outcome.best_pred_class === "string"
-            ? outcome.best_pred_class
-            : "Predicted element",
-          status,
+          tone: layoutRegionTone(expectedClass),
+          status: "neutral",
         });
       }
     }
   }
+
+  function appendPredictions(
+    source: DiagnosticArtifact | null,
+    kind: "prediction" | "best",
+  ) {
+    if (!source || source.dimension !== "layout") return;
+    const compactOutcomes = (source.outcomes ?? [])
+      .map(objectValue)
+      .filter((value): value is Record<string, unknown> => value != null);
+    const metricOutcomes = source.metrics
+      .flatMap((metric) => {
+        const results = objectValue(metric.metadata)?.rule_results;
+        return Array.isArray(results)
+          ? results.map(objectValue).filter((value): value is Record<string, unknown> => value != null)
+          : [];
+      });
+    const outcomes = compactOutcomes.length ? compactOutcomes : metricOutcomes;
+    const outcomesById = new Map<string, Record<string, unknown>>();
+    for (const outcome of outcomes) {
+      const id = [outcome.element_id, outcome.id, outcome.rule_id]
+        .find((value): value is string => typeof value === "string");
+      if (id) outcomesById.set(id, outcome);
+    }
+
+    for (const expectation of source.expectations) {
+      const outcome = outcomesById.get(expectation.id);
+      if (!outcome) continue;
+      const box = normalizedCornerBox(outcome.best_pred_bbox);
+      if (box) {
+        const label = typeof outcome.best_pred_class === "string"
+          ? outcome.best_pred_class
+          : "Predicted element";
+        boxes.push({
+          ...box,
+          id: expectation.id,
+          kind,
+          label,
+          tone: layoutRegionTone(label),
+          status: layoutEvidenceStatus(outcome),
+        });
+      }
+    }
+  }
+
+  function appendArtifactBoxes(
+    artifactBoxes: ArtifactLayoutBox[],
+    kind: "prediction" | "best",
+  ) {
+    for (const box of artifactBoxes) {
+      boxes.push({
+        ...box,
+        id: `${kind}-${box.id}`,
+        kind,
+        tone: layoutRegionTone(box.label),
+        status: "neutral",
+      });
+    }
+  }
+
+  if (outputBoxes.length) appendArtifactBoxes(outputBoxes, "prediction");
+  else appendPredictions(diagnostic, "prediction");
+  if (bestOutputBoxes.length) appendArtifactBoxes(bestOutputBoxes, "best");
+  else appendPredictions(bestDiagnostic, "best");
   return boxes;
 }
 
@@ -1560,17 +1617,58 @@ function DocumentExplorer({
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("explain");
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-  const [layers, setLayers] = useState({ expected: true, predicted: true });
+  const [layers, setLayers] = useState({ expected: false, predicted: true, best: false });
   const selectedSource = selected ? sourceAssetUrl(selected) : null;
   const selectedSourceKind = selected ? sourceAssetKind(selected) : "unsupported";
   const selectedSourceLabel = selectedSourceKind === "pdf" ? "PDF preview" :
     selectedSourceKind === "image" ? "Image preview" : "Source asset";
-  const boxes = useMemo(
-    () => layoutOverlayBoxes(diagnostic.data, layers),
-    [diagnostic.data, layers],
+  const isLayoutDimension = selected?.run_dimensions.dimension === "layout";
+  const allLayoutBoxes = useMemo(
+    () => layoutOverlayBoxes(
+      isLayoutDimension,
+      diagnostic.data,
+      artifact.layoutBoxes,
+      historicalBest.diagnostic,
+      historicalBest.artifact.layoutBoxes,
+    ),
+    [
+      artifact.layoutBoxes,
+      diagnostic.data,
+      historicalBest.artifact.layoutBoxes,
+      historicalBest.diagnostic,
+      isLayoutDimension,
+    ],
   );
-  const hasLayoutEvidence = diagnostic.data?.dimension === "layout";
+  const boxes = useMemo(
+    () => allLayoutBoxes.filter((box) => (
+      box.kind === "ground-truth" ? layers.expected :
+        box.kind === "best" ? layers.best : layers.predicted
+    )),
+    [allLayoutBoxes, layers],
+  );
+  const layerCounts = useMemo(
+    () => allLayoutBoxes.reduce(
+      (counts, box) => {
+        counts[box.kind] += 1;
+        return counts;
+      },
+      { "ground-truth": 0, prediction: 0, best: 0 },
+    ),
+    [allLayoutBoxes],
+  );
+  const visibleRegionTones = useMemo(
+    () => LAYOUT_REGION_TONES.filter(({ tone }) => boxes.some((box) => box.tone === tone)),
+    [boxes],
+  );
+  const hasLayoutEvidence = isLayoutDimension;
   const hasHistoricalBest = historicalBest.data != null;
+  const bestEvidenceLoading = historicalBest.evidenceStatus === "loading";
+
+  function toggleLayoutLayer(layer: keyof typeof layers) {
+    const enable = !layers[layer];
+    setLayers((current) => ({ ...current, [layer]: !current[layer] }));
+    if (layer === "best" && enable) onLoadHistoricalBest();
+  }
 
   return (
     <main className="workbench-shell">
@@ -1633,18 +1731,52 @@ function DocumentExplorer({
                   </div>
                   <div className="source-toolbar-actions">
                     {hasLayoutEvidence && (
-                      <div className="layer-toggle" aria-label="Layout evidence layers">
-                        <button type="button" aria-pressed={layers.expected} onClick={() => setLayers((current) => ({ ...current, expected: !current.expected }))}>
-                          <span className="layer-swatch layer-swatch-expected" aria-hidden="true" />Expected
-                        </button>
-                        <button type="button" aria-pressed={layers.predicted} onClick={() => setLayers((current) => ({ ...current, predicted: !current.predicted }))}>
-                          <span className="layer-swatch layer-swatch-predicted" aria-hidden="true" />Output
-                        </button>
+                      <div className="layer-legend">
+                        <span className="layer-legend-label">Layers</span>
+                        <div className="layer-toggle" aria-label="Layout evidence layers">
+                          <button type="button" aria-pressed={layers.expected} onClick={() => toggleLayoutLayer("expected")}>
+                            <span>Expected</span>
+                            <strong aria-label={`${layerCounts["ground-truth"]} expected regions`}>{layerCounts["ground-truth"]}</strong>
+                          </button>
+                          <button type="button" aria-pressed={layers.predicted} onClick={() => toggleLayoutLayer("predicted")}>
+                            <span>Output</span>
+                            <strong aria-label={`${layerCounts.prediction} output regions`}>{layerCounts.prediction}</strong>
+                          </button>
+                          {hasHistoricalBest && (
+                            <button type="button" aria-pressed={layers.best} onClick={() => toggleLayoutLayer("best")}>
+                              <span>Best result</span>
+                              <strong aria-label={
+                                bestEvidenceLoading ? "Loading best-result regions" :
+                                  historicalBest.evidenceStatus === "idle" ? "Load best-result regions" :
+                                    `${layerCounts.best} best-result regions`
+                              }>
+                                {bestEvidenceLoading ? "…" :
+                                  historicalBest.evidenceStatus === "idle" ? "Load" : layerCounts.best}
+                              </strong>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                     {selectedSource && <a className="simple-link" href={selectedSource} target="_blank" rel="noreferrer">Open source ↗</a>}
                   </div>
                 </div>
+                {hasLayoutEvidence && (
+                  <div className="layout-region-legend" aria-label="Layout region color legend">
+                    <span className="layout-region-legend-title">Region legend</span>
+                    {visibleRegionTones.length ? visibleRegionTones.map(({ tone, label }) => (
+                      <span className="layout-region-legend-item" key={tone}>
+                        <i className={`layout-region-swatch layout-region-tone-${tone}`} aria-hidden="true" />
+                        {label}
+                      </span>
+                    )) : (
+                      <span className="layout-region-legend-empty">No overlay layers selected</span>
+                    )}
+                    <span className="layout-region-legend-key">
+                      Dashed expected · Solid output · Double best
+                    </span>
+                  </div>
+                )}
                 <div className="pdf-stage">
                   {selectedSource && selectedSourceKind === "pdf" ? (
                     <PdfPreview
@@ -2437,6 +2569,7 @@ export default function DashboardClient({
     setArtifact({
       loading: true,
       markdown: "",
+      layoutBoxes: [],
       reference: null,
       url: artifactUrl(selectedRun, selectedDocument.result_relative_path),
       error: null,
@@ -2453,6 +2586,7 @@ export default function DashboardClient({
         setArtifact({
           loading: false,
           markdown: loadedArtifact.markdown,
+          layoutBoxes: loadedArtifact.layoutBoxes,
           reference: null,
           url: loadedArtifact.url,
           error: null,
@@ -2570,7 +2704,11 @@ export default function DashboardClient({
         : null;
       const artifactValue = loadedArtifact.status === "fulfilled"
         ? loadedArtifact.value
-        : { url: artifactUrl(bestCandidate.run, bestCandidate.result.result_relative_path), markdown: "" };
+        : {
+          url: artifactUrl(bestCandidate.run, bestCandidate.result.result_relative_path),
+          markdown: "",
+          layoutBoxes: [] as ArtifactLayoutBox[],
+        };
       setHistoricalBest((current) => ({
         ...current,
         evidenceStatus: "loaded",
@@ -2579,6 +2717,7 @@ export default function DashboardClient({
         artifact: {
           loading: false,
           markdown: artifactValue.markdown,
+          layoutBoxes: artifactValue.layoutBoxes,
           reference: referenceValue,
           url: artifactValue.url,
           error: artifactError,
