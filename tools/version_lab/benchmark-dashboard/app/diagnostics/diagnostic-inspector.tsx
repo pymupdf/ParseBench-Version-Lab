@@ -27,6 +27,9 @@ type DiagnosticInspectorProps = {
 };
 
 type EvidenceStatus = "passed" | "partial" | "failed" | "unknown";
+type RuleImpact = "headline" | "supporting";
+
+const RULE_IMPACTS: readonly RuleImpact[] = ["headline", "supporting"];
 
 type EvidenceItem = {
   id: string;
@@ -727,13 +730,13 @@ function TableDifferences({
 function TableMetricDetails({
   metric,
   metricIndex,
-  excludedFromHeadline = false,
+  impact,
   selectedEvidenceId,
   onSelectEvidence,
 }: {
   metric: DiagnosticMetric;
   metricIndex: number;
-  excludedFromHeadline?: boolean;
+  impact: RuleImpact;
   selectedEvidenceId?: string | null;
   onSelectEvidence?: (id: string) => void;
 }) {
@@ -744,8 +747,9 @@ function TableMetricDetails({
       <div className="diagnostic-section-heading">
         <div><span className="diagnostic-eyebrow">Structured comparison</span><h3>{humanize(metric.metric_name)}</h3></div>
         <div className="diagnostic-table-metric-score">
+          <RuleImpactLabel impact={impact} />
           <strong>{scorePercent(metric.value)}</strong>
-          {excludedFromHeadline && <small>Not used in headline score</small>}
+          {impact === "supporting" && <small>Not used in headline score</small>}
         </div>
       </div>
       <div className="diagnostic-table-detail-list">
@@ -839,6 +843,28 @@ function TableDiagnostic({
   const structuredMetrics = diagnostic.metrics.filter(
     (metric) => asRecordArray(metric.metadata?.per_table_details).length > 0,
   );
+  const primaryFormula = asRecord(diagnostic.primary_metric?.formula);
+  const primaryComponents = metricComponents(diagnostic.primary_metric?.components);
+  const formulaComponents = metricComponents(primaryFormula?.components);
+  const componentNames = (primaryComponents.length ? primaryComponents : formulaComponents)
+    .map((component) => component.metric_name ?? component.name)
+    .filter((name): name is string => Boolean(name));
+  const headlineMetricNames = new Set(componentNames);
+  if (diagnostic.primary_metric?.name) headlineMetricNames.add(diagnostic.primary_metric.name);
+  if (scoreBreakdown.mode === "grits_only") {
+    headlineMetricNames.delete("table_record_match");
+    headlineMetricNames.add("grits_con");
+  } else if (scoreBreakdown.mode === "combined") {
+    headlineMetricNames.add("grits_con");
+    headlineMetricNames.add("table_record_match");
+  } else if (diagnostic.primary_metric?.name === "grits_trm_composite") {
+    headlineMetricNames.add("grits_con");
+    headlineMetricNames.add("table_record_match");
+  }
+  const orderedStructuredMetrics = [
+    ...structuredMetrics.filter((metric) => headlineMetricNames.has(metric.metric_name)),
+    ...structuredMetrics.filter((metric) => !headlineMetricNames.has(metric.metric_name)),
+  ];
   const tableMetric = diagnostic.metrics.find(
     (metric) => metric.metric_name === "table_record_match",
   );
@@ -892,12 +918,12 @@ function TableDiagnostic({
           />
         </article>
       </section>
-      {structuredMetrics.length ? structuredMetrics.map((metric, index) => (
+      {orderedStructuredMetrics.length ? orderedStructuredMetrics.map((metric, index) => (
         <TableMetricDetails
           key={`${metric.metric_name}-${index}`}
           metric={metric}
           metricIndex={index}
-          excludedFromHeadline={scoreBreakdown.mode === "grits_only" && metric.metric_name === "table_record_match"}
+          impact={headlineMetricNames.has(metric.metric_name) ? "headline" : "supporting"}
           selectedEvidenceId={selectedEvidenceId}
           onSelectEvidence={onSelectEvidence}
         />
@@ -1250,8 +1276,6 @@ function formattingGroup(type: string) {
   return "other";
 }
 
-type RuleImpact = "headline" | "supporting";
-
 function ruleImpact(diagnostic: DiagnosticArtifact, type: string): RuleImpact {
   const primaryName = diagnostic.primary_metric?.name;
   if (primaryName === "rule_pass_rate") return "headline";
@@ -1305,6 +1329,25 @@ function expectedRuleSummary(value: unknown) {
   return values.join(" · ") || "No additional expectation parameters";
 }
 
+function singleScalarRuleEntry(value: unknown): [string, string | number | boolean | null] | null {
+  const rule = asRecord(value);
+  if (!rule) return null;
+  const entries = Object.entries(rule);
+  if (entries.length !== 1) return null;
+  const entry = entries[0];
+  if (!entry) return null;
+  const [key, scalar] = entry;
+  if (
+    scalar === null ||
+    typeof scalar === "string" ||
+    typeof scalar === "boolean" ||
+    (typeof scalar === "number" && Number.isFinite(scalar))
+  ) {
+    return [key, scalar];
+  }
+  return null;
+}
+
 function RuleGroups({
   items,
   groups,
@@ -1335,9 +1378,27 @@ function RuleGroups({
     unknown: 2,
     passed: 3,
   };
-  const firstPopulatedGroup = groups.find((group) =>
-    items.some((item) => groupForType(item.type) === group.key),
-  )?.key;
+  const impactSections = (impactForType ? RULE_IMPACTS : [null]).map((impact) => ({
+    impact,
+    items: items.filter((item) => impact == null || impactForType?.(item.type) === impact),
+  }));
+  const itemMatchesFilters = (item: EvidenceItem) => {
+    if (!showAll && evidenceStatus(item.outcome) === "passed") return false;
+    if (!normalizedQuery) return true;
+    return [
+      item.type,
+      expectedRuleSummary(item.expectation?.rule),
+      outcomeExplanation(item.outcome) ?? "",
+    ].some((value) => queryTerms.some((term) => value.toLowerCase().includes(term)));
+  };
+  const firstPopulatedGroup = impactSections.flatMap((section) =>
+    groups.map((group) => ({
+      key: `${section.impact ?? "all"}:${group.key}`,
+      populated: section.items.some(
+        (item) => groupForType(item.type) === group.key && itemMatchesFilters(item),
+      ),
+    })),
+  ).find((group) => group.populated)?.key;
   return (
     <div className="diagnostic-rule-groups">
       {items.length > 0 && (
@@ -1355,28 +1416,31 @@ function RuleGroups({
           </div>
         </div>
       )}
-      {groups.map((group) => {
-        const groupedItems = items.filter((item) => groupForType(item.type) === group.key);
-        if (!groupedItems.length) return null;
-        const counts = statusCounts(groupedItems);
-        const visibleItems = groupedItems
-          .filter((item) => showAll || evidenceStatus(item.outcome) !== "passed")
-          .filter((item) => {
-            if (!normalizedQuery) return true;
-            return [
-              item.type,
-              expectedRuleSummary(item.expectation?.rule),
-              outcomeExplanation(item.outcome) ?? "",
-            ].some((value) => queryTerms.some((term) => value.toLowerCase().includes(term)));
-          })
-          .sort((left, right) =>
-            statusRank[evidenceStatus(left.outcome)] - statusRank[evidenceStatus(right.outcome)],
-          );
-        if (!visibleItems.length && normalizedQuery) return null;
-        const visibleLimit = visibleLimits[group.key] ?? 60;
-        const renderedItems = visibleItems.slice(0, visibleLimit);
+      {impactSections.map((section) => {
+        if (!section.items.some(itemMatchesFilters)) return null;
         return (
-          <details className="diagnostic-rule-group" key={group.key} open={Boolean(normalizedQuery) || group.key === firstPopulatedGroup}>
+          <div className={`diagnostic-impact-section${section.impact ? ` diagnostic-impact-section-${section.impact}` : ""}`} key={section.impact ?? "all"}>
+            {section.impact && (
+              <div className="diagnostic-impact-heading">
+                <strong>{section.impact === "headline" ? "Headline inputs" : "Supporting diagnostics"}</strong>
+                <span>{section.items.length.toLocaleString()} checks</span>
+              </div>
+            )}
+            {groups.map((group) => {
+              const groupKey = `${section.impact ?? "all"}:${group.key}`;
+              const groupedItems = section.items.filter((item) => groupForType(item.type) === group.key);
+              if (!groupedItems.length) return null;
+              const counts = statusCounts(groupedItems);
+              const visibleItems = groupedItems
+                .filter(itemMatchesFilters)
+                .sort((left, right) =>
+                  statusRank[evidenceStatus(left.outcome)] - statusRank[evidenceStatus(right.outcome)],
+                );
+              if (!visibleItems.length) return null;
+              const visibleLimit = visibleLimits[groupKey] ?? 60;
+              const renderedItems = visibleItems.slice(0, visibleLimit);
+              return (
+                <details className="diagnostic-rule-group" key={groupKey} open={Boolean(normalizedQuery) || groupKey === firstPopulatedGroup}>
             <summary>
               <span>
                 <strong>{group.label}</strong>
@@ -1423,14 +1487,17 @@ function RuleGroups({
                   type="button"
                   onClick={() => setVisibleLimits((current) => ({
                     ...current,
-                    [group.key]: visibleLimit + 60,
+                    [groupKey]: visibleLimit + 60,
                   }))}
                 >
                   Show 60 more · {(visibleItems.length - renderedItems.length).toLocaleString()} remaining
                 </button>
               )}
             </div>
-          </details>
+                </details>
+              );
+            })}
+          </div>
         );
       })}
     </div>
@@ -1673,7 +1740,13 @@ function LayoutGroundTruth({
   referenceOnly?: boolean;
 }) {
   if (!expectations.length) return <EmptyDiagnostics message="No layout ground truth was retained for this page." />;
-  const sortedExpectations = sortedLayoutExpectations(expectations);
+  const orderedExpectations = sortedLayoutExpectations(expectations);
+  const sortedExpectations = referenceOnly
+    ? orderedExpectations
+    : [
+        ...orderedExpectations.filter((expectation) => !layoutExpectationIgnored(expectation)),
+        ...orderedExpectations.filter(layoutExpectationIgnored),
+      ];
   const ignoredCount = sortedExpectations.filter(layoutExpectationIgnored).length;
   const scoredCount = sortedExpectations.length - ignoredCount;
   return (
@@ -1693,7 +1766,7 @@ function LayoutGroundTruth({
         <strong>{referenceOnly ? "Visual context, not element-detection ground truth" : "How to read the coordinates"}</strong>
         <p>
           {referenceOnly
-            ? "These regions ground the sequence checks shown below; this result does not evaluate their localization or classification. "
+            ? "These regions ground the sequence checks shown in this view; this result does not evaluate their localization or classification. "
             : ""}
           Boxes are normalized to the page: x and y locate the top-left corner; w and h are width and height. Reading order is shown as a human-friendly 1-based position.
         </p>
@@ -1731,6 +1804,54 @@ function LayoutGroundTruth({
   );
 }
 
+function GroundTruthRule({
+  expectation,
+  impact,
+}: {
+  expectation: DiagnosticExpectation;
+  impact: RuleImpact | null;
+}) {
+  const scalarEntry = singleScalarRuleEntry(expectation.rule);
+  const title = (
+    <span>
+      <span className="diagnostic-rule-title">
+        <strong>{humanize(expectation.type)}</strong>
+        {impact && <RuleImpactLabel impact={impact} />}
+      </span>
+      <small>
+        {scalarEntry
+          ? `${humanize(scalarEntry[0])}: ${scalarDisplay(scalarEntry[1])}`
+          : expectedRuleSummary(expectation.rule)}
+      </small>
+    </span>
+  );
+  const tags = expectation.tags?.length
+    ? <em>{expectation.tags.join(" · ")}</em>
+    : null;
+
+  if (scalarEntry) {
+    return (
+      <div className="diagnostic-ground-truth-rule diagnostic-ground-truth-rule-static">
+        {title}
+        {tags && <span className="diagnostic-disclosure-meta">{tags}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <details className="diagnostic-ground-truth-rule">
+      <summary>
+        {title}
+        <span className="diagnostic-disclosure-meta">
+          {tags}
+          <span className="diagnostic-disclosure-label">View rule details</span>
+        </span>
+      </summary>
+      <pre><code>{JSON.stringify(expectation.rule, null, 2)}</code></pre>
+    </details>
+  );
+}
+
 function ExpectationGroups({
   expectations,
   groups,
@@ -1751,9 +1872,27 @@ function ExpectationGroups({
   const [query, setQuery] = useState("");
   const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
   const normalizedQuery = query.trim().toLowerCase();
-  const firstPopulatedGroup = groups.find((group) =>
-    expectations.some((expectation) => groupForType(expectation.type) === group.key),
-  )?.key;
+  const impactSections = (impactForType ? RULE_IMPACTS : [null]).map((impact) => ({
+    impact,
+    expectations: expectations.filter(
+      (expectation) => impact == null || impactForType?.(expectation.type) === impact,
+    ),
+  }));
+  const expectationMatchesQuery = (expectation: DiagnosticExpectation) =>
+    !normalizedQuery || [
+      expectation.type,
+      expectedRuleSummary(expectation.rule),
+      ...(expectation.tags ?? []),
+    ].some((value) => value.toLowerCase().includes(normalizedQuery));
+  const firstPopulatedGroup = impactSections.flatMap((section) =>
+    groups.map((group) => ({
+      key: `${section.impact ?? "all"}:${group.key}`,
+      populated: section.expectations.some(
+        (expectation) =>
+          groupForType(expectation.type) === group.key && expectationMatchesQuery(expectation),
+      ),
+    })),
+  ).find((group) => group.populated)?.key;
   return (
     <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
       <div className="diagnostic-section-heading">
@@ -1773,55 +1912,54 @@ function ExpectationGroups({
         </div>
       )}
       <div className="diagnostic-rule-groups">
-        {groups.map((group) => {
-          const grouped = expectations
-            .filter((expectation) => groupForType(expectation.type) === group.key)
-            .filter((expectation) => !normalizedQuery || [
-              expectation.type,
-              expectedRuleSummary(expectation.rule),
-              ...(expectation.tags ?? []),
-            ].some((value) => value.toLowerCase().includes(normalizedQuery)));
-          if (!grouped.length) return null;
-          const visibleLimit = visibleLimits[group.key] ?? 60;
-          const rendered = grouped.slice(0, visibleLimit);
+        {impactSections.map((section) => {
+          if (!section.expectations.some(expectationMatchesQuery)) return null;
           return (
-            <details className="diagnostic-rule-group" key={group.key} open={Boolean(normalizedQuery) || group.key === firstPopulatedGroup}>
-              <summary>
-                <span><strong>{group.label}</strong><small>{grouped.length.toLocaleString()} expected checks</small></span>
-              </summary>
-              <div className="diagnostic-rule-list">
-                {rendered.map((expectation) => (
-                  <details className="diagnostic-ground-truth-rule" key={expectation.id}>
+            <div className={`diagnostic-impact-section${section.impact ? ` diagnostic-impact-section-${section.impact}` : ""}`} key={section.impact ?? "all"}>
+              {section.impact && (
+                <div className="diagnostic-impact-heading">
+                  <strong>{section.impact === "headline" ? "Headline inputs" : "Supporting diagnostics"}</strong>
+                  <span>{section.expectations.length.toLocaleString()} checks</span>
+                </div>
+              )}
+              {groups.map((group) => {
+                const groupKey = `${section.impact ?? "all"}:${group.key}`;
+                const grouped = section.expectations
+                  .filter((expectation) => groupForType(expectation.type) === group.key)
+                  .filter(expectationMatchesQuery);
+                if (!grouped.length) return null;
+                const visibleLimit = visibleLimits[groupKey] ?? 60;
+                const rendered = grouped.slice(0, visibleLimit);
+                return (
+                  <details className="diagnostic-rule-group" key={groupKey} open={Boolean(normalizedQuery) || groupKey === firstPopulatedGroup}>
                     <summary>
-                      <span>
-                        <span className="diagnostic-rule-title">
-                          <strong>{humanize(expectation.type)}</strong>
-                          {impactForType && <RuleImpactLabel impact={impactForType(expectation.type)} />}
-                        </span>
-                        <small>{expectedRuleSummary(expectation.rule)}</small>
-                      </span>
-                      <span className="diagnostic-disclosure-meta">
-                        {expectation.tags?.length ? <em>{expectation.tags.join(" · ")}</em> : null}
-                        <span className="diagnostic-disclosure-label">View rule details</span>
-                      </span>
+                      <span><strong>{group.label}</strong><small>{grouped.length.toLocaleString()} expected checks</small></span>
                     </summary>
-                    <pre><code>{JSON.stringify(expectation.rule, null, 2)}</code></pre>
+                    <div className="diagnostic-rule-list">
+                      {rendered.map((expectation) => (
+                        <GroundTruthRule
+                          expectation={expectation}
+                          impact={section.impact}
+                          key={expectation.id}
+                        />
+                      ))}
+                      {rendered.length < grouped.length && (
+                        <button
+                          className="diagnostic-load-more"
+                          type="button"
+                          onClick={() => setVisibleLimits((current) => ({
+                            ...current,
+                            [groupKey]: visibleLimit + 60,
+                          }))}
+                        >
+                          Show 60 more · {(grouped.length - rendered.length).toLocaleString()} remaining
+                        </button>
+                      )}
+                    </div>
                   </details>
-                ))}
-                {rendered.length < grouped.length && (
-                  <button
-                    className="diagnostic-load-more"
-                    type="button"
-                    onClick={() => setVisibleLimits((current) => ({
-                      ...current,
-                      [group.key]: visibleLimit + 60,
-                    }))}
-                  >
-                    Show 60 more · {(grouped.length - rendered.length).toLocaleString()} remaining
-                  </button>
-                )}
-              </div>
-            </details>
+                );
+              })}
+            </div>
           );
         })}
       </div>
@@ -1834,7 +1972,6 @@ function HybridLayoutGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifac
   const scoredExpectations = diagnostic.expectations.filter((expectation) => expectation.type !== "layout");
   return (
     <div className="diagnostic-ground-truth-stack">
-      <LayoutGroundTruth diagnostic={diagnostic} expectations={layoutExpectations} referenceOnly />
       <ExpectationGroups
         expectations={scoredExpectations}
         groups={[{ key: "order", label: "Scored reading-order checks" }]}
@@ -1844,11 +1981,12 @@ function HybridLayoutGroundTruth({ diagnostic }: { diagnostic: DiagnosticArtifac
         contract={(
           <>
             <strong>These are the scored expectations</strong>
-            <p>The layout elements above provide visual references. Only these sequence checks contribute to this result’s headline score.</p>
+            <p>Only these sequence checks contribute to this result’s headline score. The layout elements below provide supporting visual references.</p>
           </>
         )}
         impactForType={() => "headline"}
       />
+      <LayoutGroundTruth diagnostic={diagnostic} expectations={layoutExpectations} referenceOnly />
     </div>
   );
 }
