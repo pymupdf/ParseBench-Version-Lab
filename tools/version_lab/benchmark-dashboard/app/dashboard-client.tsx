@@ -1603,12 +1603,15 @@ function DocumentExplorer({
                 <small>{humanize(selected.primary_metric_name)}</small>
               </div>
               <div className="metric-strip">
-                {caseMetrics.slice(0, 3).map((metric) => (
-                  <div className="metric-chip" key={metric.id}>
-                    <span>{humanize(metric.metric_name)}</span>
-                    <strong>{metricDisplay(metric.metric_name, metric.metric_value)}</strong>
-                  </div>
-                ))}
+                {caseMetrics
+                  .filter((metric) => metric.metric_name !== selected.primary_metric_name)
+                  .slice(0, 3)
+                  .map((metric) => (
+                    <div className="metric-chip" key={metric.id}>
+                      <span title={humanize(metric.metric_name)}>{humanize(metric.metric_name)}</span>
+                      <strong>{metricDisplay(metric.metric_name, metric.metric_value)}</strong>
+                    </div>
+                  ))}
               </div>
               <div className="case-navigation" aria-label="Cases in the current triage result page">
                 <button type="button" disabled={!previous} onClick={() => previous && onNavigate(previous)} aria-label="Previous case">←</button>
