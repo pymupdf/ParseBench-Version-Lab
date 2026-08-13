@@ -815,9 +815,12 @@ function reconstructedTablePairs(diagnostic: DiagnosticArtifact, actualMarkdown:
     .find((markdown): markdown is string => Boolean(markdown)) ?? "";
   const expectedTableFragments = structuredTableFragments(expectedMarkdown);
   const outputTableFragments = structuredTableFragments(actualMarkdown);
-  const sourceOutputMappingReliable = unparseableOutputTables === 0 &&
+  const noStructuredOutputTables = predictedTables === 0 && outputTableFragments.length === 0;
+  const sourceOutputMappingReliable = noStructuredOutputTables || (
+    unparseableOutputTables === 0 &&
     extractedOutputTables === outputTableFragments.length &&
-    predictedTables === outputTableFragments.length;
+    predictedTables === outputTableFragments.length
+  );
   const splittingAllowed = diagnostic.expectations.reduce((allowed, expectation) => {
     const configured = asRecord(expectation.rule)?.allow_splitting_ambiguous_merged_tables;
     return typeof configured === "boolean" ? configured : allowed;
