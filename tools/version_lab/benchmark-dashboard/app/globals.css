@@ -5002,6 +5002,7 @@ code {
 
   .output-toolbar {
     align-items: stretch;
+    flex: 0 0 auto;
     flex-direction: column;
     height: auto;
     padding: 0 8px 8px;
