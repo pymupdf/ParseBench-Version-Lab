@@ -1610,6 +1610,330 @@ function singleScalarRuleEntry(value: unknown): [string, string | number | boole
   return null;
 }
 
+type TextBagKind = "sentence" | "word" | "digit";
+type TextBagMode = "maximum" | "missing" | "unexpected";
+
+type TextBagDefinition = {
+  entries: Array<{ target: string; count: number }>;
+  kind: TextBagKind;
+  mode: TextBagMode;
+};
+
+type RetainedTextComparison = {
+  actualCount: number;
+  compacted: boolean;
+  expectedCount: number | null;
+  target: string;
+};
+
+const TEXT_BAG_RULES = {
+  missing_sentence: { field: "bag_of_sentence", kind: "sentence", mode: "missing" },
+  missing_sentence_percent: { field: "bag_of_sentence", kind: "sentence", mode: "missing" },
+  unexpected_sentence: { field: "bag_of_sentence", kind: "sentence", mode: "unexpected" },
+  unexpected_sentence_percent: { field: "bag_of_sentence", kind: "sentence", mode: "unexpected" },
+  too_many_sentence_occurence: { field: "bag_of_sentence", kind: "sentence", mode: "maximum" },
+  too_many_sentence_occurence_percent: { field: "bag_of_sentence", kind: "sentence", mode: "maximum" },
+  missing_word: { field: "bag_of_word", kind: "word", mode: "missing" },
+  missing_word_percent: { field: "bag_of_word", kind: "word", mode: "missing" },
+  unexpected_word: { field: "bag_of_word", kind: "word", mode: "unexpected" },
+  unexpected_word_percent: { field: "bag_of_word", kind: "word", mode: "unexpected" },
+  too_many_word_occurence: { field: "bag_of_word", kind: "word", mode: "maximum" },
+  too_many_word_occurence_percent: { field: "bag_of_word", kind: "word", mode: "maximum" },
+  bag_of_digit_percent: { field: "bag_of_digit", kind: "digit", mode: "missing" },
+} as const satisfies Record<string, {
+  field: "bag_of_sentence" | "bag_of_word" | "bag_of_digit";
+  kind: TextBagKind;
+  mode: TextBagMode;
+}>;
+
+function normalizedComparisonTarget(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replaceAll("…", "...")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function textBagDefinition(item: EvidenceItem): TextBagDefinition | null {
+  const rule = asRecord(item.expectation?.rule);
+  if (!rule) return null;
+  const config = TEXT_BAG_RULES[item.type as keyof typeof TEXT_BAG_RULES];
+  if (!config) return null;
+  const bag = asRecord(rule[config.field]);
+  if (!bag) return null;
+  const entries = Object.entries(bag).flatMap(([target, count]) => {
+    const numericCount = asNumber(count);
+    return numericCount == null ? [] : [{ target, count: numericCount }];
+  });
+  return entries.length ? { entries, kind: config.kind, mode: config.mode } : null;
+}
+
+function decodePythonStringBody(value: string) {
+  return value.replace(/\\([\\'"nrt])/gu, (_match, escaped: string) => {
+    if (escaped === "n") return "\n";
+    if (escaped === "r") return "\r";
+    if (escaped === "t") return "\t";
+    return escaped;
+  });
+}
+
+function retainedTextComparisons(outcome: DiagnosticOutcome | null) {
+  const explanation = outcomeExplanation(outcome);
+  if (!explanation) return [];
+  const comparisons: RetainedTextComparison[] = [];
+  const pattern = /(?:'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)")(?: \[len=(\d+), sha1=[^\]]+\])? \((\d+)(?:([<>])(\d+)|x)\)/gu;
+  for (const match of explanation.matchAll(pattern)) {
+    const actualCount = Number(match[4]);
+    const expectedCount = match[6] == null ? null : Number(match[6]);
+    if (!Number.isFinite(actualCount) || (expectedCount != null && !Number.isFinite(expectedCount))) {
+      continue;
+    }
+    comparisons.push({
+      actualCount,
+      compacted: Number(match[3]) > 96,
+      expectedCount,
+      target: decodePythonStringBody(match[1] ?? match[2] ?? ""),
+    });
+  }
+  return comparisons;
+}
+
+function comparisonMatchesTarget(comparison: RetainedTextComparison, target: string) {
+  const retainedTarget = normalizedComparisonTarget(comparison.target);
+  const expectedTarget = normalizedComparisonTarget(target);
+  if (retainedTarget === expectedTarget) return true;
+  if (!comparison.compacted || !comparison.target.includes("…")) return false;
+  const ellipsis = comparison.target.indexOf("…");
+  const start = normalizedComparisonTarget(comparison.target.slice(0, ellipsis));
+  const end = normalizedComparisonTarget(comparison.target.slice(ellipsis + 1));
+  return expectedTarget.startsWith(start) && expectedTarget.endsWith(end);
+}
+
+function specificTextEvidence(items: EvidenceItem[]) {
+  const evidence = new Map<string, EvidenceItem[]>();
+  for (const item of items) {
+    const field = item.type === "missing_specific_sentence"
+      ? "sentence"
+      : item.type === "missing_specific_word"
+        ? "word"
+        : null;
+    if (!field) continue;
+    const target = asString(asRecord(item.expectation?.rule)?.[field]);
+    if (!target) continue;
+    const key = `${item.page ?? "all"}:${field}:${normalizedComparisonTarget(target)}`;
+    evidence.set(key, [...(evidence.get(key) ?? []), item]);
+  }
+  return evidence;
+}
+
+function specificMatcherStatus(item: EvidenceItem | null): EvidenceStatus {
+  if (!item?.outcome) return "unknown";
+  if (item.outcome.passed === true) return "passed";
+  const explanation = outcomeExplanation(item.outcome);
+  if (
+    item.outcome.passed === false &&
+    explanation != null &&
+    /^Missing specific (?:sentence|word):/iu.test(explanation)
+  ) {
+    return "failed";
+  }
+  return "unknown";
+}
+
+function textBagSearchText(item: EvidenceItem) {
+  return textBagDefinition(item)?.entries.map((entry) => entry.target).join(" ") ?? "";
+}
+
+function textBagNoun(kind: TextBagKind, count: number) {
+  const singular = kind === "digit" ? "digit" : kind;
+  return count === 1 ? singular : `${singular}s`;
+}
+
+const TEXT_BAG_INITIAL_ROWS = 20;
+const TEXT_BAG_PAGE_SIZE = 60;
+
+function TextBagComparison({
+  definition,
+  item,
+  specificEvidence,
+}: {
+  definition: TextBagDefinition;
+  item: EvidenceItem;
+  specificEvidence: Map<string, EvidenceItem[]>;
+}) {
+  const retained = retainedTextComparisons(item.outcome);
+  const explanation = outcomeExplanation(item.outcome);
+  const unexpectedRows = definition.mode === "unexpected" ? retained : [];
+  const rowCount = definition.mode === "unexpected" ? unexpectedRows.length : definition.entries.length;
+  const [open, setOpen] = useState(evidenceStatus(item.outcome) !== "passed" && rowCount <= 10);
+  const [visible, setVisible] = useState(TEXT_BAG_INITIAL_ROWS);
+  const aggregateStatus = evidenceStatus(item.outcome);
+  const visibleUnexpected = unexpectedRows.slice(0, visible);
+  const visibleEntries = definition.entries.slice(0, visible);
+  const noun = textBagNoun(definition.kind, rowCount);
+  const comparisonLabel = definition.mode === "unexpected"
+    ? `${rowCount.toLocaleString()} retained unexpected ${noun}`
+    : `${definition.entries.length.toLocaleString()} expected ${textBagNoun(definition.kind, definition.entries.length)}`;
+
+  return (
+    <details
+      className="diagnostic-text-comparison"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span>{comparisonLabel}</span>
+        <strong>{scorePercent(item.outcome?.score)}</strong>
+      </summary>
+      {open && definition.mode === "unexpected" && (
+        unexpectedRows.length ? (
+          <>
+            <p className="diagnostic-text-comparison-note">
+              These are normalized {textBagNoun(definition.kind, 2)} that the evaluator did not recognize in the reference content. Only examples retained in the artifact are shown; the complete extraction remains available in the Output tab.
+            </p>
+            <div className="diagnostic-table-scroll diagnostic-text-comparison-table">
+              <table>
+                <thead><tr><th>Expected condition</th><th>Evaluator-observed text</th><th>Occurrences</th><th>Result</th></tr></thead>
+                <tbody>
+                  {visibleUnexpected.map((comparison, index) => (
+                    <tr key={`${comparison.target}-${index}`}>
+                      <td><strong>No unexpected content</strong></td>
+                      <td>{comparison.target}</td>
+                      <td>{comparison.actualCount.toLocaleString()}</td>
+                      <td><StatusPill status="failed" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="diagnostic-text-comparison-empty">
+            {aggregateStatus === "passed"
+              ? "No unexpected extracted content was detected."
+              : "The artifact does not retain individual unexpected-content examples for this rule."}
+          </p>
+        )
+      )}
+      {open && definition.mode !== "unexpected" && (
+        <>
+          <p className="diagnostic-text-comparison-note">
+            {definition.kind === "sentence" && "This is an unordered coverage bag; reading order is evaluated separately. "}
+            The evaluator normalizes and may coalesce reference entries before scoring. The aggregate percentage above is authoritative. Rows use exact counts when the GCS diagnostic provides them and binary evaluator outcomes otherwise.
+          </p>
+          <div className="diagnostic-table-scroll diagnostic-text-comparison-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>{definition.mode === "maximum" ? "Reference content" : `Expected ${definition.kind}`}</th>
+                  <th>{definition.mode === "maximum" ? "Allowed" : "Required"}</th>
+                  <th>Evaluator evidence</th>
+                  <th>{definition.mode === "maximum" ? "Compliance" : "Coverage"}</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleEntries.map((entry) => {
+                  const retainedMatches = retained.filter((comparison) =>
+                    comparisonMatchesTarget(comparison, entry.target),
+                  );
+                  const retainedComparison = retainedMatches.length === 1 &&
+                    definition.entries.filter((candidate) =>
+                      comparisonMatchesTarget(retainedMatches[0]!, candidate.target),
+                    ).length === 1
+                    ? retainedMatches[0]!
+                    : null;
+                  const specificKey = `${item.page ?? "all"}:${definition.kind}:${normalizedComparisonTarget(entry.target)}`;
+                  const specificCandidates = definition.mode === "missing" && definition.kind !== "digit"
+                    ? specificEvidence.get(specificKey) ?? []
+                    : [];
+                  const specific = specificCandidates.length === 1 ? specificCandidates[0]! : null;
+                  const specificStatus = specificMatcherStatus(specific);
+                  const actualCount = retainedComparison?.actualCount ?? null;
+                  const evaluatorCount = retainedComparison?.expectedCount ?? entry.count;
+                  let status: EvidenceStatus = "unknown";
+                  let statusLabel: string | undefined;
+                  let extractedEvidence = "Exact occurrence count not retained";
+                  let coverage: number | null = null;
+
+                  if (actualCount != null) {
+                    if (definition.mode === "maximum") {
+                      status = actualCount <= evaluatorCount ? "passed" : "failed";
+                      coverage = actualCount <= evaluatorCount
+                        ? 1
+                        : evaluatorCount / Math.max(actualCount, 1);
+                    } else {
+                      status = actualCount >= evaluatorCount
+                        ? "passed"
+                        : actualCount > 0
+                          ? "partial"
+                          : "failed";
+                      coverage = evaluatorCount > 0 ? Math.min(actualCount, evaluatorCount) / evaluatorCount : 1;
+                    }
+                    extractedEvidence = actualCount === 0
+                      ? "No evaluator match"
+                      : `${actualCount.toLocaleString()} evaluator ${actualCount === 1 ? "match" : "matches"}`;
+                  } else if (aggregateStatus === "passed") {
+                    status = "passed";
+                    coverage = 1;
+                    extractedEvidence = definition.mode === "maximum"
+                      ? "Within the allowed count"
+                      : "Requirement met";
+                  } else if (specificStatus === "failed") {
+                    status = "failed";
+                    coverage = 0;
+                    extractedEvidence = "No evaluator match";
+                  } else if (specificStatus === "passed" && entry.count === 1) {
+                    status = "passed";
+                    coverage = 1;
+                    extractedEvidence = "Evaluator match found";
+                  } else if (specificStatus === "passed") {
+                    status = "unknown";
+                    statusLabel = "Count unavailable";
+                    extractedEvidence = "Match found; exact count not retained";
+                  }
+
+                  return (
+                    <tr key={entry.target}>
+                      <td><strong>{entry.target}</strong></td>
+                      <td>
+                        {evaluatorCount.toLocaleString()}
+                        {evaluatorCount !== entry.count && (
+                          <small>{entry.count.toLocaleString()} in the source rule</small>
+                        )}
+                      </td>
+                      <td>{extractedEvidence}</td>
+                      <td>{scorePercent(coverage)}</td>
+                      <td><StatusPill status={status} label={statusLabel} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {open && visible < rowCount && (
+        <button
+          className="diagnostic-load-more"
+          type="button"
+          onClick={() => setVisible((current) => current + TEXT_BAG_PAGE_SIZE)}
+        >
+          Show {Math.min(TEXT_BAG_PAGE_SIZE, rowCount - visible).toLocaleString()} more · {(rowCount - visible).toLocaleString()} remaining
+        </button>
+      )}
+      {open && explanation && (
+        <details className="diagnostic-text-evaluator-note">
+          <summary>Evaluator note</summary>
+          <p>{explanation}</p>
+        </details>
+      )}
+    </details>
+  );
+}
+
 function RuleGroups({
   items,
   groups,
@@ -1618,6 +1942,7 @@ function RuleGroups({
   onSelectEvidence,
   impactForType,
   advisoryForItem,
+  detailForItem,
 }: {
   items: EvidenceItem[];
   groups: readonly { key: string; label: string }[];
@@ -1626,6 +1951,7 @@ function RuleGroups({
   onSelectEvidence?: (id: string) => void;
   impactForType?: (type: string) => RuleImpact;
   advisoryForItem?: (item: EvidenceItem) => string | null;
+  detailForItem?: (item: EvidenceItem) => ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(items.length <= 10);
@@ -1650,6 +1976,7 @@ function RuleGroups({
     return [
       item.type,
       expectedRuleSummary(item.expectation?.rule),
+      textBagSearchText(item),
       outcomeExplanation(item.outcome) ?? "",
     ].some((value) => queryTerms.some((term) => value.toLowerCase().includes(term)));
   };
@@ -1719,28 +2046,31 @@ function RuleGroups({
                 const status = evidenceStatus(item.outcome);
                 const explanation = outcomeExplanation(item.outcome);
                 const advisory = advisoryForItem?.(item);
+                const detail = detailForItem?.(item);
                 return (
-                  <EvidenceButton
-                    key={item.id}
-                    id={item.id}
-                    selected={selectedEvidenceId === item.id}
-                    onSelect={onSelectEvidence}
-                    className="diagnostic-rule-row"
-                  >
-                    <span className="diagnostic-rule-main">
-                      <span className="diagnostic-rule-title">
-                        <strong>{humanize(item.type)}</strong>
-                        {impactForType && <RuleImpactLabel impact={impactForType(item.type)} />}
+                  <div className="diagnostic-rule-entry" key={item.id}>
+                    <EvidenceButton
+                      id={item.id}
+                      selected={selectedEvidenceId === item.id}
+                      onSelect={onSelectEvidence}
+                      className={`diagnostic-rule-row${detail ? " diagnostic-rule-row-has-detail" : ""}`}
+                    >
+                      <span className="diagnostic-rule-main">
+                        <span className="diagnostic-rule-title">
+                          <strong>{humanize(item.type)}</strong>
+                          {impactForType && <RuleImpactLabel impact={impactForType(item.type)} />}
+                        </span>
+                        <small>{expectedRuleSummary(item.expectation?.rule)}</small>
+                        {!detail && explanation && <span title={explanation}>{explanation}</span>}
+                        {advisory && <span className="diagnostic-rule-advisory">{advisory}</span>}
                       </span>
-                      <small>{expectedRuleSummary(item.expectation?.rule)}</small>
-                      {explanation && <span title={explanation}>{explanation}</span>}
-                      {advisory && <span className="diagnostic-rule-advisory">{advisory}</span>}
-                    </span>
-                    <span className="diagnostic-rule-result">
-                      <StatusPill status={status} />
-                      {item.outcome?.score != null && <small>{scorePercent(item.outcome.score)}</small>}
-                    </span>
-                  </EvidenceButton>
+                      <span className="diagnostic-rule-result">
+                        <StatusPill status={status} />
+                        {item.outcome?.score != null && <small>{scorePercent(item.outcome.score)}</small>}
+                      </span>
+                    </EvidenceButton>
+                    {detail}
+                  </div>
                 );
               })}
               {renderedItems.length < visibleItems.length && (
@@ -1796,7 +2126,14 @@ function underlineSpanAdvisory(item: EvidenceItem, actualMarkdown: string) {
 }
 
 function TextDiagnostic(props: DiagnosticInspectorProps) {
-  const items = buildEvidenceItems(props.diagnostic);
+  const items = useMemo(
+    () => buildEvidenceItems(props.diagnostic),
+    [props.diagnostic],
+  );
+  const specificEvidence = useMemo(
+    () => specificTextEvidence(items),
+    [items],
+  );
   return items.length ? (
     <section className="diagnostic-dimension-view diagnostic-text-view" aria-labelledby="diagnostic-text-heading">
       <div className="diagnostic-section-heading">
@@ -1807,7 +2144,7 @@ function TextDiagnostic(props: DiagnosticInspectorProps) {
         <strong>Headline inputs and supporting checks</strong>
         <p>
           Content completeness, unexpected content, duplicates, digits, and reading order feed Content
-          Faithfulness. Other checks remain visible as supporting diagnostics. If this historical result uses
+          Faithfulness. Other checks remain visible as supporting diagnostics. If this result uses
           Rule Pass Rate as its primary metric, every displayed rule contributes instead.
         </p>
       </aside>
@@ -1818,6 +2155,12 @@ function TextDiagnostic(props: DiagnosticInspectorProps) {
         selectedEvidenceId={props.selectedEvidenceId}
         onSelectEvidence={props.onSelectEvidence}
         impactForType={(type) => ruleImpact(props.diagnostic, type)}
+        detailForItem={(item) => {
+          const definition = textBagDefinition(item);
+          return definition
+            ? <TextBagComparison definition={definition} item={item} specificEvidence={specificEvidence} />
+            : null;
+        }}
       />
     </section>
   ) : <EmptyDiagnostics message="No text-content rule outcomes were retained for this result." />;

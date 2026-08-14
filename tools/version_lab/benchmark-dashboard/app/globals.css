@@ -4105,6 +4105,10 @@ code {
   border-top: 1px solid var(--line);
 }
 
+.diagnostic-rule-entry {
+  min-width: 0;
+}
+
 .diagnostic-rule-row {
   background: var(--surface);
   border: 0;
@@ -4112,6 +4116,104 @@ code {
   justify-content: space-between;
   min-height: 56px;
   padding: 10px 12px;
+}
+
+.diagnostic-rule-row-has-detail {
+  border-bottom: 0;
+}
+
+.diagnostic-text-comparison {
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.diagnostic-text-comparison > summary {
+  align-items: center;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font-size: 11px;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+.diagnostic-text-comparison > summary span {
+  font-weight: 720;
+}
+
+.diagnostic-text-comparison > summary strong {
+  color: var(--ink-soft);
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.diagnostic-text-comparison[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.diagnostic-text-comparison-note,
+.diagnostic-text-comparison-empty {
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.55;
+  margin: 0;
+  padding: 9px 12px;
+}
+
+.diagnostic-text-comparison-note {
+  border-bottom: 1px solid var(--line);
+}
+
+.diagnostic-text-comparison-table table {
+  min-width: 680px;
+}
+
+.diagnostic-text-comparison-table th:first-child,
+.diagnostic-text-comparison-table td:first-child {
+  min-width: 260px;
+  width: 44%;
+}
+
+.diagnostic-text-comparison-table td:first-child strong {
+  display: block;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.diagnostic-text-comparison-table td small {
+  color: var(--ink-muted);
+  display: block;
+  font-size: 10px;
+  margin-top: 2px;
+  white-space: normal;
+}
+
+.diagnostic-text-comparison-table th:not(:first-child),
+.diagnostic-text-comparison-table td:not(:first-child) {
+  white-space: nowrap;
+}
+
+.diagnostic-text-evaluator-note {
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 11px;
+  padding: 0 12px;
+}
+
+.diagnostic-text-evaluator-note > summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 9px 0;
+}
+
+.diagnostic-text-evaluator-note > p {
+  line-height: 1.55;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 0 0 10px;
 }
 
 .diagnostic-rule-row:hover,
