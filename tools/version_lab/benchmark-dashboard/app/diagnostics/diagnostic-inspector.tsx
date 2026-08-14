@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -2025,20 +2025,30 @@ function RuleFacetBar({
   onSelect: (key: string) => void;
   label: string;
 }) {
+  const barRef = useRef<HTMLDivElement>(null);
   const total = facets.reduce((sum, facet) => sum + facet.total, 0);
   const attention = facets.reduce((sum, facet) => sum + facet.attention, 0);
   const choices: RuleFacetCount[] = [
     { key: "all", label: "All checks", total, attention },
     ...facets,
   ];
+  const selectFacet = (key: string) => {
+    onSelect(key);
+    window.requestAnimationFrame(() => {
+      const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth";
+      barRef.current?.scrollIntoView({ behavior, block: "start" });
+    });
+  };
   return (
-    <div className="diagnostic-facet-bar" aria-label={label} role="group">
+    <div className="diagnostic-facet-bar" aria-label={label} ref={barRef} role="group">
       {choices.map((facet) => (
         <button
           aria-pressed={selected === facet.key}
           className={selected === facet.key ? "diagnostic-facet-active" : undefined}
           key={facet.key}
-          onClick={() => onSelect(facet.key)}
+          onClick={() => selectFacet(facet.key)}
           type="button"
         >
           <span>{facet.label}</span>
@@ -2148,7 +2158,7 @@ function RuleGroups({
       return [{ facet, matching, visibleLimit, rendered: matching.slice(0, visibleLimit) }];
     });
     return (
-      <div className="diagnostic-rule-groups diagnostic-rule-groups-faceted">
+      <div className={`diagnostic-rule-groups diagnostic-rule-groups-faceted${selectedFacet === "all" ? "" : " diagnostic-rule-groups-filtered"}`}>
         <div className="diagnostic-rule-toolbar">
           <input
             aria-label="Search evaluation checks"
@@ -2823,7 +2833,7 @@ function ExpectationGroups({
           onSelect={setSelectedFacet}
           label="Ground-truth check categories"
         />
-        <div className="diagnostic-rule-groups diagnostic-rule-groups-faceted">
+        <div className={`diagnostic-rule-groups diagnostic-rule-groups-faceted${selectedFacet === "all" ? "" : " diagnostic-rule-groups-filtered"}`}>
           {sections.length ? sections.map(({ facet, matching, rendered, visibleLimit }) => (
             <section className="diagnostic-facet-section" key={facet.key}>
               <div className="diagnostic-facet-section-heading">

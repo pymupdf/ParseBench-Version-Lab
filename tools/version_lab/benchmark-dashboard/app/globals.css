@@ -4096,7 +4096,16 @@ code {
   gap: 7px;
   overflow-x: auto;
   padding: 9px 10px;
+  scroll-margin-top: 72px;
   scrollbar-width: thin;
+}
+
+.diagnostic-rule-groups-faceted {
+  overflow-anchor: none;
+}
+
+.diagnostic-rule-groups-filtered > .diagnostic-facet-section {
+  min-height: calc(100dvh - 80px);
 }
 
 .diagnostic-facet-bar button {
