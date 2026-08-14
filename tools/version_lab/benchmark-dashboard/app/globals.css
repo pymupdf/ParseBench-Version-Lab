@@ -4089,6 +4089,83 @@ code {
   width: min(230px, 58%);
 }
 
+.diagnostic-facet-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 9px 10px;
+  scrollbar-width: thin;
+}
+
+.diagnostic-facet-bar button {
+  align-items: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 38px;
+  padding: 6px 11px;
+  text-align: left;
+}
+
+.diagnostic-facet-bar button:hover,
+.diagnostic-facet-bar button:focus-visible {
+  background: var(--surface-soft);
+  border-color: var(--brand-border-strong);
+}
+
+.diagnostic-facet-bar button.diagnostic-facet-active {
+  background: var(--brand-soft);
+  border-color: var(--brand-border-strong);
+  color: var(--brand-dark);
+}
+
+.diagnostic-facet-bar button > span {
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.diagnostic-facet-bar button > small {
+  color: var(--ink-soft);
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.diagnostic-facet-section + .diagnostic-facet-section {
+  border-top: 2px solid var(--line-strong);
+}
+
+.diagnostic-facet-section-heading {
+  align-items: center;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 8px 12px;
+}
+
+.diagnostic-facet-section-heading strong {
+  font-size: 11px;
+}
+
+.diagnostic-facet-section-heading span {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.diagnostic-rule-groups-faceted .diagnostic-rule-list {
+  border-top: 0;
+}
+
 .diagnostic-rule-group > summary {
   cursor: pointer;
   justify-content: space-between;

@@ -34,6 +34,8 @@ type DiagnosticInspectorProps = {
 
 type EvidenceStatus = "passed" | "partial" | "failed" | "unknown";
 type RuleImpact = "headline" | "supporting";
+type RuleFacet = { key: string; label: string };
+type RuleFacetForType = (type: string, impact: RuleImpact) => RuleFacet;
 
 const RULE_IMPACTS: readonly RuleImpact[] = ["headline", "supporting"];
 
@@ -1543,6 +1545,45 @@ function formattingGroup(type: string) {
   return "other";
 }
 
+function ruleFacet(family: string, impact: RuleImpact): RuleFacet {
+  return {
+    key: `${family.toLocaleLowerCase().replaceAll(" ", "-")}:${impact}`,
+    label: `${family} · ${impact === "headline" ? "Headline" : "Supporting"}`,
+  };
+}
+
+const textFacetForType: RuleFacetForType = (type, impact) => {
+  if (type.includes("sentence")) {
+    if (type.includes("too_many")) return ruleFacet("Repeated sentences", impact);
+    if (type.includes("unexpected")) return ruleFacet("Unexpected sentences", impact);
+    if (type.includes("missing")) return ruleFacet("Missing sentences", impact);
+  }
+  if (type.includes("word")) {
+    if (type.includes("too_many")) return ruleFacet("Repeated words", impact);
+    if (type.includes("unexpected")) return ruleFacet("Unexpected words", impact);
+    if (type.includes("missing")) return ruleFacet("Missing words", impact);
+  }
+  if (type.includes("digit")) return ruleFacet("Digits", impact);
+  if (type.includes("order")) return ruleFacet("Reading order", impact);
+  if (type.includes("extra_content")) return ruleFacet("Extra content", impact);
+  return ruleFacet(humanize(type), impact);
+};
+
+const formattingFacetForType: RuleFacetForType = (type, impact) => {
+  if (type.includes("title_hierarchy")) return ruleFacet("Title hierarchy", impact);
+  if (type.includes("title") || type.includes("page_section")) return ruleFacet("Titles", impact);
+  if (type.includes("bold")) return ruleFacet("Bold", impact);
+  if (type.includes("italic")) return ruleFacet("Italic", impact);
+  if (type.includes("underline")) return ruleFacet("Underline", impact);
+  if (type.includes("strikeout")) return ruleFacet("Strikeout", impact);
+  if (type.includes("mark")) return ruleFacet("Highlight", impact);
+  if (type.includes("sup")) return ruleFacet("Superscript", impact);
+  if (type.includes("sub")) return ruleFacet("Subscript", impact);
+  if (type.includes("latex")) return ruleFacet("LaTeX", impact);
+  if (type.includes("code_block")) return ruleFacet("Code blocks", impact);
+  return ruleFacet(humanize(type), impact);
+};
+
 function ruleImpact(diagnostic: DiagnosticArtifact, type: string): RuleImpact {
   const primaryName = diagnostic.primary_metric?.name;
   if (primaryName === "rule_pass_rate") return "headline";
@@ -1971,6 +2012,63 @@ function TextBagComparison({
   );
 }
 
+type RuleFacetCount = RuleFacet & { attention: number; total: number };
+
+function RuleFacetBar({
+  facets,
+  selected,
+  onSelect,
+  label,
+}: {
+  facets: RuleFacetCount[];
+  selected: string;
+  onSelect: (key: string) => void;
+  label: string;
+}) {
+  const total = facets.reduce((sum, facet) => sum + facet.total, 0);
+  const attention = facets.reduce((sum, facet) => sum + facet.attention, 0);
+  const choices: RuleFacetCount[] = [
+    { key: "all", label: "All checks", total, attention },
+    ...facets,
+  ];
+  return (
+    <div className="diagnostic-facet-bar" aria-label={label} role="group">
+      {choices.map((facet) => (
+        <button
+          aria-pressed={selected === facet.key}
+          className={selected === facet.key ? "diagnostic-facet-active" : undefined}
+          key={facet.key}
+          onClick={() => onSelect(facet.key)}
+          type="button"
+        >
+          <span>{facet.label}</span>
+          <small>
+            {facet.total.toLocaleString()}
+            {facet.attention > 0 ? ` · ${facet.attention.toLocaleString()} need attention` : ""}
+          </small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ruleFacetCounts(
+  types: string[],
+  impactForType: (type: string) => RuleImpact,
+  facetForType: RuleFacetForType,
+  statusForIndex?: (index: number) => EvidenceStatus,
+) {
+  const facets = new Map<string, RuleFacetCount>();
+  types.forEach((type, index) => {
+    const facet = facetForType(type, impactForType(type));
+    const current = facets.get(facet.key) ?? { ...facet, attention: 0, total: 0 };
+    current.total += 1;
+    if (statusForIndex && statusForIndex(index) !== "passed") current.attention += 1;
+    facets.set(facet.key, current);
+  });
+  return [...facets.values()];
+}
+
 function RuleGroups({
   items,
   groups,
@@ -1978,6 +2076,7 @@ function RuleGroups({
   selectedEvidenceId,
   onSelectEvidence,
   impactForType,
+  facetForType,
   advisoryForItem,
   detailForItem,
 }: {
@@ -1987,11 +2086,13 @@ function RuleGroups({
   selectedEvidenceId?: string | null;
   onSelectEvidence?: (id: string) => void;
   impactForType?: (type: string) => RuleImpact;
+  facetForType?: RuleFacetForType;
   advisoryForItem?: (item: EvidenceItem) => string | null;
   detailForItem?: (item: EvidenceItem) => ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(items.length <= 10);
+  const [selectedFacet, setSelectedFacet] = useState("all");
   const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
   const normalizedQuery = query.trim().toLowerCase();
   const queryTerms = normalizedQuery.endsWith("s")
@@ -2025,6 +2126,104 @@ function RuleGroups({
       ),
     })),
   ).find((group) => group.populated)?.key;
+  if (facetForType && impactForType) {
+    const facets = ruleFacetCounts(
+      items.map((item) => item.type),
+      impactForType,
+      facetForType,
+      (index) => evidenceStatus(items[index]?.outcome ?? null),
+    );
+    const activeFacets = selectedFacet === "all"
+      ? facets
+      : facets.filter((facet) => facet.key === selectedFacet);
+    const sections = activeFacets.flatMap((facet) => {
+      const matching = items
+        .filter((item) => facetForType(item.type, impactForType(item.type)).key === facet.key)
+        .filter(itemMatchesFilters)
+        .sort((left, right) =>
+          statusRank[evidenceStatus(left.outcome)] - statusRank[evidenceStatus(right.outcome)],
+        );
+      if (!matching.length) return [];
+      const visibleLimit = visibleLimits[`facet:${facet.key}`] ?? 60;
+      return [{ facet, matching, visibleLimit, rendered: matching.slice(0, visibleLimit) }];
+    });
+    return (
+      <div className="diagnostic-rule-groups diagnostic-rule-groups-faceted">
+        <div className="diagnostic-rule-toolbar">
+          <input
+            aria-label="Search evaluation checks"
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder="Search checks"
+          />
+          <div className="mode-toggle" aria-label="Evidence status filter">
+            <button type="button" aria-pressed={!showAll} className={!showAll ? "mode-active" : ""} onClick={() => setShowAll(false)}>Needs attention</button>
+            <button type="button" aria-pressed={showAll} className={showAll ? "mode-active" : ""} onClick={() => setShowAll(true)}>All</button>
+          </div>
+        </div>
+        <RuleFacetBar
+          facets={facets}
+          selected={selectedFacet}
+          onSelect={setSelectedFacet}
+          label="Evaluation check categories"
+        />
+        {sections.length ? sections.map(({ facet, matching, rendered, visibleLimit }) => (
+          <section className="diagnostic-facet-section" key={facet.key}>
+            <div className="diagnostic-facet-section-heading">
+              <strong>{facet.label}</strong>
+              <span>{matching.length.toLocaleString()} matching</span>
+            </div>
+            <div className="diagnostic-rule-list">
+              {rendered.map((item) => {
+                const status = evidenceStatus(item.outcome);
+                const explanation = outcomeExplanation(item.outcome);
+                const advisory = advisoryForItem?.(item);
+                const detail = detailForItem?.(item);
+                return (
+                  <div className="diagnostic-rule-entry" key={item.id}>
+                    <EvidenceButton
+                      id={item.id}
+                      selected={selectedEvidenceId === item.id}
+                      onSelect={onSelectEvidence}
+                      className={`diagnostic-rule-row${detail ? " diagnostic-rule-row-has-detail" : ""}`}
+                    >
+                      <span className="diagnostic-rule-main">
+                        <span className="diagnostic-rule-title">
+                          <strong>{expectedRuleSummary(item.expectation?.rule)}</strong>
+                        </span>
+                        {!detail && explanation && <span title={explanation}>{explanation}</span>}
+                        {advisory && <span className="diagnostic-rule-advisory">{advisory}</span>}
+                      </span>
+                      <span className="diagnostic-rule-result">
+                        <StatusPill status={status} />
+                        {item.outcome?.score != null && <small>{scorePercent(item.outcome.score)}</small>}
+                      </span>
+                    </EvidenceButton>
+                    {detail}
+                  </div>
+                );
+              })}
+              {rendered.length < matching.length && (
+                <button
+                  className="diagnostic-load-more"
+                  type="button"
+                  onClick={() => setVisibleLimits((current) => ({
+                    ...current,
+                    [`facet:${facet.key}`]: visibleLimit + 60,
+                  }))}
+                >
+                  Show 60 more · {(matching.length - rendered.length).toLocaleString()} remaining
+                </button>
+              )}
+            </div>
+          </section>
+        )) : (
+          <EmptyDiagnostics title="No matching checks" message="Try another category, search term, or status filter." />
+        )}
+      </div>
+    );
+  }
   return (
     <div className="diagnostic-rule-groups">
       {items.length > 0 && (
@@ -2210,6 +2409,7 @@ function TextDiagnostic(props: DiagnosticInspectorProps) {
         selectedEvidenceId={props.selectedEvidenceId}
         onSelectEvidence={props.onSelectEvidence}
         impactForType={(type) => ruleImpact(props.diagnostic, type)}
+        facetForType={textFacetForType}
         detailForItem={(item) => {
           const definition = textBagDefinition(item);
           return definition
@@ -2249,6 +2449,7 @@ function FormattingDiagnostic(props: DiagnosticInspectorProps) {
         selectedEvidenceId={props.selectedEvidenceId}
         onSelectEvidence={props.onSelectEvidence}
         impactForType={(type) => ruleImpact(props.diagnostic, type)}
+        facetForType={formattingFacetForType}
         advisoryForItem={(item) => underlineSpanAdvisory(item, props.actualMarkdown)}
       />
     </section>
@@ -2491,22 +2692,23 @@ function LayoutGroundTruth({
 function GroundTruthRule({
   expectation,
   impact,
+  condensed = false,
 }: {
   expectation: DiagnosticExpectation;
   impact: RuleImpact | null;
+  condensed?: boolean;
 }) {
   const scalarEntry = singleScalarRuleEntry(expectation.rule);
+  const ruleSummary = scalarEntry
+    ? `${humanize(scalarEntry[0])}: ${scalarDisplay(scalarEntry[1])}`
+    : expectedRuleSummary(expectation.rule);
   const title = (
     <span>
       <span className="diagnostic-rule-title">
-        <strong>{humanize(expectation.type)}</strong>
-        {impact && <RuleImpactLabel impact={impact} />}
+        <strong>{condensed ? ruleSummary : humanize(expectation.type)}</strong>
+        {!condensed && impact && <RuleImpactLabel impact={impact} />}
       </span>
-      <small>
-        {scalarEntry
-          ? `${humanize(scalarEntry[0])}: ${scalarDisplay(scalarEntry[1])}`
-          : expectedRuleSummary(expectation.rule)}
-      </small>
+      {!condensed && <small>{ruleSummary}</small>}
     </span>
   );
   const tags = expectation.tags?.length
@@ -2544,6 +2746,7 @@ function ExpectationGroups({
   heading,
   contract,
   impactForType,
+  facetForType,
 }: {
   expectations: DiagnosticExpectation[];
   groups: readonly { key: string; label: string }[];
@@ -2552,8 +2755,10 @@ function ExpectationGroups({
   heading: string;
   contract?: ReactNode;
   impactForType?: (type: string) => RuleImpact;
+  facetForType?: RuleFacetForType;
 }) {
   const [query, setQuery] = useState("");
+  const [selectedFacet, setSelectedFacet] = useState("all");
   const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
   const normalizedQuery = query.trim().toLowerCase();
   const impactSections = (impactForType ? RULE_IMPACTS : [null]).map((impact) => ({
@@ -2577,6 +2782,84 @@ function ExpectationGroups({
       ),
     })),
   ).find((group) => group.populated)?.key;
+  if (facetForType && impactForType) {
+    const facets = ruleFacetCounts(
+      expectations.map((expectation) => expectation.type),
+      impactForType,
+      facetForType,
+    );
+    const activeFacets = selectedFacet === "all"
+      ? facets
+      : facets.filter((facet) => facet.key === selectedFacet);
+    const sections = activeFacets.flatMap((facet) => {
+      const matching = expectations
+        .filter((expectation) => facetForType(expectation.type, impactForType(expectation.type)).key === facet.key)
+        .filter(expectationMatchesQuery);
+      if (!matching.length) return [];
+      const visibleLimit = visibleLimits[`facet:${facet.key}`] ?? 60;
+      return [{ facet, matching, visibleLimit, rendered: matching.slice(0, visibleLimit) }];
+    });
+    return (
+      <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
+        <div className="diagnostic-section-heading">
+          <div><span className="diagnostic-eyebrow">{eyebrow}</span><h3>{heading}</h3></div>
+          <span>{expectations.length.toLocaleString()} checks</span>
+        </div>
+        {contract && <aside className="diagnostic-contract-note diagnostic-contract-note-compact">{contract}</aside>}
+        {expectations.length > 8 && (
+          <div className="diagnostic-rule-toolbar diagnostic-ground-truth-toolbar">
+            <input
+              aria-label="Search ground-truth checks"
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              placeholder="Search ground truth"
+            />
+          </div>
+        )}
+        <RuleFacetBar
+          facets={facets}
+          selected={selectedFacet}
+          onSelect={setSelectedFacet}
+          label="Ground-truth check categories"
+        />
+        <div className="diagnostic-rule-groups diagnostic-rule-groups-faceted">
+          {sections.length ? sections.map(({ facet, matching, rendered, visibleLimit }) => (
+            <section className="diagnostic-facet-section" key={facet.key}>
+              <div className="diagnostic-facet-section-heading">
+                <strong>{facet.label}</strong>
+                <span>{matching.length.toLocaleString()} expected checks</span>
+              </div>
+              <div className="diagnostic-rule-list">
+                {rendered.map((expectation) => (
+                  <GroundTruthRule
+                    expectation={expectation}
+                    impact={null}
+                    condensed
+                    key={expectation.id}
+                  />
+                ))}
+                {rendered.length < matching.length && (
+                  <button
+                    className="diagnostic-load-more"
+                    type="button"
+                    onClick={() => setVisibleLimits((current) => ({
+                      ...current,
+                      [`facet:${facet.key}`]: visibleLimit + 60,
+                    }))}
+                  >
+                    Show 60 more · {(matching.length - rendered.length).toLocaleString()} remaining
+                  </button>
+                )}
+              </div>
+            </section>
+          )) : (
+            <EmptyDiagnostics title="No matching checks" message="Try another category or search term." />
+          )}
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="diagnostic-dimension-view diagnostic-ground-truth-view">
       <div className="diagnostic-section-heading">
@@ -2706,6 +2989,7 @@ export function GroundTruthInspector({
           </>
         )}
         impactForType={(type) => ruleImpact(diagnostic, type)}
+        facetForType={textFacetForType}
       />
     );
   }
@@ -2724,6 +3008,7 @@ export function GroundTruthInspector({
           </>
         )}
         impactForType={(type) => ruleImpact(diagnostic, type)}
+        facetForType={formattingFacetForType}
       />
     );
   }
