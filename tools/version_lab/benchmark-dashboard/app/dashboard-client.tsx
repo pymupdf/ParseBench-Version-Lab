@@ -370,8 +370,9 @@ function layoutOverlayBoxes(
       if (!outcome) continue;
       const box = normalizedCornerBox(outcome.best_pred_bbox);
       if (box) {
-        const regionKey = typeof outcome.best_pred_index === "number"
-          ? `index:${outcome.best_pred_index}`
+        const sourceIndex = finiteNumber(outcome.best_pred_index);
+        const regionKey = sourceIndex != null
+          ? `index:${sourceIndex}`
           : [box.x, box.y, box.width, box.height].map((value) => value.toFixed(6)).join(":");
         const existing = predictionsByRegion.get(regionKey);
         if (existing) {
@@ -387,6 +388,7 @@ function layoutOverlayBoxes(
           relatedIds: [expectation.id],
           kind,
           label,
+          sourceIndex: sourceIndex ?? undefined,
           tone: layoutRegionTone(label),
           status: layoutElementHeadlineStatus(outcome),
         };
@@ -423,7 +425,23 @@ function layoutOverlayBoxes(
     for (const box of artifactBoxes) {
       // Retain unmatched parser regions, but use evaluator-linked regions for
       // matched elements so selecting Explain evidence highlights the output.
-      if (matchedBoxes.some((matched) => intersectionOverUnion(box, matched) >= 0.9)) continue;
+      const matched = matchedBoxes.find((candidate) => (
+        candidate.sourceIndex != null &&
+        box.sourceIndex != null &&
+        candidate.sourceIndex === box.sourceIndex
+      )) ?? matchedBoxes.find(
+        (candidate) => intersectionOverUnion(box, candidate) >= 0.9,
+      );
+      if (matched) {
+        // Failed localization can leave best_pred_class unset even though the
+        // retained parser output still knows the region class. Preserve that
+        // class so the overlay remains distinguishable as text, picture, etc.
+        if (matched.label === "Predicted element") {
+          matched.label = box.label;
+          matched.tone = layoutRegionTone(box.label);
+        }
+        continue;
+      }
       boxes.push({
         ...box,
         id: `${kind}-${box.id}`,
@@ -1670,7 +1688,9 @@ function DocumentExplorer({
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("explain");
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-  const [selectedEvidenceKind, setSelectedEvidenceKind] = useState<"current" | "best" | null>(null);
+  const [selectedEvidenceKind, setSelectedEvidenceKind] = useState<
+    EvidenceOverlayBox["kind"] | "diagnostic" | null
+  >(null);
   const [layers, setLayers] = useState({ expected: false, predicted: false, best: false });
   const selectedSource = selected ? sourceAssetUrl(selected) : null;
   const selectedSourceKind = selected ? sourceAssetKind(selected) : "unsupported";
@@ -1699,7 +1719,9 @@ function DocumentExplorer({
   const boxes = useMemo(
     () => selectedEvidenceId
       ? allLayoutBoxes.filter((box) => (
-          (selectedEvidenceKind === "best" ? box.kind === "best" : box.kind !== "best") &&
+          (selectedEvidenceKind === "diagnostic"
+            ? box.kind !== "best"
+            : box.kind === selectedEvidenceKind) &&
           (box.id === selectedEvidenceId || box.relatedIds?.includes(selectedEvidenceId) === true)
         ))
       : allLayoutBoxes.filter((box) => (
@@ -1745,7 +1767,7 @@ function DocumentExplorer({
 
   function selectDiagnosticEvidence(id: string) {
     setSelectedEvidenceId(id);
-    setSelectedEvidenceKind("current");
+    setSelectedEvidenceKind("diagnostic");
     if (isLayoutDimension) {
       setLayers({ expected: false, predicted: false, best: false });
     }
@@ -1753,7 +1775,7 @@ function DocumentExplorer({
 
   function selectOverlayEvidence(id: string, kind: EvidenceOverlayBox["kind"]) {
     setSelectedEvidenceId(id);
-    setSelectedEvidenceKind(kind === "best" ? "best" : "current");
+    setSelectedEvidenceKind(kind);
     setLayers({ expected: false, predicted: false, best: false });
   }
 

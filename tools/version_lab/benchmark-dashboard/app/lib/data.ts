@@ -160,6 +160,7 @@ export type HistoricalBestResult = {
 export type ArtifactLayoutBox = {
   id: string;
   label: string;
+  sourceIndex?: number;
   x: number;
   y: number;
   width: number;
@@ -623,6 +624,7 @@ export async function loadArtifact(
       return [{
         id: `${layoutPage.page_index ?? layoutPage.page_number ?? 0}-${box.index ?? index}`,
         label: humanize(box.class ?? "Output region"),
+        sourceIndex: box.index ?? index,
         x: x1 / pageWidth,
         y: y1 / pageHeight,
         width: (x2 - x1) / pageWidth,

@@ -1762,6 +1762,7 @@ code {
 
 .evidence-box-ground-truth {
   border-style: dashed;
+  z-index: 2;
 }
 
 .evidence-box-passed {
@@ -1781,6 +1782,7 @@ code {
 
 .evidence-box-prediction {
   border-style: solid;
+  z-index: 1;
 }
 
 .evidence-box-best {
@@ -1839,6 +1841,10 @@ code {
   box-shadow: 0 0 0 2px var(--evidence-selection-inner), 0 0 0 4px var(--evidence-selection-outer);
   opacity: 1;
   z-index: 4;
+}
+
+.evidence-box-ground-truth.evidence-box-selected {
+  z-index: 5;
 }
 
 .evidence-box > span {

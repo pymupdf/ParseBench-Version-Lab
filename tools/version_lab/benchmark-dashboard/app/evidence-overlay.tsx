@@ -9,6 +9,7 @@ export type EvidenceOverlayBox = {
   width: number;
   height: number;
   kind: "ground-truth" | "prediction" | "best";
+  sourceIndex?: number;
   tone?: EvidenceOverlayTone;
   status?: "passed" | "partial" | "failed" | "unknown" | "neutral" | "ignored" | "reference";
 };
@@ -53,7 +54,7 @@ export function EvidenceOverlay({
             title={`${kindLabel}: ${box.label}`}
             type="button"
           >
-            <span>{box.label}</span>
+            <span>{kindLabel} · {box.label}</span>
           </button>
         );
       })}
