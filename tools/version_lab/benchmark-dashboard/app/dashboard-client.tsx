@@ -27,11 +27,13 @@ import {
   loadDocument,
   loadDocuments,
   loadHistoricalBestResult,
+  loadSiblingOriginalMarkdown,
   loadRun,
   loadRunBundle,
   loadRunScores,
   loadRuns,
   primaryMetricForDimension,
+  originalMarkdownFromDiagnostic,
   RunBundle,
   RunDimension,
   RunScoreIndex,
@@ -74,6 +76,12 @@ type DiagnosticState = {
   loading: boolean;
   data: DiagnosticArtifact | null;
   url: string | null;
+  error: string | null;
+};
+
+type OriginalMarkdownState = {
+  loading: boolean;
+  markdown: string;
   error: string | null;
 };
 
@@ -730,37 +738,6 @@ function EmptyMarkdownArtifact({
     );
   }
   return <EmptyState title="No extracted Markdown" body="The extracted-output state is unavailable." />;
-}
-
-function originalMarkdownFromDiagnostic(diagnostic: DiagnosticArtifact | null) {
-  if (!diagnostic) return "";
-  const originals: string[] = [];
-  const unique = new Set<string>();
-  const visited = new WeakSet<object>();
-
-  function visit(value: unknown) {
-    if (value == null || typeof value !== "object") return;
-    if (visited.has(value)) return;
-    visited.add(value);
-    if (Array.isArray(value)) {
-      value.forEach(visit);
-      return;
-    }
-    for (const [key, nested] of Object.entries(value)) {
-      if (key === "original_md" && typeof nested === "string" && nested.trim()) {
-        const markdown = nested.trim();
-        if (!unique.has(markdown)) {
-          unique.add(markdown);
-          originals.push(markdown);
-        }
-      } else {
-        visit(nested);
-      }
-    }
-  }
-
-  visit(diagnostic);
-  return originals.join("\n\n---\n\n");
 }
 
 function EmptyState({
@@ -1744,6 +1721,11 @@ function DocumentExplorer({
   const [markdownMode, setMarkdownMode] = useState<MarkdownMode>("preview");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("explain");
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
+  const [siblingOriginalMarkdown, setSiblingOriginalMarkdown] = useState<OriginalMarkdownState>({
+    loading: true,
+    markdown: "",
+    error: null,
+  });
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const [selectedEvidenceKind, setSelectedEvidenceKind] = useState<
     EvidenceOverlayBox["kind"] | "diagnostic" | null
@@ -1806,10 +1788,27 @@ function DocumentExplorer({
   const hasLayoutEvidence = isLayoutDimension;
   const hasHistoricalBest = historicalBest.data != null;
   const bestEvidenceLoading = historicalBest.evidenceStatus === "loading";
-  const originalMarkdown = useMemo(
+  const currentOriginalMarkdown = useMemo(
     () => originalMarkdownFromDiagnostic(diagnostic.data),
     [diagnostic.data],
   );
+  const originalMarkdown = currentOriginalMarkdown || siblingOriginalMarkdown.markdown;
+  const originalMarkdownLoading = !currentOriginalMarkdown && siblingOriginalMarkdown.loading;
+
+  useEffect(() => {
+    if (!selected || diagnostic.loading || currentOriginalMarkdown) return;
+    const controller = new AbortController();
+    loadSiblingOriginalMarkdown(run, selected, controller.signal)
+      .then((markdown) => {
+        if (controller.signal.aborted) return;
+        setSiblingOriginalMarkdown({ loading: false, markdown, error: null });
+      })
+      .catch((error: Error) => {
+        if (error.name === "AbortError") return;
+        setSiblingOriginalMarkdown({ loading: false, markdown: "", error: error.message });
+      });
+    return () => controller.abort();
+  }, [currentOriginalMarkdown, diagnostic.loading, run, selected]);
   const primary = selected ? alignedPrimaryMetric(selected, diagnostic.data) : null;
   const detailedMetrics = useMemo(
     () => [...(diagnostic.data?.metrics ?? [])]
@@ -2022,7 +2021,7 @@ function DocumentExplorer({
                     {([
                       ["explain", "Explain"],
                       ["output", "Output"],
-                      ...(originalMarkdown ? [["original", "Original Markdown"]] as const : []),
+                      ["original", "Original Markdown"],
                       ["expectations", "Ground truth"],
                       ...(hasHistoricalBest ? [["best", "Best result"]] as const : []),
                       ["json", "JSON"],
@@ -2041,7 +2040,7 @@ function DocumentExplorer({
                       </button>
                     ))}
                   </div>
-                  {(inspectorTab === "output" || inspectorTab === "original") && (
+                  {(inspectorTab === "output" || (inspectorTab === "original" && originalMarkdown)) && (
                     <div className="mode-toggle" aria-label="Markdown display mode">
                       <button aria-pressed={markdownMode === "preview"} className={markdownMode === "preview" ? "mode-active" : ""} onClick={() => setMarkdownMode("preview")} type="button">Preview</button>
                       <button aria-pressed={markdownMode === "source"} className={markdownMode === "source" ? "mode-active" : ""} onClick={() => setMarkdownMode("source")} type="button">Source</button>
@@ -2079,18 +2078,26 @@ function DocumentExplorer({
                       <EmptyMarkdownArtifact state={artifact.markdownState} />
                     )
                   ) : inspectorTab === "original" ? (
-                    <div className="original-markdown-view">
-                      <aside className="original-markdown-note">
-                        <strong>Human-readable ground truth</strong>
-                        <p>
-                          This is the original reference Markdown retained by the benchmark. The Explain tab
-                          shows the evaluator matcher keys derived from this reference.
-                        </p>
-                      </aside>
-                      {markdownMode === "preview"
-                        ? <MarkdownPanel markdown={originalMarkdown} />
-                        : <pre className="markdown-source"><code>{originalMarkdown}</code></pre>}
-                    </div>
+                    originalMarkdown ? (
+                      <div className="original-markdown-view">
+                        <aside className="original-markdown-note">
+                          <strong>Human-readable ground truth</strong>
+                          <p>
+                            This is the original reference Markdown retained by the benchmark. The Explain tab
+                            shows the evaluator matcher keys derived from this reference.
+                          </p>
+                        </aside>
+                        {markdownMode === "preview"
+                          ? <MarkdownPanel markdown={originalMarkdown} />
+                          : <pre className="markdown-source"><code>{originalMarkdown}</code></pre>}
+                      </div>
+                    ) : originalMarkdownLoading ? (
+                      <div className="artifact-loading">Looking for original Markdown across this run…</div>
+                    ) : siblingOriginalMarkdown.error ? (
+                      <EmptyState title="Could not load original Markdown" body={siblingOriginalMarkdown.error} />
+                    ) : (
+                      <EmptyState title="Original Markdown unavailable" body="No diagnostic for this document retains an original Markdown reference." />
+                    )
                   ) : inspectorTab === "expectations" ? (
                     diagnostic.loading ? (
                       <div className="artifact-loading">Loading ground truth…</div>

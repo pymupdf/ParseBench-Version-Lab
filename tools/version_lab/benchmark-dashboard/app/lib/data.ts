@@ -524,6 +524,91 @@ export function artifactUrl(
   return `https://storage.googleapis.com/${encodeURIComponent(run.gcs_bucket)}/${encodePath(`${run.gcs_prefix}/${relativePath}`)}`;
 }
 
+export function originalMarkdownFromDiagnostic(diagnostic: DiagnosticArtifact | null) {
+  if (!diagnostic) return "";
+  const originals: string[] = [];
+  const unique = new Set<string>();
+  const visited = new WeakSet<object>();
+
+  function visit(value: unknown) {
+    if (value == null || typeof value !== "object") return;
+    if (visited.has(value)) return;
+    visited.add(value);
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    for (const [key, nested] of Object.entries(value)) {
+      if (key === "original_md" && typeof nested === "string" && nested.trim()) {
+        const markdown = nested.trim();
+        if (!unique.has(markdown)) {
+          unique.add(markdown);
+          originals.push(markdown);
+        }
+      } else {
+        visit(nested);
+      }
+    }
+  }
+
+  visit(diagnostic);
+  return originals.join("\n\n---\n\n");
+}
+
+export async function loadSiblingOriginalMarkdown(
+  run: Pick<BenchmarkRun, "gcs_bucket" | "gcs_prefix">,
+  result: CaseResult,
+  signal?: AbortSignal,
+) {
+  type DiagnosticCandidate = Pick<
+    CaseResult,
+    "id" | "diagnostic_relative_path" | "diagnostic_schema_version" | "run_dimensions"
+  >;
+
+  const candidates = await apiFetch<DiagnosticCandidate[]>(
+    "case_results",
+    new URLSearchParams({
+      select: "id,diagnostic_relative_path,diagnostic_schema_version,run_dimensions!inner(id,run_id,dimension)",
+      benchmark_case_id: `eq.${result.benchmark_cases.id}`,
+      id: `neq.${result.id}`,
+      diagnostic_relative_path: "not.is.null",
+      diagnostic_schema_version: "eq.3",
+      "run_dimensions.run_id": `eq.${result.run_dimensions.run_id}`,
+      limit: "8",
+    }),
+    signal,
+  );
+  candidates.sort((left, right) => {
+    const dimensionOrder = Number(left.run_dimensions.dimension !== "text_content") -
+      Number(right.run_dimensions.dimension !== "text_content");
+    return dimensionOrder || left.id - right.id;
+  });
+
+  let firstError: Error | null = null;
+  for (const candidate of candidates) {
+    try {
+      const sibling = await loadDiagnostic(
+        run,
+        {
+          ...result,
+          id: candidate.id,
+          diagnostic_relative_path: candidate.diagnostic_relative_path,
+          diagnostic_schema_version: candidate.diagnostic_schema_version,
+          run_dimensions: candidate.run_dimensions,
+        },
+        signal,
+      );
+      const markdown = originalMarkdownFromDiagnostic(sibling.diagnostic);
+      if (markdown) return markdown;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      if (!firstError && error instanceof Error) firstError = error;
+    }
+  }
+  if (firstError) throw firstError;
+  return "";
+}
+
 export function datasetFileUrl(
   dataset: Pick<DatasetVersion, "repository" | "resolved_sha">,
   relativePath: string,
