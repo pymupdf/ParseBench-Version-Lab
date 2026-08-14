@@ -57,7 +57,7 @@ import {
 type View = "runs" | "overview" | "triage" | "inspect";
 
 type MarkdownMode = "preview" | "source";
-type InspectorTab = "explain" | "output" | "expectations" | "best" | "json";
+type InspectorTab = "explain" | "output" | "original" | "expectations" | "best" | "json";
 type RunSort = "newest" | "oldest" | "largest" | "fastest";
 const ANY_GROUP = "__any_group__";
 type ArtifactState = {
@@ -708,6 +708,37 @@ function MarkdownPanel({ markdown }: { markdown: string }) {
       </ReactMarkdown>
     </div>
   );
+}
+
+function originalMarkdownFromDiagnostic(diagnostic: DiagnosticArtifact | null) {
+  if (!diagnostic) return "";
+  const originals: string[] = [];
+  const unique = new Set<string>();
+  const visited = new WeakSet<object>();
+
+  function visit(value: unknown) {
+    if (value == null || typeof value !== "object") return;
+    if (visited.has(value)) return;
+    visited.add(value);
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    for (const [key, nested] of Object.entries(value)) {
+      if (key === "original_md" && typeof nested === "string" && nested.trim()) {
+        const markdown = nested.trim();
+        if (!unique.has(markdown)) {
+          unique.add(markdown);
+          originals.push(markdown);
+        }
+      } else {
+        visit(nested);
+      }
+    }
+  }
+
+  visit(diagnostic);
+  return originals.join("\n\n---\n\n");
 }
 
 function EmptyState({
@@ -1749,6 +1780,10 @@ function DocumentExplorer({
   const hasLayoutEvidence = isLayoutDimension;
   const hasHistoricalBest = historicalBest.data != null;
   const bestEvidenceLoading = historicalBest.evidenceStatus === "loading";
+  const originalMarkdown = useMemo(
+    () => originalMarkdownFromDiagnostic(diagnostic.data),
+    [diagnostic.data],
+  );
   const primary = selected ? alignedPrimaryMetric(selected, diagnostic.data) : null;
   const detailedMetrics = useMemo(
     () => [...(diagnostic.data?.metrics ?? [])]
@@ -1961,6 +1996,7 @@ function DocumentExplorer({
                     {([
                       ["explain", "Explain"],
                       ["output", "Output"],
+                      ...(originalMarkdown ? [["original", "Original Markdown"]] as const : []),
                       ["expectations", "Ground truth"],
                       ...(hasHistoricalBest ? [["best", "Best result"]] as const : []),
                       ["json", "JSON"],
@@ -1979,7 +2015,7 @@ function DocumentExplorer({
                       </button>
                     ))}
                   </div>
-                  {inspectorTab === "output" && (
+                  {(inspectorTab === "output" || inspectorTab === "original") && (
                     <div className="mode-toggle" aria-label="Markdown display mode">
                       <button aria-pressed={markdownMode === "preview"} className={markdownMode === "preview" ? "mode-active" : ""} onClick={() => setMarkdownMode("preview")} type="button">Preview</button>
                       <button aria-pressed={markdownMode === "source"} className={markdownMode === "source" ? "mode-active" : ""} onClick={() => setMarkdownMode("source")} type="button">Source</button>
@@ -2015,6 +2051,19 @@ function DocumentExplorer({
                     ) : (
                       <EmptyState title="No rendered markdown" body="The indexed result does not contain a markdown payload." />
                     )
+                  ) : inspectorTab === "original" ? (
+                    <div className="original-markdown-view">
+                      <aside className="original-markdown-note">
+                        <strong>Human-readable ground truth</strong>
+                        <p>
+                          This is the original reference Markdown retained by the benchmark. The Explain tab
+                          shows the evaluator matcher keys derived from this reference.
+                        </p>
+                      </aside>
+                      {markdownMode === "preview"
+                        ? <MarkdownPanel markdown={originalMarkdown} />
+                        : <pre className="markdown-source"><code>{originalMarkdown}</code></pre>}
+                    </div>
                   ) : inspectorTab === "expectations" ? (
                     diagnostic.loading ? (
                       <div className="artifact-loading">Loading ground truth…</div>

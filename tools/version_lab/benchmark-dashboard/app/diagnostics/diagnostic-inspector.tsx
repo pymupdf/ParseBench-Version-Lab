@@ -1581,8 +1581,18 @@ function expectedRuleSummary(value: unknown) {
   if (!rule) return value == null
     ? "Expectation details unavailable"
     : `Expected: ${scalarDisplay(value)}`;
+  const matcherBag = ([
+    ["bag_of_sentence", "sentence"],
+    ["bag_of_word", "word"],
+    ["bag_of_digit", "digit"],
+  ] as const).find(([key]) => asRecord(rule[key]) != null);
+  if (matcherBag) {
+    const count = Object.keys(asRecord(rule[matcherBag[0]]) ?? {}).length;
+    const noun = count === 1 ? matcherBag[1] : `${matcherBag[1]}s`;
+    return `${count.toLocaleString()} ${noun} used as evaluator matcher keys`;
+  }
   const ignored = new Set([
-    "id", "type", "page", "tags", "layout_id", "layout_ids", "layout_bindings",
+    "id", "type", "page", "tags", "layout_id", "layout_ids", "layout_bindings", "original_md",
   ]);
   const values = Object.entries(rule)
     .filter(([key, value]) => !ignored.has(key) && value != null)
@@ -1775,7 +1785,7 @@ function TextBagComparison({
   const noun = textBagNoun(definition.kind, rowCount);
   const comparisonLabel = definition.mode === "unexpected"
     ? `${rowCount.toLocaleString()} retained unexpected ${noun}`
-    : `${definition.entries.length.toLocaleString()} expected ${textBagNoun(definition.kind, definition.entries.length)}`;
+    : `${definition.entries.length.toLocaleString()} ${definition.kind} matcher keys`;
 
   return (
     <details
@@ -1821,13 +1831,13 @@ function TextBagComparison({
         <>
           <p className="diagnostic-text-comparison-note">
             {definition.kind === "sentence" && "This is an unordered coverage bag; reading order is evaluated separately. "}
-            The evaluator normalizes and may coalesce reference entries before scoring. The aggregate percentage above is authoritative. Rows use exact counts when the GCS diagnostic provides them and binary evaluator outcomes otherwise.
+            The first column shows configured evaluator matcher keys, not the human-readable ground truth. The evaluator normalizes and may coalesce these keys before scoring. The aggregate percentage above is authoritative. Rows use exact counts when the GCS diagnostic provides them and binary evaluator outcomes otherwise.
           </p>
           <div className="diagnostic-table-scroll diagnostic-text-comparison-table">
             <table>
               <thead>
                 <tr>
-                  <th>{definition.mode === "maximum" ? "Reference content" : `Expected ${definition.kind}`}</th>
+                  <th>Evaluator matcher key</th>
                   <th>{definition.mode === "maximum" ? "Allowed" : "Required"}</th>
                   <th>Evaluator evidence</th>
                   <th>{definition.mode === "maximum" ? "Compliance" : "Coverage"}</th>

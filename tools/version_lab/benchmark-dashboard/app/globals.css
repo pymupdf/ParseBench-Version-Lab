@@ -2852,6 +2852,28 @@ code {
   background: var(--surface);
 }
 
+.original-markdown-view {
+  min-height: 100%;
+}
+
+.original-markdown-note {
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 16px;
+}
+
+.original-markdown-note strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.original-markdown-note p {
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 4px 0 0;
+}
+
 .best-result-view {
   display: flex;
   flex-direction: column;
