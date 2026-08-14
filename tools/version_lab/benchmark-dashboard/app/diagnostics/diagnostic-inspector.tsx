@@ -1635,7 +1635,9 @@ function expectedRuleSummary(value: unknown) {
   if (matcherBag) {
     const count = Object.keys(asRecord(rule[matcherBag[0]]) ?? {}).length;
     const noun = count === 1 ? matcherBag[1] : `${matcherBag[1]}s`;
-    return `${count.toLocaleString()} ${noun} used as evaluator matcher keys`;
+    return matcherBag[1] === "digit"
+      ? `${count.toLocaleString()} expected digit ${count === 1 ? "count" : "counts"}`
+      : `${count.toLocaleString()} expected ${noun}`;
   }
   const ignored = new Set([
     "id", "type", "page", "tags", "layout_id", "layout_ids", "layout_bindings", "original_md",
@@ -1834,7 +1836,11 @@ function TextBagComparison({
   const noun = textBagNoun(definition.kind, rowCount);
   const comparisonLabel = definition.mode === "unexpected"
     ? `${rowCount.toLocaleString()} retained unexpected ${noun}`
-    : `${definition.entries.length.toLocaleString()} ${definition.kind} matcher keys`;
+    : definition.mode === "maximum"
+      ? `${definition.entries.length.toLocaleString()} ${noun} with occurrence limits`
+      : definition.kind === "digit"
+        ? `${definition.entries.length.toLocaleString()} expected digit ${definition.entries.length === 1 ? "count" : "counts"}`
+        : `${definition.entries.length.toLocaleString()} expected ${noun}`;
 
   return (
     <details
@@ -1892,16 +1898,29 @@ function TextBagComparison({
       {open && definition.mode !== "unexpected" && !(definition.mode === "maximum" && noMarkdownProvided) && (
         <>
           <p className="diagnostic-text-comparison-note">
-            {definition.kind === "sentence" && "This is an unordered coverage bag; reading order is evaluated separately. "}
-            The first column shows configured evaluator matcher keys, not the human-readable ground truth. The evaluator normalizes and may coalesce these keys before scoring. The aggregate percentage above is authoritative. Rows use exact counts when the GCS diagnostic provides them and binary evaluator outcomes otherwise.
+            {definition.kind === "digit" ? (
+              <>
+                This check counts each individual digit character in the extracted Markdown. For example,
+                &ldquo;32&rdquo; contributes one 3 and one 2. Expected counts come from the ground-truth
+                Markdown, and coverage is the output count divided by the expected count. The diagnostic
+                reports deficient counts; &ldquo;Not reported&rdquo; does not mean the digit was absent.
+              </>
+            ) : (
+              <>
+                {definition.kind === "sentence" && "This is an unordered coverage check; reading order is evaluated separately. "}
+                Expected content comes from the ground-truth Markdown. The evaluator normalizes and may
+                combine equivalent entries before scoring. The aggregate percentage above is authoritative;
+                exact output counts are shown only when retained in the diagnostic artifact.
+              </>
+            )}
           </p>
           <div className="diagnostic-table-scroll diagnostic-text-comparison-table">
             <table>
               <thead>
                 <tr>
-                  <th>Evaluator matcher key</th>
-                  <th>{definition.mode === "maximum" ? "Allowed" : "Required"}</th>
-                  <th>Evaluator evidence</th>
+                  <th>{definition.mode === "maximum" ? `Limited ${definition.kind}` : `Expected ${definition.kind}`}</th>
+                  <th>{definition.mode === "maximum" ? "Allowed count" : "Expected count"}</th>
+                  <th>Found in output</th>
                   <th>{definition.mode === "maximum" ? "Compliance" : "Coverage"}</th>
                   <th>Result</th>
                 </tr>
@@ -1927,7 +1946,7 @@ function TextBagComparison({
                   const evaluatorCount = retainedComparison?.expectedCount ?? entry.count;
                   let status: EvidenceStatus = "unknown";
                   let statusLabel: string | undefined;
-                  let extractedEvidence = "Exact occurrence count not retained";
+                  let extractedEvidence = "Not reported";
                   let coverage: number | null = null;
 
                   if (actualCount != null) {
@@ -1944,33 +1963,31 @@ function TextBagComparison({
                           : "failed";
                       coverage = evaluatorCount > 0 ? Math.min(actualCount, evaluatorCount) / evaluatorCount : 1;
                     }
-                    extractedEvidence = actualCount === 0
-                      ? "No evaluator match"
-                      : `${actualCount.toLocaleString()} evaluator ${actualCount === 1 ? "match" : "matches"}`;
+                    extractedEvidence = actualCount.toLocaleString();
                   } else if (aggregateStatus === "passed") {
                     status = "passed";
                     coverage = 1;
                     extractedEvidence = definition.mode === "maximum"
-                      ? "Within the allowed count"
-                      : "Requirement met";
+                      ? "Within limit"
+                      : `At least ${evaluatorCount.toLocaleString()}`;
                   } else if (noMarkdownProvided && definition.mode === "missing") {
                     status = "failed";
                     coverage = 0;
-                    extractedEvidence = markdownState === "empty"
-                      ? "Parser returned no Markdown"
-                      : "No Markdown provided to evaluator";
+                    extractedEvidence = "0";
                   } else if (specificStatus === "failed") {
                     status = "failed";
                     coverage = 0;
-                    extractedEvidence = "No evaluator match";
+                    extractedEvidence = "0";
                   } else if (specificStatus === "passed" && entry.count === 1) {
                     status = "passed";
                     coverage = 1;
-                    extractedEvidence = "Evaluator match found";
+                    extractedEvidence = "At least 1";
                   } else if (specificStatus === "passed") {
                     status = "unknown";
-                    statusLabel = "Count unavailable";
-                    extractedEvidence = "Match found; exact count not retained";
+                    statusLabel = "Not reported";
+                    extractedEvidence = "At least 1";
+                  } else {
+                    statusLabel = "Not reported";
                   }
 
                   return (

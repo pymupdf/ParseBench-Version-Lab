@@ -2021,7 +2021,7 @@ function DocumentExplorer({
                     {([
                       ["explain", "Explain"],
                       ["output", "Output"],
-                      ["original", "Original Markdown"],
+                      ["original", "Ground truth Markdown"],
                       ["expectations", "Ground truth"],
                       ...(hasHistoricalBest ? [["best", "Best result"]] as const : []),
                       ["json", "JSON"],
@@ -2081,10 +2081,10 @@ function DocumentExplorer({
                     originalMarkdown ? (
                       <div className="original-markdown-view">
                         <aside className="original-markdown-note">
-                          <strong>Human-readable ground truth</strong>
+                          <strong>Reference Markdown used for grading</strong>
                           <p>
-                            This is the original reference Markdown retained by the benchmark. The Explain tab
-                            shows the evaluator matcher keys derived from this reference.
+                            This is the human-readable ground-truth Markdown retained by the benchmark. It is
+                            the reference used to derive grading checks, not the parser output.
                           </p>
                         </aside>
                         {markdownMode === "preview"
@@ -2092,11 +2092,11 @@ function DocumentExplorer({
                           : <pre className="markdown-source"><code>{originalMarkdown}</code></pre>}
                       </div>
                     ) : originalMarkdownLoading ? (
-                      <div className="artifact-loading">Looking for original Markdown across this run…</div>
+                      <div className="artifact-loading">Looking for ground-truth Markdown across this run…</div>
                     ) : siblingOriginalMarkdown.error ? (
-                      <EmptyState title="Could not load original Markdown" body={siblingOriginalMarkdown.error} />
+                      <EmptyState title="Could not load ground-truth Markdown" body={siblingOriginalMarkdown.error} />
                     ) : (
-                      <EmptyState title="Original Markdown unavailable" body="No diagnostic for this document retains an original Markdown reference." />
+                      <EmptyState title="Ground-truth Markdown unavailable" body="No diagnostic for this document retains a human-readable ground-truth Markdown reference." />
                     )
                   ) : inspectorTab === "expectations" ? (
                     diagnostic.loading ? (
