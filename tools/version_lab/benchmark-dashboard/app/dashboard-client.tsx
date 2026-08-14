@@ -1911,8 +1911,21 @@ function DocumentExplorer({
                         Reference only ({layerCounts.reference})
                       </span>
                     )}
-                    <span className="layout-region-legend-key">
-                      Dashed expected · Solid output · Double best
+                    <span className="layout-region-legend-key" aria-label="Layer styles">
+                      <span className="layout-region-layer-key">
+                        <i className="layout-layer-swatch layout-layer-swatch-expected" aria-hidden="true" />
+                        Expected
+                      </span>
+                      <span className="layout-region-layer-key">
+                        <i className="layout-layer-swatch layout-layer-swatch-output" aria-hidden="true" />
+                        Output
+                      </span>
+                      {hasHistoricalBest && (
+                        <span className="layout-region-layer-key">
+                          <i className="layout-layer-swatch layout-layer-swatch-best" aria-hidden="true" />
+                          Best
+                        </span>
+                      )}
                     </span>
                   </div>
                 )}
