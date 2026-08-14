@@ -2194,13 +2194,13 @@ function TextDiagnostic(props: DiagnosticInspectorProps) {
                 ? "Markdown was not retained"
                 : "Evaluator received no Markdown"}
           </strong>
-          <p>
-            {props.actualMarkdownState === "empty"
-              ? "The result artifact explicitly contains an empty Markdown value. Required-content matcher keys therefore have zero coverage; this is different from an output that was not retained."
-              : props.actualMarkdownState === "not_retained"
+          {props.actualMarkdownState !== "empty" && (
+            <p>
+              {props.actualMarkdownState === "not_retained"
                 ? "The evaluator received no Markdown and the result artifact has no Markdown field. The dashboard cannot determine whether extraction was empty or the output was lost before serialization."
                 : "The diagnostic records that no Markdown was provided to the evaluator. Required-content checks therefore failed with zero coverage."}
-          </p>
+            </p>
+          )}
         </aside>
       )}
       <RuleGroups

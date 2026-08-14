@@ -714,21 +714,12 @@ function MarkdownPanel({ markdown }: { markdown: string }) {
 }
 
 function EmptyMarkdownArtifact({
-  result,
   state,
 }: {
-  result: CaseResult;
   state: ArtifactState["markdownState"];
 }) {
   if (state === "empty") {
-    return (
-      <EmptyState
-        title="Parser returned empty Markdown"
-        body={result.success
-          ? "Parsing completed without a recorded runtime error, and the result artifact explicitly retained an empty Markdown value. No extractable content was produced."
-          : `Parsing did not produce Markdown${result.error ? `: ${result.error}` : "."}`}
-      />
-    );
+    return <EmptyState title="Parser returned empty Markdown" />;
   }
   if (state === "not_retained") {
     return (
@@ -777,12 +768,12 @@ function EmptyState({
   body,
 }: {
   title: string;
-  body: string;
+  body?: string;
 }) {
   return (
     <div className="empty-state">
       <strong>{title}</strong>
-      <p>{body}</p>
+      {body && <p>{body}</p>}
     </div>
   );
 }
@@ -1587,7 +1578,7 @@ function ResultEvidencePanel({
         ) : artifact.markdownState === "present" ? (
           <MarkdownPanel markdown={artifact.markdown} />
         ) : (
-          <EmptyMarkdownArtifact result={result} state={artifact.markdownState} />
+          <EmptyMarkdownArtifact state={artifact.markdownState} />
         )}
       </section>
     </section>
@@ -2085,7 +2076,7 @@ function DocumentExplorer({
                     ) : artifact.markdownState === "present" ? (
                       markdownMode === "preview" ? <MarkdownPanel markdown={artifact.markdown} /> : <pre className="markdown-source"><code>{artifact.markdown}</code></pre>
                     ) : (
-                      <EmptyMarkdownArtifact result={selected} state={artifact.markdownState} />
+                      <EmptyMarkdownArtifact state={artifact.markdownState} />
                     )
                   ) : inspectorTab === "original" ? (
                     <div className="original-markdown-view">

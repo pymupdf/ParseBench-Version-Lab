@@ -4483,6 +4483,52 @@ code {
   text-transform: uppercase;
 }
 
+.inspector-stage details > summary {
+  cursor: pointer;
+  list-style: none;
+  padding-right: 42px;
+  position: relative;
+}
+
+.inspector-stage details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inspector-stage details > summary::marker {
+  content: "";
+}
+
+.inspector-stage details > summary::after {
+  align-items: center;
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-border);
+  border-radius: 999px;
+  color: var(--brand-dark);
+  content: "›";
+  display: flex;
+  font-size: 17px;
+  font-weight: 760;
+  height: 22px;
+  justify-content: center;
+  line-height: 1;
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%) rotate(90deg);
+  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+  width: 22px;
+}
+
+.inspector-stage details[open] > summary::after {
+  transform: translateY(-50%) rotate(-90deg);
+}
+
+.inspector-stage details > summary:hover::after,
+.inspector-stage details > summary:focus-visible::after {
+  background: var(--brand-soft-hover);
+  border-color: var(--brand-border-strong);
+}
+
 .diagnostic-json-items {
   padding: 0;
 }
