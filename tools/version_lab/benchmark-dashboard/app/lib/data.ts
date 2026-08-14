@@ -167,6 +167,8 @@ export type ArtifactLayoutBox = {
   height: number;
 };
 
+export type ArtifactMarkdownState = "present" | "empty" | "not_retained";
+
 export type RunBundle = {
   dimensions: RunDimension[];
   metrics: DimensionMetric[];
@@ -575,7 +577,14 @@ export async function loadArtifact(
   signal?: AbortSignal,
 ) {
   const url = artifactUrl(run, result.result_relative_path);
-  if (!url) return { url: null, markdown: "", layoutBoxes: [] as ArtifactLayoutBox[] };
+  if (!url) {
+    return {
+      url: null,
+      markdown: "",
+      markdownState: "not_retained" as const,
+      layoutBoxes: [] as ArtifactLayoutBox[],
+    };
+  }
   const response = await fetch(url, { signal });
   if (!response.ok) {
     throw new Error(`Artifact returned ${response.status}`);
@@ -599,13 +608,19 @@ export async function loadArtifact(
       pages?: Array<{ markdown?: string }>;
     };
   };
-  const markdown =
-    artifact.output?.markdown ??
-    artifact.output?.pages
-      ?.map((page) => page.markdown ?? "")
-      .filter(Boolean)
-      .join("\n\n") ??
-    "";
+  const documentMarkdown = typeof artifact.output?.markdown === "string"
+    ? artifact.output.markdown
+    : null;
+  const retainedPageMarkdown = artifact.output?.pages
+    ?.flatMap((page) => typeof page.markdown === "string" ? [page.markdown] : []) ?? [];
+  const pageMarkdown = retainedPageMarkdown.filter(Boolean).join("\n\n");
+  const markdown = documentMarkdown || pageMarkdown;
+  const markdownRetained = documentMarkdown != null || retainedPageMarkdown.length > 0;
+  const markdownState: ArtifactMarkdownState = !markdownRetained
+    ? "not_retained"
+    : markdown.trim()
+      ? "present"
+      : "empty";
   const pages = artifact.raw_output?.pages ?? [];
   const requestedPage = result.benchmark_cases.page_number;
   const layoutPage = pages.find((page) => page.page_number === requestedPage) ?? pages[0];
@@ -632,7 +647,7 @@ export async function loadArtifact(
       }];
     })
     : [];
-  return { url, markdown, layoutBoxes };
+  return { url, markdown, markdownState, layoutBoxes };
 }
 
 export async function loadDiagnostic(

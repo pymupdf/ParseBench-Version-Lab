@@ -27,6 +27,7 @@ import {
 type DiagnosticInspectorProps = {
   diagnostic: DiagnosticArtifact;
   actualMarkdown: string;
+  actualMarkdownState?: "present" | "empty" | "not_retained" | "unknown";
   selectedEvidenceId?: string | null;
   onSelectEvidence?: (evidenceId: string) => void;
 };
@@ -252,6 +253,10 @@ function evidenceStatus(outcome: DiagnosticOutcome | null): EvidenceStatus {
 function outcomeExplanation(outcome: DiagnosticOutcome | null) {
   return asString(outcome?.explanation) ?? asString(outcome?.reason) ??
     asString(outcome?.note);
+}
+
+function outcomeReceivedNoMarkdown(outcome: DiagnosticOutcome | null) {
+  return /^No markdown content provided\.?$/iu.test(outcomeExplanation(outcome) ?? "");
 }
 
 function metricRuleOutcomes(metrics: DiagnosticMetric[]): DiagnosticOutcome[] {
@@ -1768,10 +1773,12 @@ function TextBagComparison({
   definition,
   item,
   specificEvidence,
+  markdownState,
 }: {
   definition: TextBagDefinition;
   item: EvidenceItem;
   specificEvidence: Map<string, EvidenceItem[]>;
+  markdownState: DiagnosticInspectorProps["actualMarkdownState"];
 }) {
   const retained = retainedTextComparisons(item.outcome);
   const explanation = outcomeExplanation(item.outcome);
@@ -1780,6 +1787,7 @@ function TextBagComparison({
   const [open, setOpen] = useState(evidenceStatus(item.outcome) !== "passed" && rowCount <= 10);
   const [visible, setVisible] = useState(TEXT_BAG_INITIAL_ROWS);
   const aggregateStatus = evidenceStatus(item.outcome);
+  const noMarkdownProvided = outcomeReceivedNoMarkdown(item.outcome);
   const visibleUnexpected = unexpectedRows.slice(0, visible);
   const visibleEntries = definition.entries.slice(0, visible);
   const noun = textBagNoun(definition.kind, rowCount);
@@ -1798,7 +1806,15 @@ function TextBagComparison({
         <strong>{scorePercent(item.outcome?.score)}</strong>
       </summary>
       {open && definition.mode === "unexpected" && (
-        unexpectedRows.length ? (
+        noMarkdownProvided ? (
+          <p className="diagnostic-text-comparison-empty">
+            {markdownState === "empty"
+              ? "The parser returned an explicitly empty Markdown result, so the evaluator had no content to inspect for unexpected text."
+              : markdownState === "not_retained"
+                ? "The evaluator received no Markdown, and the result artifact does not retain a Markdown field. Whether extraction was empty or lost before serialization cannot be determined here."
+                : "The evaluator received no Markdown, so it could not inspect the output for unexpected text."}
+          </p>
+        ) : unexpectedRows.length ? (
           <>
             <p className="diagnostic-text-comparison-note">
               These are normalized {textBagNoun(definition.kind, 2)} that the evaluator did not recognize in the reference content. Only examples retained in the artifact are shown; the complete extraction remains available in the Output tab.
@@ -1827,7 +1843,12 @@ function TextBagComparison({
           </p>
         )
       )}
-      {open && definition.mode !== "unexpected" && (
+      {open && definition.mode === "maximum" && noMarkdownProvided && (
+        <p className="diagnostic-text-comparison-empty">
+          No per-key maximum comparison was performed because the evaluator received no Markdown. The rule-level 0% is an input-availability failure, not evidence that any individual occurrence limit was exceeded.
+        </p>
+      )}
+      {open && definition.mode !== "unexpected" && !(definition.mode === "maximum" && noMarkdownProvided) && (
         <>
           <p className="diagnostic-text-comparison-note">
             {definition.kind === "sentence" && "This is an unordered coverage bag; reading order is evaluated separately. "}
@@ -1891,6 +1912,12 @@ function TextBagComparison({
                     extractedEvidence = definition.mode === "maximum"
                       ? "Within the allowed count"
                       : "Requirement met";
+                  } else if (noMarkdownProvided && definition.mode === "missing") {
+                    status = "failed";
+                    coverage = 0;
+                    extractedEvidence = markdownState === "empty"
+                      ? "Parser returned no Markdown"
+                      : "No Markdown provided to evaluator";
                   } else if (specificStatus === "failed") {
                     status = "failed";
                     coverage = 0;
@@ -2158,6 +2185,24 @@ function TextDiagnostic(props: DiagnosticInspectorProps) {
           Rule Pass Rate as its primary metric, every displayed rule contributes instead.
         </p>
       </aside>
+      {items.some((item) => outcomeReceivedNoMarkdown(item.outcome)) && (
+        <aside className="diagnostic-contract-note diagnostic-contract-note-compact">
+          <strong>
+            {props.actualMarkdownState === "empty"
+              ? "Parser returned empty Markdown"
+              : props.actualMarkdownState === "not_retained"
+                ? "Markdown was not retained"
+                : "Evaluator received no Markdown"}
+          </strong>
+          <p>
+            {props.actualMarkdownState === "empty"
+              ? "The result artifact explicitly contains an empty Markdown value. Required-content matcher keys therefore have zero coverage; this is different from an output that was not retained."
+              : props.actualMarkdownState === "not_retained"
+                ? "The evaluator received no Markdown and the result artifact has no Markdown field. The dashboard cannot determine whether extraction was empty or the output was lost before serialization."
+                : "The diagnostic records that no Markdown was provided to the evaluator. Required-content checks therefore failed with zero coverage."}
+          </p>
+        </aside>
+      )}
       <RuleGroups
         items={items}
         groups={TEXT_GROUPS}
@@ -2168,7 +2213,12 @@ function TextDiagnostic(props: DiagnosticInspectorProps) {
         detailForItem={(item) => {
           const definition = textBagDefinition(item);
           return definition
-            ? <TextBagComparison definition={definition} item={item} specificEvidence={specificEvidence} />
+            ? <TextBagComparison
+                definition={definition}
+                item={item}
+                specificEvidence={specificEvidence}
+                markdownState={props.actualMarkdownState}
+              />
             : null;
         }}
       />

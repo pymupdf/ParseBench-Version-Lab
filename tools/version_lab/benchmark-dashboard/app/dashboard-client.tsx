@@ -14,6 +14,7 @@ import remarkGfm from "remark-gfm";
 import {
   artifactUrl,
   ArtifactLayoutBox,
+  ArtifactMarkdownState,
   BenchmarkRun,
   CaseResult,
   TriageCaseResult,
@@ -63,6 +64,7 @@ const ANY_GROUP = "__any_group__";
 type ArtifactState = {
   loading: boolean;
   markdown: string;
+  markdownState: ArtifactMarkdownState | "unknown";
   layoutBoxes: ArtifactLayoutBox[];
   url: string | null;
   error: string | null;
@@ -99,6 +101,7 @@ const EMPTY_BUNDLE: RunBundle = {
 const EMPTY_ARTIFACT: ArtifactState = {
   loading: false,
   markdown: "",
+  markdownState: "unknown",
   layoutBoxes: [],
   url: null,
   error: null,
@@ -708,6 +711,34 @@ function MarkdownPanel({ markdown }: { markdown: string }) {
       </ReactMarkdown>
     </div>
   );
+}
+
+function EmptyMarkdownArtifact({
+  result,
+  state,
+}: {
+  result: CaseResult;
+  state: ArtifactState["markdownState"];
+}) {
+  if (state === "empty") {
+    return (
+      <EmptyState
+        title="Parser returned empty Markdown"
+        body={result.success
+          ? "Parsing completed without a recorded runtime error, and the result artifact explicitly retained an empty Markdown value. No extractable content was produced."
+          : `Parsing did not produce Markdown${result.error ? `: ${result.error}` : "."}`}
+      />
+    );
+  }
+  if (state === "not_retained") {
+    return (
+      <EmptyState
+        title="Extracted Markdown was not retained"
+        body="The result artifact does not contain a document- or page-level Markdown field, so the dashboard cannot determine what the parser produced."
+      />
+    );
+  }
+  return <EmptyState title="No extracted Markdown" body="The extracted-output state is unavailable." />;
 }
 
 function originalMarkdownFromDiagnostic(diagnostic: DiagnosticArtifact | null) {
@@ -1528,7 +1559,11 @@ function ResultEvidencePanel({
         <strong>{scorePercent(primary.score)}</strong>
       </header>
       {diagnostic ? (
-        <DiagnosticInspector diagnostic={diagnostic} actualMarkdown={artifact.markdown} />
+        <DiagnosticInspector
+          diagnostic={diagnostic}
+          actualMarkdown={artifact.markdown}
+          actualMarkdownState={artifact.markdownState}
+        />
       ) : artifact.loading && !diagnosticError ? (
         <div className="artifact-loading">Loading score evidence…</div>
       ) : (
@@ -1549,10 +1584,10 @@ function ResultEvidencePanel({
           <div className="artifact-loading">Loading extracted output…</div>
         ) : artifact.error ? (
           <EmptyState title="Extracted output unavailable" body={artifact.error} />
-        ) : artifact.markdown ? (
+        ) : artifact.markdownState === "present" ? (
           <MarkdownPanel markdown={artifact.markdown} />
         ) : (
-          <EmptyState title="No extracted Markdown" body="This result does not contain a rendered Markdown payload." />
+          <EmptyMarkdownArtifact result={result} state={artifact.markdownState} />
         )}
       </section>
     </section>
@@ -2030,6 +2065,7 @@ function DocumentExplorer({
                       <DiagnosticInspector
                         diagnostic={diagnostic.data}
                         actualMarkdown={artifact.markdown}
+                        actualMarkdownState={artifact.markdownState}
                         selectedEvidenceId={selectedEvidenceId}
                         onSelectEvidence={selectDiagnosticEvidence}
                       />
@@ -2046,10 +2082,10 @@ function DocumentExplorer({
                       <div className="artifact-loading">Loading rendered artifact…</div>
                     ) : artifact.error ? (
                       <EmptyState title="Output unavailable" body={artifact.error} />
-                    ) : artifact.markdown ? (
+                    ) : artifact.markdownState === "present" ? (
                       markdownMode === "preview" ? <MarkdownPanel markdown={artifact.markdown} /> : <pre className="markdown-source"><code>{artifact.markdown}</code></pre>
                     ) : (
-                      <EmptyState title="No rendered markdown" body="The indexed result does not contain a markdown payload." />
+                      <EmptyMarkdownArtifact result={selected} state={artifact.markdownState} />
                     )
                   ) : inspectorTab === "original" ? (
                     <div className="original-markdown-view">
@@ -2771,6 +2807,7 @@ export default function DashboardClient({
     setArtifact({
       loading: true,
       markdown: "",
+      markdownState: "unknown",
       layoutBoxes: [],
       url: artifactUrl(selectedRun, selectedDocument.result_relative_path),
       error: null,
@@ -2787,6 +2824,7 @@ export default function DashboardClient({
         setArtifact({
           loading: false,
           markdown: loadedArtifact.markdown,
+          markdownState: loadedArtifact.markdownState,
           layoutBoxes: loadedArtifact.layoutBoxes,
           url: loadedArtifact.url,
           error: null,
@@ -2889,6 +2927,7 @@ export default function DashboardClient({
         : {
           url: artifactUrl(bestCandidate.run, bestCandidate.result.result_relative_path),
           markdown: "",
+          markdownState: "unknown" as const,
           layoutBoxes: [] as ArtifactLayoutBox[],
         };
       setHistoricalBest((current) => ({
@@ -2899,6 +2938,7 @@ export default function DashboardClient({
         artifact: {
           loading: false,
           markdown: artifactValue.markdown,
+          markdownState: artifactValue.markdownState,
           layoutBoxes: artifactValue.layoutBoxes,
           url: artifactValue.url,
           error: artifactError,
