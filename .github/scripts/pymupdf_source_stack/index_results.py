@@ -45,7 +45,6 @@ def main() -> int:
             "",
             f"- Supabase run row: `{database_run_id}`",
             f"- GitHub run: `{github_run_id}`",
-            f"- Dashboard: [View benchmark run](https://parsebench-dashboard.vercel.app/workflows/{github_run_id})",
             f"- Artifact source: `{'GitHub artifact' if reader is not None else 'GitHub metadata only'}`",
         ]
     )

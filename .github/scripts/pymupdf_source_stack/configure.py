@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from common import COMPONENTS, LAYOUT_REPOSITORIES, env, write_github_outputs, write_json
+from common import COMPONENTS, LAYOUT_REPOSITORIES, append_summary, env, write_github_outputs, write_json
 
 RUN_SCOPES = {
     "Quick test (15 cases)": ("test", "data/test"),
@@ -38,6 +38,12 @@ def selected(mapping: dict[str, object], value: str, label: str):
 
 
 def main() -> int:
+    append_summary(
+        [
+            f"## [View benchmark run in dashboard](https://parsebench-dashboard.vercel.app/workflows/{env('GITHUB_RUN_ID')})",
+            "",
+        ]
+    )
     benchmark_ref = env("BENCHMARK_REF")
     run_scope, data_dir = selected(RUN_SCOPES, env("RUN_SCOPE_SELECTION"), "test size")
     group = selected(GROUPS, env("GROUP_SELECTION"), "document category")
