@@ -1,324 +1,182 @@
-"""Tests for PyMuPDF4LLM provider helpers."""
+"""Tests for the PyMuPDF4LLM native-HTML provider."""
 
-import types
+from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
-import parse_bench.inference.providers.parse.pymupdf4llm as pymupdf4llm_module
-from parse_bench.inference.pipelines import get_pipeline
+import parse_bench.inference.providers.parse.pymupdf4llm as provider_module
+from parse_bench.evaluation.layout_adapters.adapters import PyMuPDF4LLMLayoutAdapter
+from parse_bench.inference.pipelines import get_pipeline, list_pipelines
 from parse_bench.inference.providers.base import ProviderConfigError
-from parse_bench.inference.providers.parse.pymupdf4llm import (
-    _OCR_BACKEND_MODULES,
-    PyMuPDF4LLMProvider,
-)
+from parse_bench.inference.providers.parse.pymupdf4llm import PyMuPDF4LLMProvider
+from parse_bench.schemas.layout_detection_output import LayoutDetectionModel
+from parse_bench.schemas.parse_output import ParseOutput
+from parse_bench.schemas.pipeline import PipelineSpec
+from parse_bench.schemas.pipeline_io import InferenceRequest, RawInferenceResult
+from parse_bench.schemas.product import ProductType
 
 
-def _build_page(page_boxes: list[dict], *, raw_markdown: str):
-    return PyMuPDF4LLMProvider._build_layout_page(
-        {
-            "page_number": 1,
-            "width": 100,
-            "height": 100,
-            "page_boxes": page_boxes,
-        },
-        raw_markdown=raw_markdown,
-    )
+def test_only_one_pymupdf4llm_pipeline_is_registered() -> None:
+    assert [name for name in list_pipelines() if name.startswith("pymupdf4llm")] == [
+        "pymupdf4llm_markdown"
+    ]
 
 
-def test_modern_rapidocr_pipeline_preserves_native_html_options() -> None:
-    pipeline = get_pipeline("pymupdf4llm_html_tables_rapidocr_v3")
+def test_pipeline_uses_rapidocr_and_native_html() -> None:
+    pipeline = get_pipeline("pymupdf4llm_markdown")
 
     assert pipeline.provider_name == "pymupdf4llm"
     assert pipeline.config == {
-        "table_output": "html",
+        "use_ocr": True,
+        "ocr_backend": "rapidocr",
         "ocr_dpi": 150,
-        "ocr_backend": "rapidocr_modern",
+        "table_output": "html",
     }
 
 
-def test_build_layout_page_emits_raw_boxclass_labels() -> None:
-    """Provider forwards raw boxclass labels verbatim and never drops unknowns.
-
-    Canonicalization (and failing loud on unknown classes) is owned by the
-    evaluation label-mapper layer, so an unrecognized class must survive here.
-    """
-    markdown = "grounded content"
-    raw_classes = [
-        "caption",
-        "table",
-        "section-header",
-        "text",
-        "picture",
-        "totally-unknown-class",
-    ]
-    page_boxes = [
-        {
-            "class": raw_class,
-            "bbox": [10, 10 + index * 5, 90, 14 + index * 5],
-            "pos": [0, len(markdown)],
-        }
-        for index, raw_class in enumerate(raw_classes)
-    ]
-
-    page = _build_page(page_boxes, raw_markdown=markdown)
-
-    assert page is not None
-    assert [item.layout_segments[0].label for item in page.items] == raw_classes
-
-
-def test_build_layout_page_sets_item_type_from_raw_class() -> None:
-    markdown = "x"
-    page_boxes = [
-        {"class": "Table", "bbox": [10, 10, 90, 20], "pos": [0, 1]},
-        {"class": "picture", "bbox": [10, 25, 90, 40], "pos": [0, 1]},
-        {"class": "section_header", "bbox": [10, 45, 90, 60], "pos": [0, 1]},
-    ]
-
-    page = _build_page(page_boxes, raw_markdown=markdown)
-
-    assert page is not None
-    assert [item.type for item in page.items] == ["table", "image", "text"]
-
-
-def test_table_native_html_content_is_passed_through() -> None:
-    """A native <table> in the sliced content is preserved untouched."""
-    markdown = "<table><tr><td>a</td><td>b</td></tr></table>"
-    page_boxes = [{"class": "table", "bbox": [10, 10, 90, 90], "pos": [0, len(markdown)]}]
-
-    page = _build_page(page_boxes, raw_markdown=markdown)
-
-    assert page is not None
-    item = page.items[0]
-    assert item.type == "table"
-    assert item.html == markdown
-
-
-def test_table_pipe_markdown_is_converted_to_html() -> None:
-    """Markdown pipe tables still fall back to the markdown2 conversion."""
-    markdown = "| a | b |\n| --- | --- |\n| 1 | 2 |"
-    page_boxes = [{"class": "table", "bbox": [10, 10, 90, 90], "pos": [0, len(markdown)]}]
-
-    page = _build_page(page_boxes, raw_markdown=markdown)
-
-    assert page is not None
-    item = page.items[0]
-    assert item.type == "table"
-    assert item.html != markdown
-    assert "<table>" in item.html.lower()
-
-
-def test_markdown_options_mirror_library_kwargs() -> None:
-    """Config keys mirror pymupdf4llm.to_markdown and are forwarded verbatim."""
+def test_markdown_options_are_declarative() -> None:
     provider = PyMuPDF4LLMProvider(
         "pymupdf4llm",
-        {"use_ocr": True, "force_ocr": True, "ocr_dpi": 150, "ocr_language": "deu"},
+        {
+            "use_ocr": True,
+            "ocr_backend": "rapidocr",
+            "ocr_dpi": 150,
+            "table_output": "html",
+        },
     )
-    options = provider._markdown_options()
 
-    assert options == {
+    assert provider._markdown_options() == {
         "page_chunks": True,
         "show_progress": False,
         "use_ocr": True,
-        "force_ocr": True,
         "ocr_dpi": 150,
-        "ocr_language": "deu",
+        "table_output": "html",
     }
 
 
-def test_markdown_options_are_declarative_no_callable_injected() -> None:
-    """The options dict must stay serializable: no ocr_function/ocr_backend keys."""
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "tesseract"})
-    options = provider._markdown_options()
-
-    assert "ocr_function" not in options
-    assert "ocr_backend" not in options
-    assert all(not callable(value) for value in options.values())
-
-
-def test_markdown_options_does_not_probe_tessdata(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression: the proactive pymupdf.get_tessdata() probe is gone.
-
-    Selecting the tesseract backend must not eagerly probe the OCR engine
-    (the probe spawned a subprocess and cost ~350 ms/page). Building the
-    declarative options must succeed even if get_tessdata would raise.
-    """
-    import pymupdf
-
-    def _boom(*args: object, **kwargs: object) -> object:
-        raise AssertionError("get_tessdata must not be probed while building options")
-
-    monkeypatch.setattr(pymupdf, "get_tessdata", _boom)
-
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "tesseract"})
-    # Does not raise -> the probe was not invoked.
-    assert provider._markdown_options() == {"page_chunks": True, "show_progress": False}
-
-
-@pytest.mark.parametrize("bad_backend", [123, ["tesseract"], object()])
-def test_markdown_options_rejects_non_string_backend(bad_backend: object) -> None:
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": bad_backend})
-    with pytest.raises(ProviderConfigError, match="must be a string"):
-        provider._markdown_options()
-
-
-def test_markdown_options_rejects_unsupported_backend() -> None:
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "nonesuch"})
-    with pytest.raises(ProviderConfigError, match="Unsupported PyMuPDF4LLM OCR backend"):
-        provider._markdown_options()
-
-
-@pytest.mark.parametrize("config", [{}, {"ocr_backend": "auto"}, {"ocr_backend": "AUTO"}])
-def test_resolve_ocr_function_defers_to_library(config: dict[str, object]) -> None:
-    """Absent or 'auto' backend returns None so pymupdf4llm selects the engine."""
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", config)
-    assert provider._resolve_ocr_function() is None
-
-
-@pytest.mark.parametrize("backend", sorted(set(_OCR_BACKEND_MODULES) - {"rapidocr_modern"}))
-def test_resolve_ocr_function_resolves_backend_internally(backend: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The engine callable is resolved from the module map at call time."""
-    imported: list[str] = []
-
-    def _sentinel_exec_ocr(*args: object, **kwargs: object) -> None:
+def test_resolve_rapidocr_uses_bundled_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    def exec_ocr() -> None:
         return None
 
-    fake_module = types.SimpleNamespace(exec_ocr=_sentinel_exec_ocr)
+    requested: list[str] = []
 
-    def _fake_import(name: str) -> object:
-        imported.append(name)
-        return fake_module
+    def import_module(name: str) -> SimpleNamespace:
+        requested.append(name)
+        return SimpleNamespace(exec_ocr=exec_ocr)
 
-    monkeypatch.setattr(pymupdf4llm_module.importlib, "import_module", _fake_import)
+    monkeypatch.setattr(provider_module.importlib, "import_module", import_module)
 
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": backend})
-    resolved = provider._resolve_ocr_function()
-
-    assert resolved is _sentinel_exec_ocr
-    assert imported == [_OCR_BACKEND_MODULES[backend]]
-
-
-def test_resolve_modern_rapidocr_requires_and_selects_modern_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    imported: list[str] = []
-
-    def _sentinel_exec_ocr(*args: object, **kwargs: object) -> None:
-        return None
-
-    detector_module = types.SimpleNamespace(detect_rapidocr_backend=lambda: "rapidocr")
-    api_module = types.SimpleNamespace(exec_ocr=_sentinel_exec_ocr)
-
-    def _fake_import(name: str) -> object:
-        imported.append(name)
-        if name == "pymupdf4llm.ocr.detect_rapidocr":
-            return detector_module
-        if name == "pymupdf4llm.ocr.rapidocr_api":
-            return api_module
-        raise ImportError(name)
-
-    monkeypatch.setattr(pymupdf4llm_module.importlib, "import_module", _fake_import)
-
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "rapidocr_modern"})
-
-    assert provider._resolve_ocr_function() is _sentinel_exec_ocr
-    assert imported == ["pymupdf4llm.ocr.detect_rapidocr", "pymupdf4llm.ocr.rapidocr_api"]
-
-
-def test_resolve_modern_rapidocr_rejects_pymupdf4llm_without_adapter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _missing_adapter(name: str) -> object:
-        raise ModuleNotFoundError(name)
-
-    monkeypatch.setattr(pymupdf4llm_module.importlib, "import_module", _missing_adapter)
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "rapidocr_modern"})
-
-    with pytest.raises(ProviderConfigError, match="revision with modern RapidOCR support"):
-        provider._resolve_ocr_function()
-
-
-@pytest.mark.parametrize("detected_backend", [None, "rapidocr_onnxruntime"])
-def test_resolve_modern_rapidocr_refuses_legacy_fallback(
-    detected_backend: str | None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    detector_module = types.SimpleNamespace(detect_rapidocr_backend=lambda: detected_backend)
-    monkeypatch.setattr(pymupdf4llm_module.importlib, "import_module", lambda name: detector_module)
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "rapidocr_modern"})
-
-    with pytest.raises(ProviderConfigError, match="refusing to fall back"):
-        provider._resolve_ocr_function()
-
-
-def test_resolve_ocr_function_unavailable_backend_is_reactive() -> None:
-    """An unavailable engine fails only at resolve time, not at config time.
-
-    rapidocr_onnxruntime is not installed in the test environment, so importing
-    the backend raises ImportError. Building the declarative options must still
-    succeed; the failure surfaces reactively from _resolve_ocr_function.
-    """
     provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "rapidocr"})
 
-    # Config/options stage stays clean.
-    assert provider._markdown_options() == {"page_chunks": True, "show_progress": False}
-
-    # Resolution stage raises reactively.
-    with pytest.raises(ProviderConfigError, match="rapidocr.*unavailable"):
-        provider._resolve_ocr_function()
+    assert provider._resolve_ocr_function() is exec_ocr
+    assert requested == ["pymupdf4llm.ocr.rapidocr_api"]
 
 
-def test_resolve_ocr_function_missing_exec_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A backend module without exec_ocr is a config error."""
-    monkeypatch.setattr(
-        pymupdf4llm_module.importlib,
-        "import_module",
-        lambda name: types.SimpleNamespace(),
-    )
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "tesseract"})
-    with pytest.raises(ProviderConfigError, match="does not expose exec_ocr"):
-        provider._resolve_ocr_function()
+@pytest.mark.parametrize("backend", ["rapidtess", "tesseract", "rapidocr_onnxruntime"])
+def test_markdown_options_rejects_unsupported_ocr_backends(backend: str) -> None:
+    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": backend})
 
-
-def test_resolve_ocr_function_tesseract_without_tessdata_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicitly requested tesseract backend must not silently skip OCR.
-
-    pymupdf4llm's tesseract_api imports cleanly when Tesseract is missing (it
-    warns and its exec_ocr becomes a per-page no-op), so the ImportError guard
-    never fires. The provider must read the module's TESSDATA marker and raise
-    instead of letting the run quietly score without OCR.
-    """
-    fake_module = types.SimpleNamespace(exec_ocr=lambda *a, **k: None, TESSDATA=None)
-    monkeypatch.setattr(pymupdf4llm_module.importlib, "import_module", lambda name: fake_module)
-
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "tesseract"})
-    with pytest.raises(ProviderConfigError, match="Tesseract language data"):
-        provider._resolve_ocr_function()
-
-
-def test_resolve_ocr_function_tesseract_with_tessdata_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With Tesseract available (TESSDATA set), resolution succeeds."""
-
-    def _sentinel_exec_ocr(*args: object, **kwargs: object) -> None:
-        return None
-
-    fake_module = types.SimpleNamespace(exec_ocr=_sentinel_exec_ocr, TESSDATA="/usr/share/tessdata")
-    monkeypatch.setattr(pymupdf4llm_module.importlib, "import_module", lambda name: fake_module)
-
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_backend": "tesseract"})
-    assert provider._resolve_ocr_function() is _sentinel_exec_ocr
-
-
-def test_markdown_options_threads_table_output() -> None:
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"table_output": "html"})
-    options = provider._markdown_options()
-    assert options["table_output"] == "html"
-
-
-def test_markdown_options_omits_table_output_by_default() -> None:
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {})
-    options = provider._markdown_options()
-    assert "table_output" not in options
-
-
-def test_markdown_options_rejects_unknown_table_output() -> None:
-    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"table_output": "xml"})
-    with pytest.raises(ProviderConfigError):
+    with pytest.raises(ProviderConfigError, match="Unsupported.*OCR backend"):
         provider._markdown_options()
+
+
+@pytest.mark.parametrize("ocr_dpi", [True, 0, -1, 150.0, "150"])
+def test_markdown_options_reject_invalid_ocr_dpi(ocr_dpi: object) -> None:
+    provider = PyMuPDF4LLMProvider("pymupdf4llm", {"ocr_dpi": ocr_dpi})
+
+    with pytest.raises(ProviderConfigError, match="positive integer"):
+        provider._markdown_options()
+
+
+def test_build_layout_page_preserves_native_html_raw_labels_and_bbox() -> None:
+    native_html = "<table><tr><td>value</td></tr></table>"
+    page = PyMuPDF4LLMProvider._build_layout_page(
+        {
+            "page_number": 1,
+            "width": 200,
+            "height": 100,
+            "page_boxes": [
+                {
+                    "class": "table",
+                    "bbox": [20, 10, 180, 90],
+                    "pos": [0, len(native_html)],
+                }
+            ],
+        },
+        raw_markdown=native_html,
+    )
+
+    assert page is not None
+    item = page.items[0]
+    assert item.md == native_html
+    assert item.html == native_html
+    assert item.layout_segments[0].label == "table"
+    assert item.layout_segments[0].model_dump(include={"x", "y", "w", "h"}) == {
+        "x": 0.1,
+        "y": 0.1,
+        "w": 0.8,
+        "h": 0.8,
+    }
+
+
+def test_normalize_preserves_native_html_and_layout_grounding() -> None:
+    native_html = "<table><tr><td>value</td></tr></table>"
+    raw_output = {
+        "pages": [
+            {
+                "page_index": 0,
+                "page_number": 1,
+                "text": native_html,
+                "width": 100,
+                "height": 100,
+                "page_boxes": [
+                    {"class": "table", "bbox": [0, 0, 100, 100], "pos": [0, len(native_html)]}
+                ],
+            }
+        ],
+        "num_pages": 1,
+    }
+    pipeline = PipelineSpec(
+        pipeline_name="pymupdf4llm_markdown",
+        provider_name="pymupdf4llm",
+        product_type=ProductType.PARSE,
+        config={
+            "use_ocr": True,
+            "ocr_backend": "rapidocr",
+            "ocr_dpi": 150,
+            "table_output": "html",
+        },
+    )
+    request = InferenceRequest(
+        example_id="example-1",
+        source_file_path="/tmp/example.pdf",
+        product_type=ProductType.PARSE,
+    )
+    now = datetime.now()
+    raw_result = RawInferenceResult(
+        request=request,
+        pipeline=pipeline,
+        pipeline_name=pipeline.pipeline_name,
+        product_type=ProductType.PARSE,
+        raw_output=raw_output,
+        started_at=now,
+        completed_at=now,
+        latency_in_ms=0,
+    )
+
+    result = PyMuPDF4LLMProvider("pymupdf4llm", pipeline.config).normalize(raw_result)
+
+    assert isinstance(result.output, ParseOutput)
+    assert result.output.layout_pages[0].items[0].md == native_html
+    assert result.output.layout_pages[0].items[0].html == native_html
+    assert result.output.markdown == native_html
+    assert result.raw_output == raw_output
+
+    adapter = PyMuPDF4LLMLayoutAdapter()
+    assert adapter.matches(result)
+    layout_output = adapter.to_layout_output(result)
+    assert layout_output.model == LayoutDetectionModel.PYMUPDF4LLM_LAYOUT
+    assert layout_output.image_width == 100
+    assert layout_output.image_height == 100
+    assert layout_output.predictions[0].bbox == [0.0, 0.0, 100.0, 100.0]

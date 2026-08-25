@@ -10,7 +10,7 @@ LAYOUT_REPOSITORIES = (
     "ArtifexSoftware/sce",
     "ArtifexSoftware/pymupdf_layout",
 )
-STANDARD_REF = "1.28.0"
+STANDARD_REF = "1.28.2"
 
 
 @dataclass(frozen=True)

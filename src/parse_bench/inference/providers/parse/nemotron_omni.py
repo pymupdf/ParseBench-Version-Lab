@@ -1,17 +1,15 @@
-"""Provider for Gemma 4 Modal vLLM server.
+"""Provider for NVIDIA Nemotron-3-Nano-Omni 30B-A3B Reasoning vLLM server.
 
-Gemma 4 is Google's multimodal model family with built-in vision.
-Supports OCR, document parsing, and chart comprehension.
+Nemotron-3-Nano-Omni is a Mamba2-Transformer hybrid MoE (31B total / 3B active)
+with native video + audio + image + text input. It is served OpenAI-compatible
+via vLLM and used here strictly for PARSE (document -> markdown).
 
-Supports two prompt modes:
-- "parse" (default): Pure markdown output, with md-table-to-HTML conversion
-  for GriTS/TEDS evaluation. No layout data.
-- "layout": Structured output with <div data-bbox/data-label> wrappers
-  (same approach as the Gemini provider). Produces both reassembled markdown
-  and layout_pages for layout detection cross-evaluation.
+The model defaults to reasoning mode, which is unhelpful for OCR-style tasks
+(it produces long internal thoughts before the answer). Thinking is toggled via
+`chat_template_kwargs.enable_thinking` per the model card's "Instruct Mode"
+best practices.
 
-Uses the same prompts as the Gemini (Google) provider since they share the
-same model family lineage.
+Model card: https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16
 """
 
 import asyncio
@@ -33,10 +31,11 @@ from parse_bench.inference.providers.base import (
     ProviderTransientError,
 )
 from parse_bench.inference.providers.parse._layout_utils import (
+    SYSTEM_PROMPT_LAYOUT,
+    USER_PROMPT_LAYOUT,
     build_layout_pages,
     items_to_markdown,
     parse_layout_blocks,
-    resolve_layout_prompts,
 )
 from parse_bench.inference.providers.registry import register_provider
 from parse_bench.schemas.parse_output import ParseOutput
@@ -50,9 +49,10 @@ from parse_bench.schemas.product import ProductType
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SERVED_MODEL_NAME = "gemma-4-26b-a4b"
+DEFAULT_SERVED_MODEL_NAME = "nemotron-omni-30b"
 
-# Reuse Gemini's parse prompts (same Google model family)
+# Byte-identical to the standard parse prompt used by openai.py /
+# anthropic.py / gemma4.py — keeps Nemotron head-to-head comparable.
 SYSTEM_PROMPT_PARSE = (
     "You are a document parser. Your task is to convert "
     "document images to clean, well-structured markdown."
@@ -87,55 +87,61 @@ USER_PROMPT_PARSE = (
 )
 
 
-@register_provider("gemma4")
-class Gemma4Provider(Provider):
-    """
-    Provider for Gemma 4 vLLM server on Modal.
+@register_provider("nemotron_omni")
+class NemotronOmniProvider(Provider):
+    """Provider for a self-hosted Nemotron-Omni-30B vLLM server.
 
     Configuration options:
-        - server_url (str, required): Modal server URL
-        - model (str, default="gemma-4-26b-a4b"): Served model name
+        - server_url (str, required): vLLM server URL. May also be supplied via
+          the ``NEMOTRON_OMNI_SERVER_URL`` environment variable.
+        - model (str, default="nemotron-omni-30b"): Served model name
         - prompt_mode (str, default="parse"): "parse" or "layout"
-        - bbox_scale: 1000 (default, 0-1000 bboxes) or None
-          (absolute pixel bboxes, layout prompt only)
-        - timeout (int, default=600): Request timeout in seconds
-        - dpi (int, default=150): DPI for PDF to image conversion
-        - max_tokens (int, default=16384): Max tokens per response
-        - temperature (float, default=0.1): Sampling temperature
+        - timeout (int, default=900): Request timeout in seconds (30B is slow)
+        - dpi (int, default=150): DPI for PDF → image conversion
+        - max_tokens (int, default=8192): Max tokens per response
+        - temperature (float, default=0.2): Sampling temperature
+        - top_k (int | None, default=1): Top-k sampling. None to omit.
+        - top_p (float | None, default=None): Top-p sampling. None to omit.
+        - enable_thinking (bool, default=False): Toggle reasoning mode
+        - reasoning_budget (int | None, default=None): Tokens for the thinking
+            block (card recommends 16384 in thinking mode)
+        - thinking_token_budget (int | None, default=None): Total budget cap
+            forwarded via extra_body when thinking is enabled
         - api_key_env (str, default="VLLM_API_KEY"): Env var for API key
     """
 
     def __init__(self, provider_name: str, base_config: dict[str, Any] | None = None):
         super().__init__(provider_name, base_config)
 
-        server_url = self.base_config.get("server_url") or os.getenv("GEMMA4_SERVER_URL")
+        server_url = self.base_config.get("server_url") or os.getenv("NEMOTRON_OMNI_SERVER_URL")
         if not server_url:
-            raise ProviderConfigError("Gemma4 provider requires 'server_url' in config.")
+            raise ProviderConfigError(
+                "NemotronOmni provider requires 'server_url' in config or "
+                "NEMOTRON_OMNI_SERVER_URL in the environment."
+            )
         self._server_url: str = str(server_url)
 
         self._model = self.base_config.get("model", DEFAULT_SERVED_MODEL_NAME)
         self._prompt_mode = self.base_config.get("prompt_mode", "parse")
-        # E4B outputs bboxes as [y1, x1, y2, x2]; 26B outputs correct [x1, y1, x2, y2]
-        self._swap_bbox = self.base_config.get("swap_bbox", False)
-        self._timeout = self.base_config.get("timeout", 600)
+        self._timeout = self.base_config.get("timeout", 900)
         self._dpi = self.base_config.get("dpi", 150)
-        self._max_tokens = self.base_config.get("max_tokens", 16384)
-        self._temperature = self.base_config.get("temperature", 0.1)
-
-        api_key_env = self.base_config.get("api_key_env", "VLLM_API_KEY")
-        self._api_key = os.environ.get(api_key_env, "")
-
-        # Grid the layout-prompt bboxes are on: 1000 (the 0-1000 prompt,
-        # the default) or None (absolute pixels of the sent image).
-        self._bbox_scale = self.base_config.get("bbox_scale", 1000)
-        layout_system, layout_user = resolve_layout_prompts(self._bbox_scale, None)
+        self._max_tokens = self.base_config.get("max_tokens", 8192)
+        self._temperature = self.base_config.get("temperature", 0.2)
+        self._top_k = self.base_config.get("top_k", 1)
+        self._top_p = self.base_config.get("top_p", None)
+        self._enable_thinking = self.base_config.get("enable_thinking", False)
+        self._reasoning_budget = self.base_config.get("reasoning_budget", None)
+        self._thinking_token_budget = self.base_config.get("thinking_token_budget", None)
 
         if self._prompt_mode == "layout":
-            self._system_prompt = layout_system
-            self._user_prompt = layout_user
+            self._system_prompt = SYSTEM_PROMPT_LAYOUT
+            self._user_prompt = USER_PROMPT_LAYOUT
         else:
             self._system_prompt = SYSTEM_PROMPT_PARSE
             self._user_prompt = USER_PROMPT_PARSE
+
+        api_key_env = self.base_config.get("api_key_env", "VLLM_API_KEY")
+        self._api_key = os.environ.get(api_key_env, "")
 
     # ------------------------------------------------------------------
     # Image helpers
@@ -176,7 +182,11 @@ class Gemma4Provider(Provider):
     async def _call_api(self, session: aiohttp.ClientSession, image_b64: str) -> str:
         api_url = f"{self._server_url.rstrip('/')}/v1/chat/completions"
 
-        payload = {
+        chat_template_kwargs: dict[str, Any] = {"enable_thinking": self._enable_thinking}
+        if self._enable_thinking and self._reasoning_budget is not None:
+            chat_template_kwargs["reasoning_budget"] = self._reasoning_budget
+
+        payload: dict[str, Any] = {
             "model": self._model,
             "messages": [
                 {"role": "system", "content": self._system_prompt},
@@ -194,7 +204,16 @@ class Gemma4Provider(Provider):
             "temperature": self._temperature,
             "max_tokens": self._max_tokens,
             "stream": False,
+            # Nemotron-3 vLLM extras; vLLM's OpenAI server accepts top-level
+            # extras for top_k/top_p and chat_template_kwargs.
+            "chat_template_kwargs": chat_template_kwargs,
         }
+        if self._top_k is not None:
+            payload["top_k"] = self._top_k
+        if self._top_p is not None:
+            payload["top_p"] = self._top_p
+        if self._enable_thinking and self._thinking_token_budget is not None:
+            payload["thinking_token_budget"] = self._thinking_token_budget
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._api_key:
@@ -234,40 +253,25 @@ class Gemma4Provider(Provider):
 
         result: dict[str, Any] = {
             "prompt_mode": self._prompt_mode,
-            "bbox_scale": self._bbox_scale,
             "_config": {
                 "server_url": self._server_url,
                 "model": self._model,
                 "dpi": self._dpi,
             },
         }
-
         if self._prompt_mode == "layout":
             items = parse_layout_blocks(raw_content)
             result["raw_content"] = raw_content
-            # E4B outputs bboxes as [y1, x1, y2, x2]; 26B outputs correct [x1, y1, x2, y2]
-            result["layout_items"] = [
-                {
-                    "bbox": (
-                        [item["bbox"][1], item["bbox"][0], item["bbox"][3], item["bbox"][2]]
-                        if self._swap_bbox
-                        else item["bbox"]
-                    ),
-                    "label": item["label"],
-                    "text": item["text"],
-                }
-                for item in items
-            ]
+            result["layout_items"] = items
             result["image_width"] = img_width
             result["image_height"] = img_height
         else:
             result["markdown"] = raw_content
-
         return result
 
     def run_inference(self, pipeline: PipelineSpec, request: InferenceRequest) -> RawInferenceResult:
         if request.product_type != ProductType.PARSE:
-            raise ProviderPermanentError(f"Gemma4Provider only supports PARSE, got {request.product_type}")
+            raise ProviderPermanentError(f"NemotronOmniProvider only supports PARSE, got {request.product_type}")
 
         started_at = datetime.now()
 
@@ -318,7 +322,7 @@ class Gemma4Provider(Provider):
                 pipeline_name=pipeline.pipeline_name,
                 product_type=request.product_type,
                 raw_output={
-                    "markdown": "" if self._prompt_mode == "parse" else None,
+                    "markdown": "",
                     "_error": error_msg,
                     "_error_type": type(e).__name__,
                     "_config": {
@@ -333,7 +337,7 @@ class Gemma4Provider(Provider):
             )
 
     # ------------------------------------------------------------------
-    # HTML helpers
+    # HTML helpers (same as Gemma4 — pipe-table → HTML for GriTS/TEDS)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -395,7 +399,7 @@ class Gemma4Provider(Provider):
 
     def normalize(self, raw_result: RawInferenceResult) -> InferenceResult:
         if raw_result.product_type != ProductType.PARSE:
-            raise ProviderPermanentError(f"Gemma4Provider only supports PARSE, got {raw_result.product_type}")
+            raise ProviderPermanentError(f"NemotronOmniProvider only supports PARSE, got {raw_result.product_type}")
 
         prompt_mode = raw_result.raw_output.get("prompt_mode", "parse")
 
@@ -414,7 +418,6 @@ class Gemma4Provider(Provider):
                 image_height=img_h,
                 markdown=markdown,
                 page_number=1,
-                bbox_scale=raw_result.raw_output.get("bbox_scale", 1000),
             )
 
             output = ParseOutput(

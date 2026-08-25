@@ -1,12 +1,11 @@
 """Provider for PyMuPDF4LLM PARSE."""
 
 import importlib
-import logging
 import math
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from parse_bench.inference.providers.base import (
     Provider,
@@ -29,32 +28,20 @@ from parse_bench.schemas.pipeline_io import (
 )
 from parse_bench.schemas.product import ProductType
 
-logger = logging.getLogger(__name__)
-
-
-# `ocr_backend` is a ParseBench-level config key (not a pymupdf4llm.to_markdown
-# kwarg): it names which bundled OCR engine should back `ocr_function`. The
-# engine callable is resolved from this map internally at call time (see
-# `_resolve_ocr_function`) so it never enters a serialized options/config dict.
 _OCR_BACKEND_MODULES = {
     "rapidocr": "pymupdf4llm.ocr.rapidocr_api",
-    "rapidocr_modern": "pymupdf4llm.ocr.rapidocr_api",
-    "tesseract": "pymupdf4llm.ocr.tesseract_api",
 }
 
 
 @register_provider("pymupdf4llm")
 class PyMuPDF4LLMProvider(Provider):
-    """Provider for PyMuPDF4LLM (markdown). AGPL — runtime dep only."""
+    """Provider for PyMuPDF4LLM native HTML table output. AGPL — runtime dep only."""
 
     def __init__(self, provider_name: str, base_config: dict[str, Any] | None = None):
         super().__init__(provider_name, base_config)
 
     def _markdown_options(self) -> dict[str, Any]:
-        # `use_ocr`, `force_ocr`, `ocr_dpi`, and `ocr_language` intentionally
-        # mirror pymupdf4llm.to_markdown's kwargs 1:1 and are forwarded verbatim
-        # below; keep these config keys aligned with the library API rather than
-        # renaming them to match other providers.
+        """Build serializable options for ``pymupdf4llm.to_markdown``."""
         options: dict[str, Any] = {
             "page_chunks": True,
             "show_progress": False,
@@ -87,74 +74,32 @@ class PyMuPDF4LLMProvider(Provider):
                 raise ProviderConfigError("PyMuPDF4LLM 'ocr_language' must be a non-empty string")
             options["ocr_language"] = ocr_language
 
-        table_output = self.base_config.get("table_output")
-        if table_output is not None:
-            if not isinstance(table_output, str):
-                raise ProviderConfigError("PyMuPDF4LLM 'table_output' must be a string")
-            normalized_table_output = table_output.strip().lower()
-            if normalized_table_output not in ("markdown", "html"):
-                raise ProviderConfigError("PyMuPDF4LLM 'table_output' must be 'markdown' or 'html'")
-            # Opt-in HTML table rendering. pymupdf4llm builds that ship the native
-            # HTML table engine emit structured <table> markup for table_output="html";
-            # builds without it ignore the extra keyword, so the default markdown
-            # pipelines above are unaffected.
-            options["table_output"] = normalized_table_output
+        table_output = self.base_config.get("table_output", "html")
+        if not isinstance(table_output, str) or table_output.strip().lower() != "html":
+            raise ProviderConfigError("PyMuPDF4LLM only supports table_output='html'")
+        options["table_output"] = "html"
 
         raw_backend = self.base_config.get("ocr_backend")
         if raw_backend is None:
             return options
-        # `ocr_backend` selects a bundled pymupdf4llm OCR engine. It is a
-        # ParseBench-level string, not a to_markdown kwarg: validate it here so a
-        # bad value fails fast, but resolve the engine callable lazily at call
-        # time (see `_resolve_ocr_function`) so it never enters this options
-        # dict. `auto` defers to pymupdf4llm's own engine selection.
         if not isinstance(raw_backend, str):
             raise ProviderConfigError("PyMuPDF4LLM 'ocr_backend' must be a string")
         backend = raw_backend.strip().lower()
-        if backend != "auto" and backend not in _OCR_BACKEND_MODULES:
-            supported = ", ".join(["auto", *_OCR_BACKEND_MODULES])
+        if backend not in _OCR_BACKEND_MODULES:
+            supported = ", ".join(_OCR_BACKEND_MODULES)
             raise ProviderConfigError(
                 f"Unsupported PyMuPDF4LLM OCR backend '{raw_backend}'. Supported backends: {supported}"
             )
         return options
 
     def _resolve_ocr_function(self) -> Callable[..., Any] | None:
-        """Resolve the configured OCR engine callable immediately before OCR.
-
-        `ocr_backend` is validated in `_markdown_options`; here the selected
-        engine module is imported and its ``exec_ocr`` returned so it can be
-        handed to ``to_markdown(ocr_function=...)`` as a direct call-time kwarg
-        -- never stored in the serialized options/config dict. An absent or
-        ``auto`` backend returns ``None`` so pymupdf4llm performs its own engine
-        selection. Engine availability is discovered reactively: an unavailable
-        backend raises ProviderConfigError only when that backend is actually
-        requested, rather than probing eagerly for every request.
-        """
+        """Resolve the configured bundled OCR engine immediately before use."""
         raw_backend = self.base_config.get("ocr_backend")
         if not isinstance(raw_backend, str):
             return None
-        backend = raw_backend.strip().lower()
-        module_name = _OCR_BACKEND_MODULES.get(backend)
+        module_name = _OCR_BACKEND_MODULES.get(raw_backend.strip().lower())
         if module_name is None:
             return None
-
-        if backend == "rapidocr_modern":
-            try:
-                detector_module = importlib.import_module("pymupdf4llm.ocr.detect_rapidocr")
-                detect_rapidocr_backend = detector_module.detect_rapidocr_backend
-            except (ImportError, AttributeError) as e:
-                raise ProviderConfigError(
-                    "PyMuPDF4LLM OCR backend 'rapidocr_modern' requires a "
-                    "PyMuPDF4LLM revision with modern RapidOCR support"
-                ) from e
-
-            detected_backend = detect_rapidocr_backend()
-            if detected_backend != "rapidocr":
-                raise ProviderConfigError(
-                    "PyMuPDF4LLM OCR backend 'rapidocr_modern' requires the modern "
-                    "'rapidocr' package; refusing to fall back to 'rapidocr-onnxruntime'"
-                )
-
         try:
             ocr_module = importlib.import_module(module_name)
         except (ImportError, RuntimeError) as e:
@@ -162,18 +107,7 @@ class PyMuPDF4LLMProvider(Provider):
         ocr_function = getattr(ocr_module, "exec_ocr", None)
         if not callable(ocr_function):
             raise ProviderConfigError(f"PyMuPDF4LLM OCR backend '{raw_backend}' does not expose exec_ocr")
-        # The tesseract backend module imports cleanly even when Tesseract is
-        # missing: it warns once and its exec_ocr becomes a per-page no-op
-        # (pymupdf4llm/ocr/tesseract_api.py), so the import guard above never
-        # fires for it. A benchmark run must not silently score without the OCR
-        # the user asked for, so read the module's import-time availability
-        # marker (no extra subprocess probe) and fail loudly instead.
-        if getattr(ocr_module, "TESSDATA", True) is None:
-            raise ProviderConfigError(
-                f"PyMuPDF4LLM OCR backend '{raw_backend}' is unavailable: "
-                "Tesseract language data was not found (pymupdf.get_tessdata() returned None)"
-            )
-        return ocr_function
+        return cast(Callable[..., Any], ocr_function)
 
     def _extract(self, pdf_path: str) -> dict[str, Any]:
         try:
@@ -184,9 +118,6 @@ class PyMuPDF4LLMProvider(Provider):
 
         try:
             markdown_options = self._markdown_options()
-            # Resolve the OCR engine callable here, immediately before the call,
-            # and pass it as a direct kwarg so the callable never lives in the
-            # declarative options dict (ocr_backend stays a plain string key).
             ocr_function = self._resolve_ocr_function()
             if ocr_function is None:
                 page_chunks = pymupdf4llm.to_markdown(pdf_path, **markdown_options)
@@ -223,7 +154,6 @@ class PyMuPDF4LLMProvider(Provider):
             page_boxes = chunk.get("page_boxes", []) if isinstance(chunk, dict) else []
             if not isinstance(page_boxes, list):
                 page_boxes = []
-
             pages.append(
                 {
                     "page_index": i,
@@ -265,47 +195,12 @@ class PyMuPDF4LLMProvider(Provider):
             raise ProviderPermanentError(f"Unexpected error: {e}") from e
 
     @staticmethod
-    def _convert_md_tables_to_html(content: str) -> str:
-        import markdown2
-
-        lines = content.split("\n")
-        result_parts: list[str] = []
-        table_lines: list[str] = []
-        in_table = False
-
-        def _flush() -> None:
-            nonlocal table_lines
-            if len(table_lines) >= 2:
-                html = markdown2.markdown("\n".join(table_lines), extras=["tables"]).strip()
-                if "<table>" in html.lower():
-                    result_parts.append(html)
-                else:
-                    result_parts.extend(table_lines)
-            else:
-                result_parts.extend(table_lines)
-            table_lines = []
-
-        for line in lines:
-            if "|" in line and line.strip().startswith("|"):
-                in_table = True
-                table_lines.append(line)
-            else:
-                if in_table:
-                    _flush()
-                    in_table = False
-                result_parts.append(line)
-        if in_table:
-            _flush()
-        return "\n".join(result_parts)
-
-    @staticmethod
     def _coerce_bbox(
         raw_bbox: Any,
         *,
         page_width: float,
         page_height: float,
     ) -> tuple[float, float, float, float] | None:
-        """Validate, clamp, and normalize a PyMuPDF XYXY bbox to XYWH."""
         if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
             return None
         try:
@@ -316,7 +211,6 @@ class PyMuPDF4LLMProvider(Provider):
             return None
         if page_width <= 0 or page_height <= 0:
             return None
-
         x0 = min(max(x0, 0.0), page_width)
         x1 = min(max(x1, 0.0), page_width)
         y0 = min(max(y0, 0.0), page_height)
@@ -332,7 +226,6 @@ class PyMuPDF4LLMProvider(Provider):
 
     @staticmethod
     def _coerce_text_range(raw_pos: Any, text_length: int) -> tuple[int, int] | None:
-        """Validate and clamp a page-box Markdown character range."""
         if not isinstance(raw_pos, (list, tuple)) or len(raw_pos) != 2:
             return None
         start, stop = raw_pos
@@ -356,7 +249,7 @@ class PyMuPDF4LLMProvider(Provider):
         *,
         raw_markdown: str,
     ) -> ParseLayoutPageIR | None:
-        """Convert PyMuPDF page boxes into benchmark visual-grounding IR."""
+        """Convert native PyMuPDF page boxes into benchmark visual-grounding IR."""
         try:
             page_number = int(page_data.get("page_number", 0))
             page_width = float(page_data.get("width", 0.0))
@@ -370,11 +263,6 @@ class PyMuPDF4LLMProvider(Provider):
         for page_box in page_data.get("page_boxes", []):
             if not isinstance(page_box, dict):
                 continue
-
-            # Emit the raw pymupdf4llm boxclass label untouched. Canonicalization
-            # and failing loud on genuinely unknown classes are owned by the
-            # evaluation label-mapper layer (PyMuPDF4LLMLabelMapper), not the
-            # provider, so no class is silently dropped here.
             raw_label = str(page_box.get("class", "")).strip()
             if not raw_label:
                 continue
@@ -387,7 +275,6 @@ class PyMuPDF4LLMProvider(Provider):
             )
             if bbox is None:
                 continue
-
             text_range = cls._coerce_text_range(page_box.get("pos"), len(raw_markdown))
             if text_range is None:
                 start_index = None
@@ -397,42 +284,24 @@ class PyMuPDF4LLMProvider(Provider):
                 start_index, end_index = text_range
                 content = raw_markdown[start_index:end_index]
 
-            raw_confidence = page_box.get("confidence")
-            confidence: float | None = None
-            if raw_confidence is not None:
-                try:
-                    parsed_confidence = float(raw_confidence)
-                except (TypeError, ValueError):
-                    parsed_confidence = math.nan
-                if math.isfinite(parsed_confidence) and 0.0 <= parsed_confidence <= 1.0:
-                    confidence = parsed_confidence
-
             segment = LayoutSegmentIR(
                 x=bbox[0],
                 y=bbox[1],
                 w=bbox[2],
                 h=bbox[3],
-                confidence=confidence,
                 label=raw_label,
                 start_index=start_index,
                 end_index=end_index,
             )
-
             if normalized_class == "table":
                 item_type = "table"
-                # If the sliced content is already native HTML (e.g. a pipeline
-                # opted into table_output="html"), keep it verbatim; otherwise
-                # convert Markdown pipe tables via markdown2.
-                item_html = content if "<table" in content.lower() else cls._convert_md_tables_to_html(content)
+                item_html = content
             elif normalized_class == "picture":
                 item_type = "image"
                 item_html = ""
             else:
-                # Field-grounding evaluation consumes text-like items while the
-                # raw provider category remains on the segment label.
                 item_type = "text"
                 item_html = ""
-
             items.append(
                 LayoutItemIR(
                     type=item_type,
@@ -463,12 +332,8 @@ class PyMuPDF4LLMProvider(Provider):
             layout_page = self._build_layout_page(page_data, raw_markdown=raw_markdown)
             if layout_page is not None:
                 layout_pages.append(layout_page)
-
-            # page_boxes[*].pos refers to raw_markdown. Build layout items
-            # before this table conversion changes character offsets.
-            text = self._convert_md_tables_to_html(raw_markdown)
-            pages.append(PageIR(page_index=page_index, markdown=text))
-            page_texts.append(text)
+            pages.append(PageIR(page_index=page_index, markdown=raw_markdown))
+            page_texts.append(raw_markdown)
 
         full_text = "\n\n".join(page_texts)
         output = ParseOutput(

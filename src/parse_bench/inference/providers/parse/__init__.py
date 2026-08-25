@@ -6,6 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 _PROVIDER_MODULES = [
+    "amazon_nova",
     "anthropic",
     "azure_document_intelligence",
     "chandra2",
@@ -34,7 +35,9 @@ _PROVIDER_MODULES = [
     "llamaparse_v2_normalization",
     "mineru25",
     "mineru2605pro",
+    "mineru_diffusion",
     "mistral_ocr",
+    "nemotron_omni",
     "openai",
     "paddleocr",
     "pulse",
@@ -47,6 +50,8 @@ _PROVIDER_MODULES = [
     "textract",
     "unlimitedocr",
     "unstructured",
+    "warp_ingest",
+    "oi_parser",
 ]
 
 for _mod in _PROVIDER_MODULES:

@@ -80,7 +80,7 @@ cd ParseBench-Version-Lab
 
 ## Source access
 
-The default PyMuPDF Layout `1.28.0` ref uses the private
+The default PyMuPDF Layout `1.28.2` ref uses the private
 `ArtifexSoftware/sce` repository. Configure Git credentials for an account with
 access. If GitHub CLI is already authenticated:
 
@@ -129,7 +129,7 @@ uv run --project tools/version_lab version-lab run --all-latest --resolve-only
 Select explicit refs and a pipeline:
 
 ```shell
-uv run --project tools/version_lab version-lab run --mupdf-ref 1.28.0 --pymupdf-ref 1.28.0 --pymupdf-layout-ref 1.28.0 --pymupdf4llm-ref 1.28.0 --pipeline pymupdf4llm_markdown_150dpi --scope quick --group all
+uv run --project tools/version_lab version-lab run --mupdf-ref 1.28.2 --pymupdf-ref 1.28.2 --pymupdf-layout-ref 1.28.2 --pymupdf4llm-ref 1.28.2 --pipeline pymupdf4llm_markdown_150dpi --scope quick --group all
 ```
 
 View all arguments and accepted values:
@@ -139,6 +139,25 @@ uv run --project tools/version_lab version-lab --help
 uv run --project tools/version_lab version-lab plan --help
 uv run --project tools/version_lab version-lab run --help
 ```
+
+## PyMuPDF4LLM pipelines
+
+The canonical `pymupdf4llm_markdown` pipeline and all output transformation,
+layout projection, evaluation, and scoring behavior come directly from
+upstream ParseBench. Version Lab registers only these additional configurations:
+
+| Pipeline | Version Lab variation |
+|---|---|
+| `pymupdf4llm_markdown_150dpi` | OCR at 150 DPI |
+| `pymupdf4llm_markdown_tesseract` | Tesseract OCR backend |
+| `pymupdf4llm_markdown_rapidocr` | Bundled RapidOCR backend |
+| `pymupdf4llm_markdown_no_ocr` | OCR disabled |
+| `pymupdf4llm_html_tables` | Native HTML tables at 150 DPI |
+| `pymupdf4llm_html_tables_rapidocr_v3` | Native HTML tables with modern RapidOCR |
+
+Selected historical source revisions must support the current upstream
+PyMuPDF4LLM provider API. Incompatible revisions fail rather than receiving a
+Version Lab-specific output transformation.
 
 ## Results
 

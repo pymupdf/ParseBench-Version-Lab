@@ -18,6 +18,9 @@ from parse_bench.evaluation.metrics.parse.header_accuracy_metric import (
     HeaderAccuracyMetric,
     HeaderAccuracyMetricGenerous,
 )
+from parse_bench.evaluation.metrics.parse.llm_normalization.config import (
+    get_normalization_mode,
+)
 from parse_bench.evaluation.metrics.parse.rule_based_judge_metric import (
     RuleBasedJudgeMetric as RuleBasedMetric,
 )
@@ -44,6 +47,9 @@ from parse_bench.evaluation.metrics.parse.table_title_stripping import (
 from parse_bench.evaluation.metrics.parse.teds_metric import (
     TEDS_CONTENT,
     TEDSMetric,
+)
+from parse_bench.evaluation.metrics.parse.text_content_projection import (
+    canonicalize_tables_for_text_content,
 )
 from parse_bench.evaluation.metrics.parse.text_similarity_metric import (
     TextSimilarityMetric,
@@ -152,6 +158,7 @@ class ParseEvaluator(BaseEvaluator):
         self._enable_table_record_match = enable_table_record_match
         self._enable_table_composite = enable_table_composite
         self._rule_metric = RuleBasedMetric()
+        logger.info("Chart LLM normalization mode: %s", get_normalization_mode().value)
         self._text_similarity_metric = TextSimilarityMetric()
         self._teds_metric = TEDSMetric(variants=teds_variants if teds_variants is not None else {TEDS_CONTENT})
         self._grits_metric = GriTSMetric()
@@ -232,6 +239,8 @@ class ParseEvaluator(BaseEvaluator):
                 # For now, use document-level markdown
                 # TODO: Support per-page rule execution
                 markdown_content = inference_result.output.markdown
+                if test_case.group == "text_content":
+                    markdown_content = canonicalize_tables_for_text_content(markdown_content)
 
                 # Execute rules
                 rule_result = self._rule_metric.compute(

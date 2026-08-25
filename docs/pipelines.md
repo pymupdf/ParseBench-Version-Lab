@@ -93,6 +93,9 @@ These pipelines use hosted APIs. You only need an API key in your `.env` file.
 | `google_gemini_3_5_flash_no_thinking_parse_with_layout` | Gemini 3.5 Flash, minimal thinking + layout | `GOOGLE_GEMINI_API_KEY` |
 | **`google_gemini_3_5_flash_parse_with_layout_file`** | Gemini 3.5 Flash, default thinking + layout, file mode (In paper: *Google Gemini 3.5 Flash (Thinking Medium)*) | `GOOGLE_GEMINI_API_KEY` |
 | **`google_gemini_3_5_flash_no_thinking_parse_with_layout_file`** | Gemini 3.5 Flash, minimal thinking + layout, file mode (In paper: *Google Gemini 3.5 Flash (Thinking Minimal)*) | `GOOGLE_GEMINI_API_KEY` |
+| **`google_gemini_3_5_flash_lite_parse_with_layout_file`** | Gemini 3.5 Flash Lite, layout + file mode (In paper: *Google Gemini 3.5 Flash Lite*) | `GOOGLE_GEMINI_API_KEY` |
+| **`google_gemini_3_6_flash_parse_with_layout_file`** | Gemini 3.6 Flash, default thinking + layout, file mode (In paper: *Google Gemini 3.6 Flash (Thinking Medium)*) | `GOOGLE_GEMINI_API_KEY` |
+| **`google_gemini_3_6_flash_no_thinking_parse_with_layout_file`** | Gemini 3.6 Flash, minimal thinking + layout, file mode (In paper: *Google Gemini 3.6 Flash (Thinking Minimal)*) | `GOOGLE_GEMINI_API_KEY` |
 
 ### Azure Document Intelligence
 
@@ -127,8 +130,8 @@ These pipelines use hosted APIs. You only need an API key in your `.env` file.
 
 | Pipeline | Description | Env Var |
 |---|---|---|
-| `pulse` | Default with HTML table output | `PULSE_API_KEY` |
-| `pulse_ultra_2` | `pulse-ultra-2` VLM tier (10 credits/page) | `PULSE_API_KEY` |
+| `pulse` | Default model with native markdown output, `/tables` reconstruction on every document, no refinement | `PULSE_API_KEY` |
+| `pulse_ultra_2` | `pulse-ultra-2` hosted tier with native markdown output and refinement enabled | `PULSE_API_KEY` |
 
 ### Chunkr
 
@@ -151,6 +154,7 @@ These pipelines use hosted APIs. You only need an API key in your `.env` file.
 |---|---|---|
 | **`extend_parse`** | Default (In paper: *Extend*) | `EXTEND_API_KEY` |
 | `extend_parse_2` | 2.0 engine (v2.0.0, GA) | `EXTEND_API_KEY` |
+| `extend_parse_light` | Light engine (v1.0.0) | `EXTEND_API_KEY` |
 | `extend_parse_document` | Document scope | `EXTEND_API_KEY` |
 | `extend_parse_section` | Section scope | `EXTEND_API_KEY` |
 
@@ -167,6 +171,14 @@ These pipelines use hosted APIs. You only need an API key in your `.env` file.
 | `unstructured_auto` | Auto strategy | `UNSTRUCTURED_API_KEY` |
 | `unstructured_fast` | Fast strategy | `UNSTRUCTURED_API_KEY` |
 | `unstructured_hi_res` | Hi-res strategy | `UNSTRUCTURED_API_KEY` |
+
+### OpenInnovation Parser (oi-parser)
+
+Hosted document-parsing API. Sign up at [oi-parser.ai](https://oi-parser.ai/) to get an API key.
+
+| Pipeline | Description | Env Vars |
+|---|---|---|
+| **`oi_parser`** | oi-parser hosted `/v1/extract` API | `OI_PARSER_API_KEY`, `OI_PARSER_BASE_URL` (optional) |
 
 ---
 
@@ -242,6 +254,18 @@ These pipelines require you to deploy the model on your own infrastructure (e.g.
 | `mineru25_vllm` | MinerU2.5-2509-1.2B vLLM server (two-step layout + recognition) | `MINERU25_SERVER_URL` |
 | `mineru2605pro_vllm` | MinerU2.5-Pro-2605-1.2B vLLM server (adds chart/image analysis) | `MINERU2605PRO_SERVER_URL` |
 
+### MinerU-Diffusion
+
+| Pipeline | Description | Env Var |
+|---|---|---|
+| `mineru_diffusion` | MinerU-Diffusion-V1-0320-2.5B server (diffusion-decoding OCR, two-stage layout + recognition) | `MINERU_DIFFUSION_SERVER_URL` |
+
+### Nemotron-Omni
+
+| Pipeline | Description | Env Var |
+|---|---|---|
+| `nemotron_omni_30b_vllm_thinking` | Nemotron-3-Nano-Omni 30B-A3B Reasoning, thinking enabled | `NEMOTRON_OMNI_SERVER_URL` |
+
 ### Surya OCR 2
 
 | Pipeline | Description | Env Var |
@@ -252,25 +276,24 @@ These pipelines require you to deploy the model on your own infrastructure (e.g.
 
 ## Local Pipelines (No API key needed)
 
-These run entirely locally with no external dependencies.
+These run entirely locally and do not require API keys.
 
 | Pipeline | Description | Requirements |
 |---|---|---|
 | `pypdf_baseline` | PyPDF text extraction | None |
 | `pymupdf_text` | PyMuPDF text extraction | None |
 | `pymupdf_html` | PyMuPDF HTML extraction | None |
-| `pymupdf4llm_markdown` | PyMuPDF4LLM layout Markdown, automatic OCR engine selection | `pymupdf4llm` |
-| `pymupdf4llm_markdown_tesseract` | PyMuPDF4LLM Markdown, Tesseract OCR backend | `pymupdf4llm`, `tesseract` |
-| `pymupdf4llm_markdown_rapidocr` | PyMuPDF4LLM Markdown, RapidOCR backend | `pymupdf4llm`, `rapidocr-onnxruntime` |
-| `pymupdf4llm_markdown_no_ocr` | PyMuPDF4LLM Markdown, OCR disabled | `pymupdf4llm` |
-| `pymupdf4llm_markdown_150dpi` | PyMuPDF4LLM Markdown, OCR at 150 DPI | `pymupdf4llm` |
-| `pymupdf4llm_html_tables` | PyMuPDF4LLM Markdown with HTML table output | `pymupdf4llm` |
-| `pymupdf4llm_html_tables_rapidocr_v3` | PyMuPDF4LLM Markdown with native HTML tables and modern RapidOCR; refuses legacy fallback | Newer `pymupdf4llm`, `rapidocr`, `onnxruntime` |
+| `pymupdf4llm_markdown` | PyMuPDF4LLM Markdown with native HTML tables and RapidOCR at 150 DPI | Python 3.12, `pymupdf4llm==1.28.2`, and `rapidocr==3.9.2` |
+| `warp_ingest` | Warp-Ingest local parser | `warp-ingest[ocr]>=2.0.1` installed |
 | `tesseract_eng` | Tesseract OCR (English) | `tesseract` installed |
 | `tesseract_fast` | Tesseract OCR (fast) | `tesseract` installed |
 | `tesseract_high_quality` | Tesseract OCR (high quality) | `tesseract` installed |
 | `infinity_parser2_flash` | Infinity-Parser2-Flash (vLLM server, JSON layout) | `infinity_parser2`, running vLLM server |
 | `infinity_parser2_pro` | Infinity-Parser2-Pro (vLLM server, JSON layout) | `infinity_parser2`, running vLLM server |
+
+Create the isolated Python environment for `pymupdf4llm_markdown` with
+`uv sync --python 3.12 --extra pymupdf4llm`, then run it with
+`uv run --python 3.12 --extra pymupdf4llm parse-bench run pymupdf4llm_markdown --max_concurrent 1`.
 
 ---
 

@@ -129,6 +129,32 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
 
     register_fn(
         PipelineSpec(
+            pipeline_name="extend_parse_light",
+            provider_name="extend_parse",
+            product_type=ProductType.PARSE,
+            config={
+                "target": "markdown",
+                "chunking_strategy": "page",
+                "engine": "parse_light",
+                "engineVersion": "1.0.0",
+                "block_options": {
+                    "tables": {"target_format": "html"},
+                    "figures": {
+                        "enabled": True,
+                        "figureImageClippingEnabled": True,
+                        "advancedChartExtractionEnabled": True,
+                    },
+                    "formulas": {"enabled": True},
+                },
+                "advanced_options": {
+                    "enrichmentFormat": "xml",
+                },
+            },
+        )
+    )
+
+    register_fn(
+        PipelineSpec(
             pipeline_name="extend_parse_document",
             provider_name="extend_parse",
             product_type=ProductType.PARSE,
@@ -211,33 +237,67 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
     # Pulse Pipelines
     # =========================================================================
 
+    pulse_common_endpoint_config = {
+        "async_extract": True,
+        "return_html": True,
+        "storage": {"enabled": True},
+        "markdown_source": "markdown",
+        "poll_interval": 1.0,
+    }
+    pulse_tables_config = {
+        "merge": True,
+        "table_format": "html",
+        "charts_to_tables": True,
+    }
+    pulse_tables_endpoint_config = {
+        "async_tables": True,
+        "use_tables_endpoint": True,
+        "tables_config": pulse_tables_config,
+        "merge_tables_into_markdown": True,
+        "replace_existing_tables": True,
+        **pulse_common_endpoint_config,
+    }
+    pulse_ultra_2_image_prompt = (
+        "For ParseBench charts, output a markdown table where each row is one data point. "
+        "Include every visible chart label needed to identify the value as explicit row or column text, "
+        "including series names, legend labels, axis labels, sign/category labels such as "
+        "Favorable attitude or Unfavorable attitude, units, and years. Do not leave grouping labels only in prose."
+    )
+    pulse_ultra_2_prompt = "Preserve chart captions, title hierarchy, table structure, and semantic formatting."
+    pulse_ultra_2_config = {
+        "model": "pulse-ultra-2",
+        "credits_per_page": 10,
+        "refine": True,
+        "extract_figure": True,
+        "figure_description": True,
+        "additional_prompt": pulse_ultra_2_prompt,
+        "custom_image_prompt": pulse_ultra_2_image_prompt,
+        **pulse_common_endpoint_config,
+    }
+
     register_fn(
         PipelineSpec(
             pipeline_name="pulse",
             provider_name="pulse",
             product_type=ProductType.PARSE,
-            config={},
+            config={
+                "model": "default",
+                "refine": False,
+                "credits_per_page": 1,
+                "figure_processing": {"description": True},
+                **pulse_tables_endpoint_config,
+            },
         )
     )
 
-    # pulse-ultra-2: vision-language model with figure extraction,
-    # figure descriptions, and refinement enabled.
+    # pulse-ultra-2: hosted tier with native figure extraction.
+    # Refinement is enabled for the submitted leaderboard configuration.
     register_fn(
         PipelineSpec(
             pipeline_name="pulse_ultra_2",
             provider_name="pulse",
             product_type=ProductType.PARSE,
-            config={
-                "model": "pulse-ultra-2",
-                "extract_figure": True,
-                "figure_description": True,
-                "refine": True,
-                # Optional: select which refinement passes run.
-                "refine_options": {"tables": False, "text": True, "formatting": True},
-                # Optional: domain-specific guidance — replace as needed.
-                "additional_prompt": "<placeholder>",
-                "custom_refine_prompt": "<placeholder>",
-            },
+            config=pulse_ultra_2_config,
         )
     )
 
@@ -486,64 +546,11 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             pipeline_name="pymupdf4llm_markdown",
             provider_name="pymupdf4llm",
             product_type=ProductType.PARSE,
-            config={},
-        )
-    )
-
-    register_fn(
-        PipelineSpec(
-            pipeline_name="pymupdf4llm_markdown_tesseract",
-            provider_name="pymupdf4llm",
-            product_type=ProductType.PARSE,
-            config={"ocr_backend": "tesseract"},
-        )
-    )
-
-    register_fn(
-        PipelineSpec(
-            pipeline_name="pymupdf4llm_markdown_rapidocr",
-            provider_name="pymupdf4llm",
-            product_type=ProductType.PARSE,
-            config={"ocr_backend": "rapidocr"},
-        )
-    )
-
-    register_fn(
-        PipelineSpec(
-            pipeline_name="pymupdf4llm_markdown_no_ocr",
-            provider_name="pymupdf4llm",
-            product_type=ProductType.PARSE,
-            config={"use_ocr": False},
-        )
-    )
-
-    register_fn(
-        PipelineSpec(
-            pipeline_name="pymupdf4llm_markdown_150dpi",
-            provider_name="pymupdf4llm",
-            product_type=ProductType.PARSE,
-            config={"ocr_dpi": 150},
-        )
-    )
-
-    register_fn(
-        PipelineSpec(
-            pipeline_name="pymupdf4llm_html_tables",
-            provider_name="pymupdf4llm",
-            product_type=ProductType.PARSE,
-            config={"table_output": "html", "ocr_dpi": 150},
-        )
-    )
-
-    register_fn(
-        PipelineSpec(
-            pipeline_name="pymupdf4llm_html_tables_rapidocr_v3",
-            provider_name="pymupdf4llm",
-            product_type=ProductType.PARSE,
             config={
-                "table_output": "html",
+                "use_ocr": True,
+                "ocr_backend": "rapidocr",
                 "ocr_dpi": 150,
-                "ocr_backend": "rapidocr_modern",
+                "table_output": "html",
             },
         )
     )
@@ -552,6 +559,15 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         PipelineSpec(
             pipeline_name="markitdown",
             provider_name="markitdown",
+            product_type=ProductType.PARSE,
+            config={},
+        )
+    )
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="warp_ingest",
+            provider_name="warp_ingest",
             product_type=ProductType.PARSE,
             config={},
         )
@@ -1345,6 +1361,36 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
     )
 
     # =========================================================================
+    # Nemotron-3-Nano-Omni 30B-A3B Reasoning (BF16)
+    # =========================================================================
+
+    # Thinking enabled. Uses the shared parse prompt (byte-identical to
+    # openai/anthropic/gemma4) so this model stays apples-to-apples comparable.
+    # Budget mirrors Gemini's `_thinking_high` (max_tokens=65536,
+    # reasoning_budget=16384 ≈ 10x output headroom); the server needs
+    # max_model_len=131072 to cover prompt + image + output.
+    register_fn(
+        PipelineSpec(
+            pipeline_name="nemotron_omni_30b_vllm_thinking",
+            provider_name="nemotron_omni",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",  # Set via NEMOTRON_OMNI_SERVER_URL or override
+                "model": "nemotron-omni-30b",
+                "enable_thinking": True,
+                "temperature": 0.6,
+                "top_k": None,
+                "top_p": 0.95,
+                "max_tokens": 65536,
+                "reasoning_budget": 16384,
+                # grace_period=1024 per card → thinking_token_budget=16384+1024
+                "thinking_token_budget": 17408,
+                "timeout": 1800,
+            },
+        )
+    )
+
+    # =========================================================================
     # Chandra OCR 2
     # =========================================================================
 
@@ -1474,6 +1520,24 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # Amazon Nova 2 Lite - Parse with Layout (Bedrock Converse, US geo profile)
+    # Nova 2 Lite has no in-region endpoint in us-east-1, so it is addressed through the
+    #  cross-Region inference profile. Extended thinking is left at its Bedrock
+    # default (disabled) — page transcription does not need it and reasoning tokens bill
+    # at the output rate.
+    register_fn(
+        PipelineSpec(
+            pipeline_name="amazon_nova_2_lite_parse_with_layout",
+            provider_name="amazon_nova",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "us.amazon.nova-2-lite-v1:0",
+                "dpi": 150,
+                "max_tokens": 32768,
+            },
+        )
+    )
+
     # Gemini 3.1 Flash Lite - Parse with Layout
     register_fn(
         PipelineSpec(
@@ -1497,6 +1561,20 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             product_type=ProductType.PARSE,
             config={
                 "model": "gemini-3.1-flash-lite-preview",
+                "max_tokens": 32768,
+                "mode": "parse_with_layout_file",
+            },
+        )
+    )
+
+    # Gemini 3.5 Flash Lite - Parse with Layout File
+    register_fn(
+        PipelineSpec(
+            pipeline_name="google_gemini_3_5_flash_lite_parse_with_layout_file",
+            provider_name="google",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "gemini-3.5-flash-lite",
                 "max_tokens": 32768,
                 "mode": "parse_with_layout_file",
             },
@@ -1574,6 +1652,39 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             product_type=ProductType.PARSE,
             config={
                 "model": "gemini-3.5-flash",
+                "max_tokens": 32768,
+                "mode": "parse_with_layout_file",
+                "thinking_level": "minimal",
+            },
+        )
+    )
+
+    # =========================================================================
+    # Gemini 3.6 Flash (GA) - Parse with Layout File
+    # =========================================================================
+
+    # Gemini 3.6 Flash - Parse with Layout File (default thinking)
+    register_fn(
+        PipelineSpec(
+            pipeline_name="google_gemini_3_6_flash_parse_with_layout_file",
+            provider_name="google",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "gemini-3.6-flash",
+                "max_tokens": 32768,
+                "mode": "parse_with_layout_file",
+            },
+        )
+    )
+
+    # Gemini 3.6 Flash - Parse with Layout File - Thinking Minimal
+    register_fn(
+        PipelineSpec(
+            pipeline_name="google_gemini_3_6_flash_no_thinking_parse_with_layout_file",
+            provider_name="google",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "gemini-3.6-flash",
                 "max_tokens": 32768,
                 "mode": "parse_with_layout_file",
                 "thinking_level": "minimal",
@@ -1783,6 +1894,28 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             },
         )
     )
+
+    # OpenAI GPT-5.6 (sol / terra / luna) - Parse with Layout File - Reasoning None
+    for _gpt56_suffix, _gpt56_model in (
+        ("sol", "gpt-5.6-sol"),
+        ("terra", "gpt-5.6-terra"),
+        ("luna", "gpt-5.6-luna"),
+    ):
+        register_fn(
+            PipelineSpec(
+                pipeline_name=(
+                    f"openai_gpt_5_6_{_gpt56_suffix}_reasoning_none_parse_with_layout_file"
+                ),
+                provider_name="openai",
+                product_type=ProductType.PARSE,
+                config={
+                    "model": _gpt56_model,
+                    "max_tokens": 32768,
+                    "mode": "parse_with_layout_file",
+                    "reasoning_effort": "none",
+                },
+            )
+        )
 
     # OpenAI GPT-5.4 Nano - Parse with Layout
     register_fn(
@@ -1997,6 +2130,24 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
     )
 
     # =========================================================================
+    # MinerU-Diffusion-V1 (opendatalab/MinerU-Diffusion-V1-0320-2.5B)
+    # Diffusion-decoding OCR VLM. Runs the official two-stage parse: layout
+    # detection, then per-region recognition (table -> OTSL, formula -> LaTeX,
+    # else text), merged into markdown with OTSL converted to HTML server-side.
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="mineru_diffusion",
+            provider_name="mineru_diffusion",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",  # Set via MINERU_DIFFUSION_SERVER_URL or override
+            },
+        )
+    )
+
+    # =========================================================================
     # Surya OCR 2 (datalab-to/surya-ocr-2, 650M VLM)
     # =========================================================================
 
@@ -2113,5 +2264,20 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
                 "rate_limit_base_wait": 2.0,
                 "rate_limit_max_wait": 30.0,
             },
+        )
+    )
+
+    # =========================================================================
+    # OpenInnovation Parser (oi-parser)
+    # =========================================================================
+    register_fn(
+        PipelineSpec(
+            pipeline_name="oi_parser",
+            provider_name="oi_parser",
+            product_type=ProductType.PARSE,
+            # Endpoint resolves in the provider: OI_PARSER_BASE_URL env → the provider's
+            # default public endpoint. Left unset here so the env override is honored
+            # (matches the LlamaParse configurable-base-URL convention).
+            config={},
         )
     )

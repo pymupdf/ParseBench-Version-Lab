@@ -21,15 +21,15 @@ _Top 10 by Overall score. For the full sortable, filterable leaderboard, see [pa
 | Rank | Provider | Category | Overall | Tables | Charts | Content Faith. | Sem. Format. | Visual Ground. | ¢ / Page |
 |---:|---|---|---:|---:|---:|---:|---:|---:|---:|
 | 1 | LlamaParse Agentic | LlamaParse | 84.88 | 90.74 | 78.11 | 89.68 | 85.24 | 80.62 | 1.25¢ |
-| 2 | KDL-Frontier-Parser-nano | VLM - Open Weight | 76.36 | 85.56 | 63.41 | 87.19 | 66.81 | 78.84 | — |
-| 3 | Google Gemini 3 Flash (Thinking High) | VLM - Proprietary | 75.05 | 91.50 | 64.79 | 90.87 | 68.31 | 59.77 | 2.41¢ |
-| 4 | Infinity-Parser2-Pro | VLM - Open Weight | 74.28 | 86.4 | 61.3 | 89.7 | 59.1 | 74.9 | — |
-| 5 | Infinity-Parser2-Flash | VLM - Open Weight | 73.25 | 82.88 | 55.56 | 89.52 | 57.7 | 80.61 | — |
-| 6 | Reducto (Agentic) | Commercial - Startup APIs | 72.97 | 80.42 | 73.4 | 86.37 | 57.6 | 67.07 | 4.76¢ |
-| 7 | MinerU2.5-Pro-2605-1.2B | VLM - Open Weight | 72.78 | 77.59 | 61.64 | 87.88 | 57.49 | 79.30 | — |
-| 8 | LlamaParse Cost Effective | LlamaParse | 71.89 | 73.16 | 66.66 | 88.02 | 73.04 | 58.56 | 0.38¢ |
-| 9 | Google Gemini 3 Flash (Thinking Minimal) | VLM - Proprietary | 71.04 | 89.85 | 64.83 | 86.19 | 58.35 | 55.97 | 0.65¢ |
-| 10 | Anthropic Fable 5 | VLM - Proprietary | 70.78 | 89.79 | 52.21 | 90.02 | 72.62 | 49.24 | 15.60¢ |
+| 2 | Pulse Ultra 2 | Commercial - Startup APIs | 77.08 | 75.45 | 90.82 | 79.49 | 73.05 | 66.56 | 15¢ |
+| 3 | LlamaParse Cost Effective | LlamaParse | 76.77 | 81.42 | 70.15 | 90.92 | 68.78 | 72.59 | 0.38¢ |
+| 4 | KDL-Frontier-Parser-nano | VLM - Open Weight | 76.36 | 85.56 | 63.41 | 87.19 | 66.81 | 78.84 | — |
+| 5 | Extend (2.0) | Commercial - Startup APIs | 75.33 | 84.82 | 78.31 | 84.59 | 60.31 | 68.61 | 2.50¢ |
+| 6 | Google Gemini 3 Flash (Thinking High) | VLM - Proprietary | 75.05 | 91.50 | 64.79 | 90.87 | 68.31 | 59.77 | 2.41¢ |
+| 7 | Infinity-Parser2-Pro | VLM - Open Weight | 74.28 | 86.4 | 61.3 | 89.7 | 59.1 | 74.9 | — |
+| 8 | Extend Light (1.0) | Commercial - Startup APIs | 73.26 | 75.8 | 78.6 | 84.8 | 58.6 | 68.5 | 0.62¢ |
+| 9 | Infinity-Parser2-Flash | VLM - Open Weight | 73.25 | 82.88 | 55.56 | 89.52 | 57.7 | 80.61 | — |
+| 10 | Reducto (Agentic) | Commercial - Startup APIs | 72.97 | 80.42 | 73.4 | 86.37 | 57.6 | 67.07 | 4.76¢ |
 <!-- LEADERBOARD:END -->
 
 **Inclusion criteria:**
@@ -45,6 +45,10 @@ _Top 10 by Overall score. For the full sortable, filterable leaderboard, see [pa
 # Install
 uv sync --extra runners
 
+# Optional: add the `fast` extra for a JIT-accelerated TEDS table metric (numba).
+# Scores are identical to the default path — just faster on large tables.
+uv sync --extra runners --extra fast
+
 # Quick test run (small dataset, 3 files per category — good for trying things out)
 uv run parse-bench run llamaparse_agentic --test
 
@@ -54,11 +58,6 @@ uv run parse-bench run llamaparse_agentic
 # View interactive reports in your browser
 uv run parse-bench serve llamaparse_agentic
 ```
-
-To benchmark selected Git branches, tags, or commits of PyMuPDF, PyMuPDF
-Layout, and PyMuPDF4LLM together, see the
-[source-stack workflow guide](docs/pymupdf-source-stack-workflow.md).
-Indexed source-stack runs can be explored in the [ParseBench dashboard](https://parsebench-dashboard.vercel.app).
 
 ## Available Pipelines
 
@@ -234,7 +233,14 @@ ANTHROPIC_API_KEY=...
 GOOGLE_API_KEY=...
 ```
 
-ParseBench does **not** use LLM-as-a-judge — all evaluation is deterministic and rule-based. API keys are only used to call the parsing tool being evaluated.
+By default ParseBench does **not** use LLM-as-a-judge — all evaluation is deterministic and rule-based, and API keys are only used to call the parsing tool being evaluated. (An opt-in chart normalization mode exists but is off by default — see [`LLAMACLOUD_BENCH_LLM_NORMALIZATION`](#environment-variables).)
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PARSEBENCH_FAST_TEDS` | `1` | Fast Zhang-Shasha TEDS table metric (uses the `numba` JIT when the [`fast` extra](#quick-start) is installed, otherwise an exact pure-Python fallback). Set to `0` to force the original APTED implementation — scores are identical either way, so this is only needed for debugging or benchmarking. |
+| `LLAMACLOUD_BENCH_LLM_NORMALIZATION` | `off` | Set to `judge` to opt into LLM-as-judge chart normalization (non-deterministic, needs `ANTHROPIC_API_KEY`). |
 
 ### CLI Reference
 
@@ -327,3 +333,6 @@ src/parse_bench/
 - **Paper**: [arXiv:2604.08538](https://arxiv.org/abs/2604.08538)
 - **HuggingFace Dataset**: [llamaindex/ParseBench](https://huggingface.co/datasets/llamaindex/ParseBench)
 - **Code**: [run-llama/ParseBench](https://github.com/run-llama/ParseBench)
+- **ExtractBench**: [run-llama/ExtractBench](https://github.com/run-llama/ExtractBench) - A Benchmark for Schema-Guided Enterprise Document Extraction
+
+

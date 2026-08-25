@@ -21,7 +21,7 @@ def run(*arguments: str) -> None:
 
 
 def parse_bench(*arguments: str) -> None:
-    run(sys.executable, "-m", "parse_bench.cli", *arguments)
+    run(sys.executable, "-m", "parsebench_version_lab.parse_bench_cli", *arguments)
 
 
 def download() -> None:

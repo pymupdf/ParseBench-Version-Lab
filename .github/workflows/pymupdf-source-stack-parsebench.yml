@@ -293,7 +293,8 @@ jobs:
         env:
           MODERN_RAPIDOCR_PIPELINE: pymupdf4llm_html_tables_rapidocr_v3
         run: |
-          sync_args=(--locked --extra runners)
+          export UV_PROJECT_ENVIRONMENT="$GITHUB_WORKSPACE/.venv"
+          sync_args=(--project tools/version_lab --locked)
           if [[ "$PIPELINE" == "$MODERN_RAPIDOCR_PIPELINE" ]]; then
             sync_args+=(--extra rapidocr-modern)
           fi

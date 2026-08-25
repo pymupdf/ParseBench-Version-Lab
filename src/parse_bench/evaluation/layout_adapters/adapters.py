@@ -203,6 +203,66 @@ class LlamaParseLayoutAdapter(LayoutAdapter):
         return _build_llamaparse_granular_pages_from_payload(grounded_pages)
 
 
+@register_layout_adapter("warp_ingest", priority=100)
+class WarpIngestLayoutAdapter(LayoutAdapter):
+    """Adapter for generic layout predictions emitted by Warp-Ingest."""
+
+    def to_layout_output(
+        self,
+        inference_result: InferenceResult,
+        *,
+        page_filter: int | None = None,
+    ) -> LayoutOutput:
+        try:
+            from warp_ingest.ingestor.markdown_exporter import render_layout_predictions
+        except ImportError as exc:
+            raise ValueError("warp-ingest>=2.0.1 is required for Warp-Ingest layout evaluation") from exc
+
+        payload = inference_result.raw_output if isinstance(inference_result.raw_output, dict) else {}
+        rendered = render_layout_predictions(payload, page_filter=page_filter)
+        predictions = [
+            self._build_prediction(prediction)
+            for prediction in rendered.get("predictions", [])
+            if isinstance(prediction, dict)
+        ]
+
+        return LayoutOutput(
+            example_id=inference_result.request.example_id,
+            pipeline_name=inference_result.pipeline_name,
+            model=LayoutDetectionModel.UNSTRUCTURED_LAYOUT,
+            image_width=self._positive_int(rendered.get("image_width"), 612),
+            image_height=self._positive_int(rendered.get("image_height"), 792),
+            predictions=predictions,
+        )
+
+    @staticmethod
+    def _positive_int(value: Any, default: int) -> int:
+        try:
+            parsed = int(round(float(value)))
+        except (TypeError, ValueError):
+            return default
+        return max(1, parsed)
+
+    @staticmethod
+    def _build_prediction(prediction: dict[str, Any]) -> LayoutPrediction:
+        content_payload = prediction.get("content")
+        content: LayoutTextContent | LayoutTableContent | None = None
+        if isinstance(content_payload, dict) and content_payload.get("type") == "table":
+            content = LayoutTableContent(html=str(content_payload.get("html") or ""))
+        elif isinstance(content_payload, dict):
+            content = LayoutTextContent(text=str(content_payload.get("text") or ""))
+
+        provider_metadata = {"order_index": prediction.get("order_index")}
+        return LayoutPrediction(
+            bbox=[float(value) for value in prediction.get("bbox", [])],
+            score=float(prediction.get("score", 1.0)),
+            label=str(prediction.get("label", "")),
+            page=prediction.get("page"),
+            content=content,
+            provider_metadata=provider_metadata,
+        )
+
+
 def _build_llamaparse_granular_pages_from_payload(grounded_pages: Any) -> list[_GranularPage]:
     if not isinstance(grounded_pages, list):
         return []
@@ -1266,6 +1326,103 @@ class ReductoLayoutAdapter(LayoutAdapter):
             example_id=inference_result.request.example_id,
             pipeline_name=inference_result.pipeline_name,
             model=LayoutDetectionModel.REDUCTO_LAYOUT,
+            image_width=max(output_width, 1),
+            image_height=max(output_height, 1),
+            predictions=predictions,
+        )
+
+
+@register_layout_adapter("oi_parser", priority=90)
+class OIParserLayoutAdapter(LayoutAdapter):
+    """Adapter that extracts LayoutOutput from oi-parser ParseOutput.layout_pages.
+
+    Enables cross-evaluation: the ``oi_parser`` PARSE pipeline is scored against the
+    layout-detection dataset using the block bboxes the API returns in
+    ``output.layout_pages`` (absolute-pixel xywh + a raw label per item; label casing
+    is canonicalized to Canonical17 by ``OIParserLabelMapper``).
+    """
+
+    @classmethod
+    def matches(cls, inference_result: InferenceResult) -> bool:
+        return isinstance(inference_result.output, ParseOutput) and bool(
+            inference_result.output.layout_pages
+        )
+
+    def to_layout_output(
+        self,
+        inference_result: InferenceResult,
+        *,
+        page_filter: int | None = None,
+    ) -> LayoutOutput:
+        # Handle synthetic LayoutOutput results (e.g. from cross-eval re-runs).
+        if isinstance(inference_result.output, LayoutOutput):
+            if page_filter is None:
+                return inference_result.output
+            filtered = [p for p in inference_result.output.predictions if p.page == page_filter]
+            return inference_result.output.model_copy(update={"predictions": filtered})
+
+        if not isinstance(inference_result.output, ParseOutput):
+            raise ValueError("OIParserLayoutAdapter requires ParseOutput or LayoutOutput")
+
+        layout_pages = inference_result.output.layout_pages
+        if not layout_pages:
+            # Doc produced markdown but no layout segments (e.g. a huge table whose
+            # layout-detect response was truncated). Emit an EMPTY LayoutOutput so the
+            # doc is still COUNTED (scores ~0 on layout) rather than erroring and being
+            # dropped — dropping would inflate the average (anti-cheat concern).
+            return LayoutOutput(
+                task_type="layout_detection",
+                example_id=inference_result.request.example_id,
+                pipeline_name=inference_result.pipeline_name,
+                model=LayoutDetectionModel.OI_PARSER_LAYOUT,
+                image_width=1,
+                image_height=1,
+                predictions=[],
+            )
+
+        first_page = layout_pages[0]
+        output_width = int(first_page.width or 1)
+        output_height = int(first_page.height or 1)
+
+        predictions: list[LayoutPrediction] = []
+
+        for lp in layout_pages:
+            page_number = lp.page_number
+            if page_filter is not None and page_number != page_filter:
+                continue
+
+            for item in lp.items:
+                for seg in item.layout_segments:
+                    # Emit the raw API label; OIParserLabelMapper canonicalizes casing.
+                    label = seg.label or item.type or "Text"
+
+                    # oi-parser emits ABSOLUTE pixel xywh (in the page's width/height
+                    # pixel space), so map straight to pixel xyxy — no [0,1] scaling.
+                    x1 = seg.x
+                    y1 = seg.y
+                    x2 = seg.x + seg.w
+                    y2 = seg.y + seg.h
+
+                    content = _build_vendor_content(label, item.value)
+
+                    predictions.append(
+                        LayoutPrediction(
+                            bbox=[x1, y1, x2, y2],
+                            score=float(seg.confidence or 1.0),
+                            label=label,
+                            page=page_number,
+                            content=content,
+                            provider_metadata={
+                                "order_index": len(predictions),
+                            },
+                        )
+                    )
+
+        return LayoutOutput(
+            task_type="layout_detection",
+            example_id=inference_result.request.example_id,
+            pipeline_name=inference_result.pipeline_name,
+            model=LayoutDetectionModel.OI_PARSER_LAYOUT,
             image_width=max(output_width, 1),
             image_height=max(output_height, 1),
             predictions=predictions,
@@ -2790,7 +2947,7 @@ class KdlFrontierNanoLayoutAdapter(LayoutAdapter):
 
 @register_layout_adapter("pymupdf4llm", priority=90)
 class PyMuPDF4LLMLayoutAdapter(LayoutAdapter):
-    """Extract canonical layout predictions from PyMuPDF4LLM parse output."""
+    """Extract layout predictions from PyMuPDF4LLM parse output."""
 
     @classmethod
     def matches(cls, inference_result: InferenceResult) -> bool:
@@ -2818,12 +2975,7 @@ class PyMuPDF4LLMLayoutAdapter(LayoutAdapter):
             raise ValueError("PyMuPDF4LLMLayoutAdapter requires ParseOutput or LayoutOutput")
 
         layout_pages = inference_result.output.layout_pages
-        # Segments are normalized to [0, 1] against their own page. Scale each by
-        # its real page dimensions and expose the (reference) page's real
-        # dimensions as image_width/height so the metric's normalize_bbox_xyxy
-        # round-trips back to [0, 1] (a numeric no-op vs. the old synthetic 1000
-        # scale). Mirrors DoclingParseLayoutAdapter's real-dimension convention.
-        selected_pages = [lp for lp in layout_pages if page_filter is None or lp.page_number == page_filter]
+        selected_pages = [page for page in layout_pages if page_filter is None or page.page_number == page_filter]
         reference_page = selected_pages[0] if selected_pages else (layout_pages[0] if layout_pages else None)
         output_width = int(reference_page.width or 1) if reference_page is not None else 1
         output_height = int(reference_page.height or 1) if reference_page is not None else 1
@@ -2839,8 +2991,6 @@ class PyMuPDF4LLMLayoutAdapter(LayoutAdapter):
                 for segment in segments:
                     if segment is None:
                         continue
-                    # Emit the raw provider label; canonicalization happens in the
-                    # label-mapper layer during projection.
                     label = segment.label or item.type or "Text"
                     is_table = item.type == "table"
                     content_text = item.html if is_table and item.html else item.md or item.value

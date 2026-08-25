@@ -16,11 +16,10 @@ from parse_bench.inference.providers.base import (
     ProviderTransientError,
 )
 from parse_bench.inference.providers.parse._layout_utils import (
-    SYSTEM_PROMPT_LAYOUT,
-    USER_PROMPT_LAYOUT,
     build_layout_pages,
     items_to_markdown,
     parse_layout_blocks,
+    resolve_layout_prompts,
     split_pdf_to_pages,
 )
 from parse_bench.inference.providers.registry import register_provider
@@ -77,6 +76,9 @@ _OPENAI_PRICING_PER_M: dict[str, tuple[float, float]] = {
     "gpt-5.4": (2.50, 15.00),
     "gpt-5.4-nano": (0.20, 1.25),
     "gpt-5.5": (5.00, 30.00),
+    "gpt-5.6-sol": (5.00, 30.00),
+    "gpt-5.6-terra": (2.50, 15.00),
+    "gpt-5.6-luna": (1.00, 6.00),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4o": (2.50, 10.00),
     "gpt-4.1-mini": (0.40, 1.60),
@@ -130,6 +132,12 @@ class OpenAIProvider(Provider):
                 f"Invalid mode '{self._mode}'. "
                 "Must be 'image', 'file', 'parse_with_layout', or 'parse_with_layout_file'."
             )
+
+        # Grid the layout-mode bboxes are on: 1000 (the 0-1000 prompt, the
+        # default) or None (absolute pixels of the sent image, for models
+        # that ground well but re-normalize unreliably).
+        self._bbox_scale = self.base_config.get("bbox_scale", 1000)
+        self._layout_system_prompt, self._layout_user_prompt = resolve_layout_prompts(self._bbox_scale, self._mode)
 
         # Initialize OpenAI client
         try:
@@ -329,7 +337,7 @@ class OpenAIProvider(Provider):
                 "model": self._model,
                 "max_completion_tokens": self._max_tokens,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT_LAYOUT},
+                    {"role": "system", "content": self._layout_system_prompt},
                     {
                         "role": "user",
                         "content": [
@@ -341,7 +349,7 @@ class OpenAIProvider(Provider):
                             },
                             {
                                 "type": "text",
-                                "text": USER_PROMPT_LAYOUT,
+                                "text": self._layout_user_prompt,
                             },
                         ],
                     },
@@ -437,7 +445,7 @@ class OpenAIProvider(Provider):
                 "model": self._model,
                 "max_completion_tokens": self._max_tokens,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT_LAYOUT},
+                    {"role": "system", "content": self._layout_system_prompt},
                     {
                         "role": "user",
                         "content": [
@@ -450,7 +458,7 @@ class OpenAIProvider(Provider):
                             },
                             {
                                 "type": "text",
-                                "text": USER_PROMPT_LAYOUT,
+                                "text": self._layout_user_prompt,
                             },
                         ],
                     },
@@ -473,6 +481,13 @@ class OpenAIProvider(Provider):
                 raise ProviderTransientError(f"Transient error calling OpenAI API: {e}") from e
             if any(kw in error_str for kw in ["rate_limit", "rate limit", "429"]):
                 raise ProviderTransientError(f"Rate limited: {e}") from e
+            # GPT-5.6 intermittently returns a 401 "insufficient permissions"
+            # that clears on retry; treat it as transient so the runner retries.
+            is_gpt56_401_blip = (
+                self._model.startswith("gpt-5.6-") and "insufficient permissions for this operation" in error_str
+            )
+            if is_gpt56_401_blip:
+                raise ProviderTransientError(f"Transient OpenAI 401 (retryable): {e}") from e
             raise ProviderPermanentError(f"Error calling OpenAI API: {e}") from e
 
     def run_inference(self, pipeline: PipelineSpec, request: InferenceRequest) -> RawInferenceResult:
@@ -625,6 +640,7 @@ class OpenAIProvider(Provider):
                 "num_pages": num_pages,
                 "model": self._model,
                 "mode": self._mode,
+                "bbox_scale": self._bbox_scale,
                 "config": config_info,
                 "input_tokens": total_input,
                 "output_tokens": total_output,
@@ -686,6 +702,7 @@ class OpenAIProvider(Provider):
                         image_height,
                         markdown,
                         page_number=page_index + 1,
+                        bbox_scale=raw_result.raw_output.get("bbox_scale", 1000),
                     )
                 )
             else:
