@@ -107,7 +107,7 @@ env:
   GCP_PROJECT_ID: pypi-download-analysis-457820
   GCS_PREFIX: parsebench/pymupdf_source_stack
   UV_NO_SYNC: "1"
-  WORKFLOW_SCRIPTS: .workflow-support/.github/scripts/pymupdf_source_stack
+  WORKFLOW_SCRIPTS: .github/scripts/pymupdf_source_stack
 
 jobs:
   benchmark:
@@ -129,24 +129,12 @@ jobs:
     steps:
       - name: Checkout ParseBench
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-
-      - name: Checkout workflow helpers
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: .workflow-support
-          persist-credentials: false
-          sparse-checkout: |
-            .github/scripts/pymupdf_source_stack
-            tools/version_lab/src
 
       - name: Initialize run configuration
         id: config
         env:
           ALL_LATEST: ${{ inputs.all_latest }}
-          BENCHMARK_REF: main
+          BENCHMARK_REF: ${{ github.ref_name }}
           DATASET_REF: ${{ inputs.dataset_version }}
           GROUP_SELECTION: ${{ inputs.group }}
           LATEST_ANY_BRANCH: ${{ inputs.latest_any_branch }}
@@ -263,7 +251,7 @@ jobs:
       - name: Add selected configuration to workflow summary
         env:
           ALL_LATEST: ${{ steps.config.outputs.all_latest }}
-          BENCHMARK_REF: main
+          BENCHMARK_REF: ${{ github.ref_name }}
           DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
           DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
           DATASET_REQUESTED_REF: ${{ steps.dataset.outputs.requested_ref }}
@@ -451,8 +439,6 @@ jobs:
       - name: Checkout publishing helper
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.workflow_sha }}
-          path: .workflow-support
           persist-credentials: false
           sparse-checkout: |
             .github/scripts/pymupdf_source_stack
@@ -497,8 +483,6 @@ jobs:
       - name: Checkout summary helpers
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.workflow_sha }}
-          path: .workflow-support
           persist-credentials: false
           sparse-checkout: |
             .github/scripts/pymupdf_source_stack
