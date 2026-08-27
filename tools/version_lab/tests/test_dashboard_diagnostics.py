@@ -169,6 +169,8 @@ def test_writer_requires_complete_v2_index_and_publishes_v3_tree(tmp_path: Path)
             "layout/example": {
                 "relative_path": "_diagnostics/v3/case.json",
                 "schema_version": 3,
+                "source_relative_path": "example.pdf",
+                "source_media_type": None,
             }
         },
     }

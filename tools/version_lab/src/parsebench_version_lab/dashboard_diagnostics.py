@@ -7,6 +7,7 @@ evidence or changing benchmark scores.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -218,9 +219,12 @@ def write_dashboard_diagnostics(
         filename = PurePosixPath(source_relative_path).name
         upgraded = transform_v2_diagnostic(artifact, dimension=dimension)
         _write_json(destination / filename, upgraded)
+        source = _object(upgraded.get("source"))
         index_entries[test_id] = {
             "relative_path": f"{DASHBOARD_DIAGNOSTIC_DIRECTORY}/{filename}",
             "schema_version": DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION,
+            "source_relative_path": source.get("relative_path"),
+            "source_media_type": source.get("media_type"),
         }
 
     index = {
@@ -308,3 +312,16 @@ def upgrade_local_dashboard_diagnostic_trees(artifact_root: Path) -> list[Path]:
             raise
 
         return [target / "index.json" for target, _backup in installed]
+
+
+def main(arguments: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("artifact_root", type=Path)
+    args = parser.parse_args(arguments)
+    for index_path in upgrade_local_dashboard_diagnostic_trees(args.artifact_root):
+        print(index_path)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

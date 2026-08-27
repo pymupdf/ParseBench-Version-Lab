@@ -91,7 +91,7 @@ def test_github_indexing_is_independent_from_the_benchmark_outcome() -> None:
     assert "SOURCE_WORKFLOW: pymupdf-source-stack-parsebench.yml" in index_workflow
     assert "PARSEBENCH_SUPABASE_SECRET_KEY" in index_workflow
     assert 'run: python3 "$WORKFLOW_SCRIPTS/index_results.py"' in index_workflow
-    assert 'run: python3 "$WORKFLOW_SCRIPTS/prepare_dashboard_diagnostics.py"' in benchmark_workflow
+    assert 'run: .venv/bin/python -m parsebench_version_lab.dashboard_diagnostics "$OUTPUT_DIR"' in benchmark_workflow
     assert benchmark_workflow.index("Prepare dashboard diagnostics") > benchmark_workflow.index(
         "Generate ParseBench reports"
     )

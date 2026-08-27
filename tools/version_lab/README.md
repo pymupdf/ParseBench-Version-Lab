@@ -159,6 +159,15 @@ Selected historical source revisions must support the current upstream
 PyMuPDF4LLM provider API. Incompatible revisions fail rather than receiving a
 Version Lab-specific output transformation.
 
+## Diagnostic boundary
+
+ParseBench produces its canonical evaluation reports unchanged. After each
+evaluation, Version Lab reads that report and the pinned dataset rows, then
+writes separate per-document diagnostic sidecars for publishing and dashboard
+indexing. Dashboard metadata, source-asset mapping, and schema upgrades remain
+under `tools/version_lab`; no diagnostic hooks or fields are added to upstream
+ParseBench modules.
+
 ## Results
 
 Each run is stored under `.version-lab/run-*`. The main outputs are:
@@ -167,6 +176,7 @@ Each run is stored under `.version-lab/run-*`. The main outputs are:
 - `output/_benchmark_scores.md`: aggregate score summary
 - `output/_benchmark_scores.json`: machine-readable aggregate scores
 - `output/<pipeline>/_evaluation_report_dashboard.html`: HTML dashboard
+- `output/<pipeline>/**/_diagnostics/`: Version Lab diagnostic sidecars
 
 The dataset cache is stored under `.version-lab/cache/datasets/`. Use
 `--workspace PATH` to select another location.

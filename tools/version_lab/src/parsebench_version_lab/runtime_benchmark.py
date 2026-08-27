@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from .coverage import inspect_dataset
+from .evaluation_diagnostics import write_diagnostics_from_report
 from .util import required_env
 
 DATASET_MARKER = ".parsebench-dataset-revision.json"
@@ -108,6 +109,12 @@ def evaluate_group(group: str, report_dir: Path) -> None:
         "--export_markdown=False",
         "--export_html=False",
     )
+    diagnostic_index = write_diagnostics_from_report(
+        report_dir,
+        test_cases_dir=Path(required_env("DATA_DIR")),
+        dimension=group,
+    )
+    print(f"Version Lab diagnostics saved to: {diagnostic_index.resolve()}")
 
 
 def evaluate() -> None:

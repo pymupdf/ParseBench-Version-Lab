@@ -514,7 +514,7 @@ def test_diagnostic_index_rejects_unsafe_or_incompatible_locators(tmp_path: Path
         "table",
     )
 
-    assert locators == {"table/safe": ("pipeline/table/_diagnostics/v3/safe.json", 3)}
+    assert locators == {"table/safe": ("pipeline/table/_diagnostics/v3/safe.json", 3, None, None)}
     assert (
         benchmark_index_module._diagnostic_locators(
             LocalArtifactReader(tmp_path),
@@ -583,7 +583,7 @@ def test_diagnostic_index_consumes_only_dashboard_v3(tmp_path: Path) -> None:
         LocalArtifactReader(tmp_path),
         "pipeline/layout/_evaluation_report.json",
         "layout",
-    ) == {"layout/example": ("pipeline/layout/_diagnostics/v3/case.json", 3)}
+    ) == {"layout/example": ("pipeline/layout/_diagnostics/v3/case.json", 3, None, None)}
 
     (tmp_path / "pipeline/layout/_diagnostics/v3/index.json").unlink()
     assert (

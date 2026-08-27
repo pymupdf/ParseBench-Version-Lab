@@ -35,14 +35,6 @@ class EvaluationResult(BaseModel):
     example_id: str = Field(description="Example identifier from inference result")
     pipeline_name: str = Field(description="Pipeline that produced the result")
     product_type: str = Field(description="Product type (extract, parse, etc.)")
-    source_relative_path: str | None = Field(
-        default=None,
-        description="Dataset-relative path to the exact source asset used for this example",
-    )
-    source_media_type: str | None = Field(
-        default=None,
-        description="Media type of the source asset, such as application/pdf or image/png",
-    )
     success: bool = Field(description="Whether evaluation succeeded")
     metrics: list[MetricValue] = Field(default_factory=list, description="List of metric scores")
     error: str | None = Field(default=None, description="Error message if evaluation failed")
@@ -69,13 +61,6 @@ class EvaluationSummary(BaseModel):
     successful: int = Field(description="Number of successful evaluations")
     failed: int = Field(description="Number of failed evaluations")
     skipped: int = Field(description="Number of skipped examples (no result found)")
-    verified_only: bool = Field(
-        default=False,
-        description=(
-            "Whether rules explicitly marked verified=false were discarded before evaluation. "
-            "Defaults to false for reports written before this provenance field existed."
-        ),
-    )
     aggregate_metrics: dict[str, float] = Field(
         default_factory=dict,
         description="Aggregated metric values (e.g., avg_accuracy, avg_latency)",

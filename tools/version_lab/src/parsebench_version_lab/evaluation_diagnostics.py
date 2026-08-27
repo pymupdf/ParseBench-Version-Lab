@@ -1,4 +1,4 @@
-"""Write compact, per-example evaluation diagnostics for interactive consumers.
+"""Write Version Lab diagnostics from canonical ParseBench reports.
 
 The canonical evaluation report intentionally keeps every example in one file.
 That is convenient for aggregate reports, but expensive for a document inspector:
@@ -372,15 +372,12 @@ def _outcome_summary(result: EvaluationResult, primary: MetricValue | None) -> d
     return {"passed": 0, "partial": 0, "failed": 0, "total": 0, "source": None}
 
 
-def _source_details(
-    result: EvaluationResult,
-    expectation_rows: list[dict[str, Any]],
-) -> dict[str, Any]:
+def _source_details(expectation_rows: list[dict[str, Any]]) -> dict[str, Any]:
     dataset_paths = sorted(
         {source_path for row in expectation_rows if isinstance((source_path := row.get("pdf")), str) and source_path}
     )
-    relative_path = result.source_relative_path or (dataset_paths[0] if len(dataset_paths) == 1 else None)
-    media_type = result.source_media_type
+    relative_path = dataset_paths[0] if len(dataset_paths) == 1 else None
+    media_type = None
     if media_type is None and relative_path:
         media_type = mimetypes.guess_type(relative_path)[0]
 
@@ -517,7 +514,7 @@ def write_diagnostic_artifacts(
             "schema_version": DIAGNOSTIC_SCHEMA_VERSION,
             "test_id": result.test_id,
             "dimension": resolved_dimension,
-            "source": _source_details(diagnostic_result, expectation_rows),
+            "source": _source_details(expectation_rows),
             "dataset_file": (f"{resolved_dimension}.jsonl" if resolved_dimension in _DATASET_DIMENSIONS else None),
             "primary_metric": (
                 {
@@ -550,3 +547,23 @@ def write_diagnostic_artifacts(
     index_path = diagnostics_dir / "index.json"
     _write_json(index_path, index_payload)
     return index_path
+
+
+def write_diagnostics_from_report(
+    report_dir: Path,
+    *,
+    test_cases_dir: Path,
+    dimension: str,
+    verified_only: bool = False,
+) -> Path:
+    """Generate Version Lab sidecars without modifying the ParseBench report."""
+
+    report_path = report_dir / "_evaluation_report.json"
+    summary = EvaluationSummary.model_validate_json(report_path.read_text(encoding="utf-8"))
+    return write_diagnostic_artifacts(
+        summary,
+        report_dir,
+        test_cases_dir=test_cases_dir,
+        dimension=dimension,
+        verified_only=verified_only,
+    )

@@ -364,7 +364,7 @@ def _diagnostic_locators(
     reader: JsonArtifactReader,
     report_path: str,
     dimension: str,
-) -> dict[str, tuple[str, int]]:
+) -> dict[str, tuple[str, int, str | None, str | None]]:
     """Read safe dashboard schema-v3 diagnostic paths."""
     report_directory = PurePosixPath(report_path).parent
     expected_version = 3
@@ -375,7 +375,7 @@ def _diagnostic_locators(
     if index_version != expected_version or index.get("dimension") != dimension:
         return {}
 
-    locators: dict[str, tuple[str, int]] = {}
+    locators: dict[str, tuple[str, int, str | None, str | None]] = {}
     for test_id, value in _object(index.get("diagnostics")).items():
         if not test_id:
             continue
@@ -388,7 +388,13 @@ def _diagnostic_locators(
         path = PurePosixPath(relative_path)
         if path.parent != expected_directory or path.suffix != ".json":
             continue
-        locators[test_id] = ((report_directory / path).as_posix(), schema_version)
+        declared_media_type = entry.get("source_media_type")
+        locators[test_id] = (
+            (report_directory / path).as_posix(),
+            schema_version,
+            _normalized_source_path(entry.get("source_relative_path")),
+            declared_media_type if isinstance(declared_media_type, str) else None,
+        )
     return locators
 
 
@@ -829,7 +835,10 @@ class BenchmarkIndexer:
             if not isinstance(test_id, str):
                 continue
             inference_group = test_id.split("/", 1)[0] if "/" in test_id else None
+            diagnostic = diagnostic_locators.get(test_id)
             source_path = _normalized_source_path(example.get("source_relative_path"))
+            if source_path is None and diagnostic is not None:
+                source_path = diagnostic[2]
             if source_path is None:
                 repository = dataset.get("repository")
                 resolved_sha = dataset.get("resolved_sha")
@@ -837,7 +846,10 @@ class BenchmarkIndexer:
                     if legacy_assets is None:
                         legacy_assets = self._dataset_source_assets(repository, resolved_sha)
                     source_path = legacy_assets.get(test_id)
-            source_media_type = _source_media_type(source_path, example.get("source_media_type"))
+            declared_media_type = example.get("source_media_type")
+            if not isinstance(declared_media_type, str) and diagnostic is not None:
+                declared_media_type = diagnostic[3]
+            source_media_type = _source_media_type(source_path, declared_media_type)
             pdf_path = source_path if source_media_type == "application/pdf" else None
             case_rows.append(
                 {
@@ -858,7 +870,7 @@ class BenchmarkIndexer:
 
         result_rows: list[dict[str, Any]] = []
         result_rows_by_case_id: dict[int, dict[str, Any]] = {}
-        diagnostic_by_case_id: dict[int, tuple[str, int]] = {}
+        diagnostic_by_case_id: dict[int, tuple[str, int, str | None, str | None]] = {}
         for example in example_rows:
             test_id = example.get("test_id")
             if not isinstance(test_id, str) or test_id not in case_ids:
@@ -902,7 +914,7 @@ class BenchmarkIndexer:
             diagnostic = diagnostic_by_case_id.get(case_id)
             if diagnostic is None:
                 continue
-            diagnostic_path, diagnostic_schema_version = diagnostic
+            diagnostic_path, diagnostic_schema_version, _diagnostic_source, _diagnostic_media_type = diagnostic
             existing_schema_version = _integer(result_record.get("diagnostic_schema_version"))
             existing_path = result_record.get("diagnostic_relative_path")
             has_existing_locator = isinstance(existing_path, str) and bool(existing_path.strip())

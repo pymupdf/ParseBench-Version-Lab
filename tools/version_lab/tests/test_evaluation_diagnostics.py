@@ -1,15 +1,22 @@
 import hashlib
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from parse_bench.evaluation import cli as evaluation_cli_module
-from parse_bench.evaluation.cli import EvaluationCLI
-from parse_bench.evaluation.diagnostics import diagnostic_dimension, write_diagnostic_artifacts
-from parse_bench.evaluation.runner import EvaluationRunner
-from parse_bench.schemas.evaluation import EvaluationResult, EvaluationSummary, MetricValue
+VERSION_LAB_SRC = Path(__file__).parents[1] / "src"
+sys.path.insert(0, str(VERSION_LAB_SRC))
+
+from parse_bench.schemas.evaluation import EvaluationResult, EvaluationSummary, MetricValue  # noqa: E402
+
+from parsebench_version_lab import runtime_benchmark  # noqa: E402
+from parsebench_version_lab.evaluation_diagnostics import (  # noqa: E402
+    diagnostic_dimension,
+    write_diagnostic_artifacts,
+    write_diagnostics_from_report,
+)
 
 
 def _summary(result: EvaluationResult) -> EvaluationSummary:
@@ -28,8 +35,6 @@ def _result(*, metrics: list[MetricValue], tags: list[str] | None = None) -> Eva
         example_id="sample",
         pipeline_name="example_pipeline",
         product_type="parse",
-        source_relative_path="docs/chart/sample.pdf",
-        source_media_type="application/pdf",
         success=True,
         metrics=metrics,
         tags=tags or ["chart"],
@@ -510,46 +515,63 @@ def test_compacts_repeated_layout_outcome_text_for_eager_loading(tmp_path: Path)
     assert not ({"pred_text_norm", "missing_tokens", "extra_tokens"} & artifact["outcomes"][0].keys())
 
 
-def test_regenerate_uses_verified_only_provenance_from_report(
+def test_report_postprocessor_preserves_canonical_report(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    dataset_dir.mkdir()
+    (dataset_dir / "chart.jsonl").write_text(
+        json.dumps({"pdf": "docs/chart/sample.pdf", "category": "chart", "id": "point-1", "rule": "{}"})
+        + "\n",
+        encoding="utf-8",
+    )
+    report_dir = tmp_path / "chart"
+    report_dir.mkdir()
+    summary = _summary(_result(metrics=[]))
+    report_path = report_dir / "_evaluation_report.json"
+    report_payload = summary.model_dump_json()
+    report_path.write_text(report_payload, encoding="utf-8")
+
+    index_path = write_diagnostics_from_report(
+        report_dir,
+        test_cases_dir=dataset_dir,
+        dimension="chart",
+    )
+
+    _, artifact = _read_artifact(index_path, "chart/sample")
+    assert artifact["source"]["relative_path"] == "docs/chart/sample.pdf"
+    assert report_path.read_text(encoding="utf-8") == report_payload
+
+
+def test_report_postprocessor_requires_a_canonical_report(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        write_diagnostics_from_report(
+            tmp_path / "missing",
+            test_cases_dir=tmp_path,
+            dimension="chart",
+        )
+
+
+def test_runtime_evaluation_writes_version_lab_diagnostics(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    evaluation_dir = tmp_path / "chart"
-    evaluation_dir.mkdir()
-    summary = _summary(_result(metrics=[]))
-    summary.verified_only = True
-    (evaluation_dir / "_evaluation_report.json").write_text(
-        summary.model_dump_json(),
-        encoding="utf-8",
-    )
     observed: dict[str, object] = {}
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "dataset"))
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path / "output"))
+    monkeypatch.setenv("PIPELINE", "example_pipeline")
+    monkeypatch.setattr(runtime_benchmark, "parse_bench", lambda *_arguments: None)
 
-    def fake_write_diagnostics(*_args: object, **kwargs: object) -> Path:
+    def fake_write(report_dir: Path, **kwargs: object) -> Path:
+        observed["report_dir"] = report_dir
         observed.update(kwargs)
-        return evaluation_dir / "_diagnostics" / "v2" / "index.json"
+        return report_dir / "_diagnostics" / "v2" / "index.json"
 
-    monkeypatch.setattr(evaluation_cli_module, "write_diagnostic_artifacts", fake_write_diagnostics)
+    monkeypatch.setattr(runtime_benchmark, "write_diagnostics_from_report", fake_write)
+    report_dir = tmp_path / "output" / "example_pipeline" / "chart"
 
-    exit_code = EvaluationCLI().regenerate_report(
-        evaluation_dir,
-        export_csv=False,
-        export_rule_csv=False,
-        export_markdown=False,
-        export_html=False,
-    )
+    runtime_benchmark.evaluate_group("chart", report_dir)
 
-    assert exit_code == 0
-    assert observed["verified_only"] is True
-
-
-def test_historical_report_defaults_verified_only_provenance_to_false() -> None:
-    summary = _summary(_result(metrics=[])).model_dump()
-    summary.pop("verified_only")
-
-    assert EvaluationSummary.model_validate(summary).verified_only is False
-
-
-def test_runner_records_verified_only_provenance(tmp_path: Path) -> None:
-    summary = EvaluationRunner(tmp_path, verified_only=True).run_evaluation(use_rich=False)
-
-    assert summary.verified_only is True
+    assert observed == {
+        "report_dir": report_dir,
+        "test_cases_dir": tmp_path / "dataset",
+        "dimension": "chart",
+    }

@@ -8,7 +8,6 @@ from pathlib import Path
 import fire
 
 from parse_bench.analysis.detailed_report import generate_detailed_html_report
-from parse_bench.evaluation.diagnostics import diagnostic_dimension, write_diagnostic_artifacts
 from parse_bench.evaluation.reports import (
     export_csv as export_csv_report,
 )
@@ -97,7 +96,7 @@ class EvaluationCLI:
             for metadata_path in metadata_paths:
                 if metadata_path.exists():
                     try:
-                        with open(metadata_path, encoding="utf-8") as f:
+                        with open(metadata_path) as f:
                             metadata = json.load(f)
                         # Infer test_cases_dir
                         if test_cases_dir is None and "test_cases_dir" in metadata:
@@ -116,7 +115,7 @@ class EvaluationCLI:
             if product_type is None:
                 for result_file in output_dir_path.rglob("*.result.json"):
                     try:
-                        with open(result_file, encoding="utf-8") as f:
+                        with open(result_file) as f:
                             result_data = json.load(f)
                         if "product_type" in result_data:
                             product_type = result_data["product_type"]
@@ -172,18 +171,9 @@ class EvaluationCLI:
 
             # Save JSON report
             report_json_path = report_dir_path / "_evaluation_report.json"
-            report_json_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+            report_json_path.write_text(summary.model_dump_json(indent=2))
             print("\n✅ Evaluation complete!")
             print(f"📊 Results saved to: {report_json_path.resolve()}")
-
-            diagnostic_index_path = write_diagnostic_artifacts(
-                summary,
-                report_dir_path,
-                test_cases_dir=test_cases_dir_path,
-                dimension=diagnostic_dimension(group),
-                verified_only=verified_only,
-            )
-            print(f"🔎 Per-document diagnostics saved to: {diagnostic_index_path.resolve()}")
 
             # Print summary
             self._print_summary(summary)
@@ -288,7 +278,7 @@ class EvaluationCLI:
                 )
                 return 1
 
-            summary_data = json.loads(summary_json_path.read_text(encoding="utf-8"))
+            summary_data = json.loads(summary_json_path.read_text())
             summary = EvaluationSummary.model_validate(summary_data)
 
             # Auto-detect test_cases_dir from _metadata.json if not provided
@@ -300,7 +290,7 @@ class EvaluationCLI:
             for metadata_path in metadata_paths:
                 if metadata_path.exists():
                     try:
-                        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                        metadata = json.loads(metadata_path.read_text())
                         if test_cases_dir is None and "test_cases_dir" in metadata:
                             candidate = Path(metadata["test_cases_dir"])
                             if candidate.exists() and candidate.is_dir():
@@ -321,20 +311,6 @@ class EvaluationCLI:
                 print(f"  Test cases: {test_cases_dir_path}")
             if pdf_base_url:
                 print(f"  PDF base URL: {pdf_base_url}")
-
-            diagnostic_index_path = write_diagnostic_artifacts(
-                summary,
-                report_dir_path,
-                test_cases_dir=test_cases_dir_path,
-                dimension=diagnostic_dimension(
-                    evaluation_path.name
-                    if test_cases_dir_path is not None
-                    and (test_cases_dir_path / f"{evaluation_path.name}.jsonl").is_file()
-                    else None
-                ),
-                verified_only=summary.verified_only,
-            )
-            print(f"  Per-document diagnostics: {diagnostic_index_path.resolve()}")
 
             if export_csv:
                 csv_path = export_csv_report(summary, report_dir_path)

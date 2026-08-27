@@ -411,7 +411,7 @@ jobs:
       - name: Prepare dashboard diagnostics
         env:
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
-        run: python3 "$WORKFLOW_SCRIPTS/prepare_dashboard_diagnostics.py"
+        run: .venv/bin/python -m parsebench_version_lab.dashboard_diagnostics "$OUTPUT_DIR"
 
       - name: Add aggregate results to workflow summary
         env:

@@ -36,36 +36,6 @@ resolve_latest_branches = _load_module("resolve_latest_branches")
 resolve_sources = _load_module("resolve_sources")
 results_summary = _load_module("write_results_summary")
 run_summary = _load_module("write_run_summary")
-prepare_dashboard_diagnostics = _load_module("prepare_dashboard_diagnostics")
-
-
-def test_prepare_dashboard_diagnostics_upgrades_output_without_touching_benchmark(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output_dir = tmp_path / "parsebench-output"
-    output_dir.mkdir()
-    summary = tmp_path / "summary.md"
-    monkeypatch.setenv("OUTPUT_DIR", str(output_dir))
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    upgraded = [output_dir / "pipeline/table/_diagnostics/v3/index.json"]
-    observed: list[Path] = []
-
-    def upgrade(root: Path) -> list[Path]:
-        observed.append(root)
-        return upgraded
-
-    monkeypatch.setattr(
-        prepare_dashboard_diagnostics,
-        "upgrade_local_dashboard_diagnostic_trees",
-        upgrade,
-    )
-
-    assert prepare_dashboard_diagnostics.main() == 0
-    assert observed == [output_dir]
-    text = summary.read_text(encoding="utf-8")
-    assert "Schema: `v3`" in text
-    assert "Canonical ParseBench reports and evaluator diagnostics were not modified." in text
 
 
 @pytest.mark.parametrize(

@@ -38,7 +38,7 @@ from parse_bench.evaluation.metric_aggregation import add_precision_recall_f1_ag
 from parse_bench.evaluation.stats import build_operational_stats
 from parse_bench.schemas.evaluation import EvaluationResult, EvaluationSummary
 from parse_bench.schemas.layout_detection_output import LayoutOutput
-from parse_bench.schemas.pipeline_io import InferenceRequest, InferenceResult
+from parse_bench.schemas.pipeline_io import InferenceResult, InferenceRequest
 from parse_bench.schemas.product import ProductType
 from parse_bench.test_cases import load_test_cases
 from parse_bench.test_cases.parse_rule_schemas import get_rule_type
@@ -537,25 +537,6 @@ class EvaluationRunner:
                 matches.append(test_case)
 
         return matches
-
-    def _source_asset_metadata(self, test_case: TestCase) -> tuple[str | None, str | None]:
-        """Return portable source metadata without leaking a runner-local absolute path."""
-        if self.test_cases_dir is None:
-            return None, None
-        try:
-            relative_path = test_case.file_path.resolve().relative_to(self.test_cases_dir.resolve())
-        except ValueError:
-            return None, None
-
-        media_types = {
-            ".pdf": "application/pdf",
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".jfif": "image/jpeg",
-            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        }
-        return relative_path.as_posix(), media_types.get(relative_path.suffix.lower())
 
     def run_evaluation(
         self,
@@ -1091,16 +1072,11 @@ class EvaluationRunner:
             if progress:
                 progress.stop()
 
-        # Stamp source metadata and tags from test cases onto evaluation results.
-        # QA results append a synthetic #qN suffix to the underlying document id.
+        # Stamp tags from test cases onto evaluation results
         for result in evaluation_results:
-            base_test_id = result.test_id.split("#q", 1)[0]
-            tc = test_cases_dict.get(base_test_id)  # type: ignore[assignment]
+            tc = test_cases_dict.get(result.test_id)  # type: ignore[assignment]
             if tc is not None:
                 result.tags = list(tc.tags)
-                source_path, source_media_type = self._source_asset_metadata(tc)
-                result.source_relative_path = source_path
-                result.source_media_type = source_media_type
 
         # Aggregate metrics
         aggregate_metrics = self._aggregate_metrics(evaluation_results)
@@ -1138,7 +1114,6 @@ class EvaluationRunner:
             successful=successful,
             failed=failed,
             skipped=skipped,
-            verified_only=self.verified_only,
             aggregate_metrics=aggregate_metrics,
             per_example_results=evaluation_results,
             confusion_matrix=confusion_matrix,
