@@ -170,7 +170,7 @@ ParseBench modules.
 
 ## Results
 
-Each run is stored under `.version-lab/run-*`. The main outputs are:
+Each run is stored under `tools/version_lab/.version-lab/run-*`. The main outputs are:
 
 - `run.json`: selected configuration, exact source commits, and status
 - `output/_benchmark_scores.md`: aggregate score summary
@@ -178,7 +178,7 @@ Each run is stored under `.version-lab/run-*`. The main outputs are:
 - `output/<pipeline>/_evaluation_report_dashboard.html`: HTML dashboard
 - `output/<pipeline>/**/_diagnostics/`: Version Lab diagnostic sidecars
 
-The dataset cache is stored under `.version-lab/cache/datasets/`. Use
+The dataset cache is stored under `tools/version_lab/.version-lab/cache/datasets/`. Use
 `--workspace PATH` to select another location.
 
 ## Continuous benchmark indexing
@@ -222,7 +222,7 @@ uv run --project tools/version_lab version-lab backfill-index \
 
 The command paginates GCS without printing object names. It saves its complete
 manifest and final checkpoint under the ignored directory
-`.version-lab/benchmark-index-backfill/`, then idempotently upserts runs,
+`tools/version_lab/.version-lab/benchmark-index-backfill/`, then idempotently upserts runs,
 document-level headline scores, artifact locators, and errors into Supabase.
 Detailed per-document metrics remain in the GCS diagnostic artifacts. Re-running
 the command safely refreshes the lightweight index without writing `case_metrics`.

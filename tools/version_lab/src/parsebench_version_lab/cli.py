@@ -113,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--workspace",
         type=Path,
-        help="Persistent run/cache root (default: REPOSITORY/.version-lab)",
+        help="Persistent run/cache root (default: REPOSITORY/tools/version_lab/.version-lab)",
     )
     run.add_argument(
         "--resolve-only",
@@ -191,7 +191,10 @@ def main(arguments: list[str] | None = None) -> int:
         return 0 if status["ready"] else 1
     if args.command == "backfill-index":
         repository = repository_root()
-        workspace = (args.workspace or repository / ".version-lab" / "benchmark-index-backfill").resolve()
+        workspace = (
+            args.workspace
+            or repository / "tools" / "version_lab" / ".version-lab" / "benchmark-index-backfill"
+        ).resolve()
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_secret_key = os.environ.get("SUPABASE_SECRET_KEY")
         if not supabase_url or not supabase_secret_key:
@@ -210,7 +213,9 @@ def main(arguments: list[str] | None = None) -> int:
         return 0 if result["runs_failed"] == 0 else 1
     if args.command == "backfill-diagnostics":
         repository = repository_root()
-        workspace = (args.workspace or repository / ".version-lab" / "diagnostic-backfill").resolve()
+        workspace = (
+            args.workspace or repository / "tools" / "version_lab" / ".version-lab" / "diagnostic-backfill"
+        ).resolve()
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_secret_key = os.environ.get("SUPABASE_SECRET_KEY")
         if not supabase_url or not supabase_secret_key:
@@ -234,7 +239,7 @@ def main(arguments: list[str] | None = None) -> int:
         return 0
     repository = repository_root()
     ensure_ready(resolve_only=args.resolve_only)
-    workspace = (args.workspace or repository / ".version-lab").resolve()
+    workspace = (args.workspace or repository / "tools" / "version_lab" / ".version-lab").resolve()
     paths = create_paths(repository, workspace)
     print(f"Version Lab run directory: {paths.run}")
     local_run = LocalRun(config, paths)
