@@ -71,6 +71,18 @@ tesseract --list-langs
 The language list must contain `eng`. If Tesseract is not found, add
 `C:\Program Files\Tesseract-OCR` to `PATH` and open a new developer shell.
 
+## Dataset downloads in GitHub Actions
+
+The benchmark workflow uses HTTP downloads with two workers to avoid the Xet
+token endpoint's API rate limits on shared runner IPs. An optional `HF_TOKEN`
+repository secret enables authenticated downloads with higher rate limits.
+Without it, the public dataset remains accessible anonymously.
+
+Rate-limited downloads make up to four attempts, retaining completed files and
+waiting at least 310 seconds between attempts (or longer if `Retry-After`
+requests it). The revision marker is written only after the snapshot download
+and dataset readiness check succeed.
+
 ## Repository
 
 ```shell

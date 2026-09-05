@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .coverage import inspect_dataset
@@ -15,6 +16,9 @@ from .evaluation_diagnostics import write_diagnostics_from_report
 from .util import required_env
 
 DATASET_MARKER = ".parsebench-dataset-revision.json"
+DATASET_DOWNLOAD_ATTEMPTS = 4
+# Hub rate limits use five-minute windows. Xet errors do not expose headers.
+DATASET_RATE_LIMIT_WAIT = 310
 
 
 def run(*arguments: str) -> None:
@@ -27,6 +31,7 @@ def parse_bench(*arguments: str) -> None:
 
 def download() -> None:
     from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import HfHubHTTPError
     from parse_bench.data.download import is_dataset_ready  # type: ignore[import-untyped]
 
     data_dir = Path(required_env("DATA_DIR"))
@@ -45,13 +50,36 @@ def download() -> None:
             print("Cached dataset is absent, incomplete, or for a different revision; downloading it again.")
             shutil.rmtree(data_dir)
         print(f"Downloading immutable dataset snapshot: {repository}@{revision}")
-        snapshot_download(
-            repo_id=repository,
-            repo_type="dataset",
-            local_dir=str(data_dir),
-            revision=revision,
-            force_download=True,
-        )
+        for attempt in range(1, DATASET_DOWNLOAD_ATTEMPTS + 1):
+            try:
+                snapshot_download(
+                    repo_id=repository,
+                    repo_type="dataset",
+                    local_dir=str(data_dir),
+                    revision=revision,
+                    # Reuse completed files when resuming after a rate limit.
+                    force_download=False,
+                    max_workers=2,
+                )
+                break
+            except (HfHubHTTPError, ConnectionError) as error:
+                response = getattr(error, "response", None)
+                rate_limited = (
+                    response.status_code == 429 if response is not None else "429 Too Many Requests" in str(error)
+                )
+                if not rate_limited or attempt == DATASET_DOWNLOAD_ATTEMPTS:
+                    raise
+                delay = DATASET_RATE_LIMIT_WAIT
+                if response is not None:
+                    retry_after = response.headers.get("Retry-After", "")
+                    if retry_after.isdigit():
+                        delay = max(delay, int(retry_after))
+                print(
+                    f"Hugging Face rate limit reached; resuming dataset download in {delay}s "
+                    f"(attempt {attempt + 1}/{DATASET_DOWNLOAD_ATTEMPTS}).",
+                    flush=True,
+                )
+                time.sleep(delay)
         if not is_dataset_ready(data_dir):
             raise SystemExit(f"Dataset snapshot {repository}@{revision} is incomplete at {data_dir}")
         marker_path.write_text(json.dumps(expected_marker, indent=2) + "\n", encoding="utf-8")

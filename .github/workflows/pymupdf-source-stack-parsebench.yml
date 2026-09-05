@@ -366,6 +366,9 @@ jobs:
 
       - name: Prepare versioned ParseBench dataset
         env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          # Avoid per-file Xet token API calls on shared runner IPs.
+          HF_HUB_DISABLE_XET: "1"
           DATA_DIR: ${{ steps.config.outputs.data_dir }}
           DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
           DATASET_SHA: ${{ steps.dataset.outputs.sha }}
