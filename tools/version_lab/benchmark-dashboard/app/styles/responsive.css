@@ -124,6 +124,26 @@
     padding-top: 10px;
   }
 
+  .workflow-row.workflow-outcome-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px 16px;
+  }
+  .workflow-outcome-row .workflow-identity {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .workflow-outcome-row .workflow-created {
+    grid-column: 2;
+    grid-row: 1;
+    border-top: 0;
+    padding-top: 0;
+    text-align: right;
+  }
+  .workflow-outcome-lane {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
   .overview-support-grid {
     grid-template-columns: 1fr;
   }
@@ -579,6 +599,23 @@
 }
 
 @media (max-width: 500px) {
+  .workflow-outcome-lane {
+    grid-template-columns: 25px minmax(0, 1fr);
+    gap: 8px 10px;
+    padding: 12px;
+  }
+  .workflow-outcome-symbol {
+    width: 24px;
+    height: 24px;
+    font-size: 16px;
+    align-self: start;
+  }
+  .workflow-outcome-action {
+    grid-column: 2;
+  }
+  .workflow-outcome-copy > strong {
+    font-size: 12px;
+  }
   .jump-form > div {
     flex-direction: column;
   }

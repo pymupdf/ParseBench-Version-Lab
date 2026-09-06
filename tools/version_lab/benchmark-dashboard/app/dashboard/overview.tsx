@@ -14,11 +14,12 @@ import {
   scorePercent,
   summaryNumber,
 } from "./format";
-import { ScoreBar, EmptyState } from "./shared";
+import { ScoreBar } from "./shared";
 import type { TriageFilters } from "./types";
 import { CommitLink } from "./commit-link";
 import { TriageGrid } from "./triage-grid";
 import { DimensionIcon, dimensionPresentation } from "./dimension-presentation";
+import { runOutcome, unscoredRunDescription } from "./run-outcome";
 
 function DimensionCard({
   dimension,
@@ -119,9 +120,13 @@ export function Overview({
   ).length;
   const selectionMismatch =
     (run.requested_scope != null &&
+      run.effective_scope != null &&
       run.requested_scope !== run.effective_scope) ||
     (run.requested_group != null &&
+      run.effective_group != null &&
       run.requested_group !== run.effective_group);
+  const noReports = !loading && bundle.dimensions.length === 0;
+  const outcome = runOutcome(run);
 
   return (
     <main
@@ -136,13 +141,18 @@ export function Overview({
         <div className="section-heading benchmark-summary-heading">
           <div>
             <span className="eyebrow">
-              Benchmark result · {scopeLabel(run.effective_scope)}
+              Benchmark result
+              {run.effective_scope
+                ? ` · ${scopeLabel(run.effective_scope)}`
+                : ""}
             </span>
             <h2 id="benchmark-result-heading">Evaluation report</h2>
           </div>
-          <span className="report-coverage-label">
-            {humanize(run.coverage_status)} coverage
-          </span>
+          {run.coverage_status && run.coverage_status !== "unknown" && (
+            <span className="report-coverage-label">
+              {humanize(run.coverage_status)} coverage
+            </span>
+          )}
         </div>
 
         {loading ? (
@@ -201,10 +211,32 @@ export function Overview({
             </div>
           </div>
         ) : (
-          <EmptyState
-            title="No completed benchmark result"
-            body={`This ${humanize(run.conclusion ?? run.status).toLowerCase()} workflow attempt is indexed, but it did not produce dimension reports.`}
-          />
+          <section
+            className="run-outcome-report"
+            data-outcome={outcome.tone}
+            aria-label="Run outcome"
+          >
+            <div>
+              <span className="eyebrow">Execution outcome</span>
+              <h3>{outcome.label}</h3>
+              <p>{unscoredRunDescription(run)}</p>
+              <p>
+                {bundle.errors.length
+                  ? "The indexed error details are shown in the run record below."
+                  : "No structured error details were retained in the index. The workflow logs provide the execution record."}
+              </p>
+            </div>
+            {run.github_run_url && (
+              <a
+                className="run-outcome-logs"
+                href={run.github_run_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open workflow logs ↗
+              </a>
+            )}
+          </section>
         )}
       </section>
 
@@ -225,7 +257,7 @@ export function Overview({
         </section>
       )}
 
-      <details className="run-record-details">
+      <details className="run-record-details" open={noReports}>
         <summary>
           <span>Run record</span>
           <span className="run-record-caption">
@@ -244,22 +276,42 @@ export function Overview({
               <h3 id="run-details-heading">Execution configuration</h3>
             </div>
             <div className="run-facts">
-              <div>
-                <span>Pipeline</span>
-                <strong>{humanize(run.pipeline_name)}</strong>
-              </div>
-              <div>
-                <span>Evaluation group</span>
-                <strong>{humanize(run.effective_group)}</strong>
-              </div>
-              <div>
-                <span>Coverage</span>
-                <strong>{humanize(run.coverage_status)}</strong>
-              </div>
-              <div>
-                <span>Trigger</span>
-                <strong>{humanize(run.event)}</strong>
-              </div>
+              {run.pipeline_name && (
+                <div>
+                  <span>Pipeline</span>
+                  <strong>{humanize(run.pipeline_name)}</strong>
+                </div>
+              )}
+              {(run.effective_group ?? run.requested_group) && (
+                <div>
+                  <span>
+                    {run.effective_group
+                      ? "Evaluation group"
+                      : "Requested group"}
+                  </span>
+                  <strong>
+                    {humanize(run.effective_group ?? run.requested_group)}
+                  </strong>
+                </div>
+              )}
+              {!run.effective_scope && run.requested_scope && (
+                <div>
+                  <span>Requested scope</span>
+                  <strong>{scopeLabel(run.requested_scope)}</strong>
+                </div>
+              )}
+              {run.coverage_status && run.coverage_status !== "unknown" && (
+                <div>
+                  <span>Coverage</span>
+                  <strong>{humanize(run.coverage_status)}</strong>
+                </div>
+              )}
+              {run.event && (
+                <div>
+                  <span>Trigger</span>
+                  <strong>{humanize(run.event)}</strong>
+                </div>
+              )}
               <div>
                 <span>Attempt</span>
                 <strong>#{run.github_run_attempt}</strong>

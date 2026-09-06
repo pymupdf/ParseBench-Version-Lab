@@ -108,22 +108,47 @@ export function BestResultPanel({
   currentDiagnostic,
   currentDiagnosticError,
   best,
+  onRetry,
 }: {
   current: CaseResult;
   currentArtifact: ArtifactState;
   currentDiagnostic: DiagnosticArtifact | null;
   currentDiagnosticError: string | null;
   best: HistoricalBestState;
+  onRetry: () => void;
 }) {
   const [comparisonView, setComparisonView] =
     useState<BestComparisonView>("best");
   const comparisonId = useId();
+  if (best.loading) {
+    return (
+      <div className="artifact-loading" role="status">
+        Finding the best matching result across runs…
+      </div>
+    );
+  }
+  if (best.error) {
+    return (
+      <div className="best-result-unavailable">
+        <EmptyState title="Could not load the comparison" body={best.error} />
+        <button className="best-result-link" type="button" onClick={onRetry}>
+          Retry comparison
+        </button>
+      </div>
+    );
+  }
   if (!best.data) {
     return (
       <EmptyState
-        title="Best result unavailable"
+        title={
+          current.primary_metric_name?.trim()
+            ? "No matching result in another run"
+            : "Comparable metric unavailable"
+        }
         body={
-          best.error ?? "No substantially better historical result was found."
+          current.primary_metric_name?.trim()
+            ? "No other scored result is indexed for this document, dataset revision, dimension, and headline metric yet. You can still explore this run’s output and ground truth in the other tabs."
+            : "This result has no recorded headline metric, so a comparison with other runs would not be reliable. Its output and ground truth are available in the other tabs."
         }
       />
     );
@@ -135,6 +160,13 @@ export function BestResultPanel({
     bestPrimary.score != null && currentPrimary.score != null
       ? bestPrimary.score - currentPrimary.score
       : null;
+  const comparisonHeading = improvement == null
+    ? "The best matching result across runs"
+    : improvement > 0
+      ? "Same document. A better result."
+      : improvement === 0
+        ? "This result ties the best score."
+        : "This result leads the other runs.";
   const groundTruthDiagnostic = currentDiagnostic ?? best.diagnostic;
   const bestHref = `/workflows/${run.github_run_id}/triage/${result.id}?dimension=${encodeURIComponent(result.run_dimensions.dimension)}&from=triage`;
   const views: Array<{
@@ -178,13 +210,17 @@ export function BestResultPanel({
       >
         <div className="best-result-score best-comparison-heading">
           <span className="diagnostic-eyebrow">Historical comparison</span>
-          <h2 id="best-result-heading">Same document. A better result.</h2>
+          <h2 id="best-result-heading">{comparisonHeading}</h2>
           <p>
             Compare the evidence from this run with the strongest matching
-            result in the index.
+            result from another run. Smaller improvements and tied scores are
+            included.
           </p>
         </div>
-        <div className="best-score-comparison">
+        <div
+          className="best-score-comparison"
+          data-leader={improvement == null ? "unknown" : improvement > 0 ? "other" : improvement < 0 ? "current" : "tie"}
+        >
           <div>
             <span>Current run</span>
             <strong>{scorePercent(currentPrimary.score)}</strong>
@@ -194,12 +230,14 @@ export function BestResultPanel({
             →
           </span>
           <div>
-            <span>Best matching run</span>
+            <span>Best other run</span>
             <strong>{scorePercent(bestPrimary.score)}</strong>
             <small>
               {improvement == null
                 ? "Score difference unavailable"
-                : `${improvement > 0 ? "+" : ""}${(improvement * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })} percentage points`}
+                : improvement === 0
+                  ? "Tied with the current score"
+                  : `${improvement > 0 ? "+" : ""}${(improvement * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })} percentage points vs. current`}
             </small>
           </div>
         </div>

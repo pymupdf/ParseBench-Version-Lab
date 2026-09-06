@@ -467,13 +467,11 @@ export async function loadDocument(
 
 export async function loadHistoricalBestResult(
   current: CaseResult,
-  minimumImprovement = 0.1,
   signal?: AbortSignal,
 ): Promise<HistoricalBestResult | null> {
-  const currentScore = current.primary_score;
-  if (currentScore == null || !Number.isFinite(currentScore)) return null;
-  const minimumScore = Math.round((currentScore + minimumImprovement) * 1e12) / 1e12;
-  if (minimumScore > 1) return null;
+  // A benchmark case identifies the document/page and dataset revision. Keep
+  // the metric exact as well: scores from different metrics cannot be ranked.
+  if (!current.primary_metric_name?.trim()) return null;
 
   type HistoricalBestRow = Omit<CaseResult, "run_dimensions"> & {
     run_dimensions: CaseResult["run_dimensions"] & {
@@ -483,16 +481,15 @@ export async function loadHistoricalBestResult(
 
   const params = new URLSearchParams({
     select: HISTORICAL_BEST_SELECT,
+    id: `neq.${current.id}`,
     benchmark_case_id: `eq.${current.benchmark_cases.id}`,
     "run_dimensions.dimension": `eq.${current.run_dimensions.dimension}`,
-    primary_score: `gte.${minimumScore}`,
+    "run_dimensions.run_id": `neq.${current.run_dimensions.run_id}`,
+    primary_metric_name: `eq.${current.primary_metric_name}`,
+    primary_score: "not.is.null",
     order: "primary_score.desc.nullslast,id.desc",
     limit: "1",
   });
-  if (current.primary_metric_name) {
-    params.set("primary_metric_name", `eq.${current.primary_metric_name}`);
-  }
-
   const rows = await apiFetch<HistoricalBestRow[]>("case_results", params, signal);
   const candidate = rows[0];
   if (!candidate) return null;

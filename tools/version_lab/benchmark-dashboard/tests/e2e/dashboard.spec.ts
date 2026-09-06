@@ -355,11 +355,15 @@ test("navigates inspector tabs with Arrow, Home, and End keys", async ({
   );
   const tabs = page.getByRole("tablist", { name: "Case inspection views" });
   const explain = tabs.getByRole("tab", { name: "Explain", exact: true });
+  const best = tabs.getByRole("tab", { name: "Best result", exact: true });
   const output = tabs.getByRole("tab", { name: "Output", exact: true });
   const json = tabs.getByRole("tab", { name: "JSON", exact: true });
   await expect(explain).toHaveAttribute("tabindex", "0");
   await expect(output).toHaveAttribute("tabindex", "-1");
   await explain.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(best).toBeFocused();
+  await expect(best).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("ArrowRight");
   await expect(output).toBeFocused();
   await expect(output).toHaveAttribute("aria-selected", "true");

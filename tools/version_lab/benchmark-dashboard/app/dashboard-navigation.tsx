@@ -205,15 +205,19 @@ export function RunContextBar({
               )}
             </div>
             <div className="run-meta">
-              {!compact && <span>{formatDate(run.source_created_at)}</span>}
-              <span>
-                {run.head_branch ?? "Unknown branch"} ·{" "}
-                <code>{shortSha(run.head_sha)}</code>
-              </span>
-              <span>
-                {humanize(run.effective_scope)} ·{" "}
-                {humanize(run.effective_group)}
-              </span>
+              {!compact && run.source_created_at && <span>{formatDate(run.source_created_at)}</span>}
+              {(run.head_branch || run.head_sha) && (
+                <span>
+                  {run.head_branch}
+                  {run.head_branch && run.head_sha && " · "}
+                  {run.head_sha && <code>{shortSha(run.head_sha)}</code>}
+                </span>
+              )}
+              {(run.effective_scope || run.effective_group) && (
+                <span>
+                  {[run.effective_scope, run.effective_group].filter(Boolean).map(humanize).join(" · ")}
+                </span>
+              )}
               {!compact && <span>Attempt #{run.github_run_attempt}</span>}
             </div>
           </>

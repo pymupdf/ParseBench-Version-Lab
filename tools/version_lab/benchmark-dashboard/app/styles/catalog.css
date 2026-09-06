@@ -569,6 +569,101 @@
   color: var(--brand);
   font-size: 17px;
 }
+.workflow-outcome-heading {
+  grid-column: 2 / 6;
+}
+.workflow-outcome-lane {
+  grid-column: 2 / 6;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid #e7d2c8;
+  border-radius: 6px;
+  background: #fcf5f0;
+  min-width: 0;
+}
+.workflow-outcome-row:not([data-outcome="failed"]) .workflow-outcome-lane {
+  background: #f2f4ee;
+  border-color: #d8decf;
+}
+.workflow-outcome-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  border: 1px solid #ba785e;
+  border-radius: 50%;
+  color: #8f442d;
+  font-size: 18px;
+  font-weight: 650;
+}
+.workflow-outcome-row:not([data-outcome="failed"]) .workflow-outcome-symbol {
+  border-color: #8a9880;
+  color: #435249;
+}
+.workflow-outcome-copy {
+  min-width: 0;
+}
+.workflow-outcome-copy > strong {
+  display: block;
+  color: #733c2b;
+  font-size: 13px;
+  font-weight: 650;
+}
+.workflow-outcome-row:not([data-outcome="failed"])
+  .workflow-outcome-copy
+  > strong {
+  color: #344737;
+}
+.workflow-outcome-copy > span {
+  display: block;
+  margin-top: 5px;
+  color: #435249;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.workflow-outcome-action {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #344f3c;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.workflow-outcome-row:hover .workflow-outcome-action {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workflow-outcome-row .workflow-created {
+  grid-column: 6 / 8;
+}
+.workflow-outcome-row .workflow-outcome-source {
+  color: #435249;
+  margin-top: 4px;
+}
+.workflow-outcome-copy > .workflow-retained-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.workflow-retained-scores > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid #d6dccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #20332b;
+}
+.workflow-retained-scores strong {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 .catalog-empty {
   display: flex;
   flex-direction: column;

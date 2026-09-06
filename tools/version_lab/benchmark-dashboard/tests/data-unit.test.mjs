@@ -79,6 +79,121 @@ test("data failures preserve their table and HTTP context", async (t) => {
   await assert.rejects(data.loadDocuments(42), /Could not load case_results \(503\): Service unavailable/);
 });
 
+function comparisonFixture(currentScore = 0.8, candidateScore = 0.82) {
+  const current = {
+    id: 101,
+    primary_metric_name: "content_faithfulness",
+    primary_score: currentScore,
+    result_relative_path: "current/report.result.json",
+    run_dimensions: { id: 11, run_id: 42, dimension: "text_content" },
+    benchmark_cases: {
+      id: 201,
+      test_id: "text/report_p2",
+      page_number: 2,
+      dataset_versions: { repository: "org/dataset", resolved_sha: "abcdef0123456789" },
+    },
+  };
+  const run = {
+    id: 39,
+    github_run_id: 987654321,
+    github_run_url: "https://github.com/org/repo/actions/runs/987654321",
+    pipeline_name: "historical-parser",
+    gcs_bucket: "historical-artifacts",
+    gcs_prefix: "runs/987654321",
+    head_sha: "123456789abcdef0",
+  };
+  const result = {
+    ...current,
+    id: 99,
+    primary_score: candidateScore,
+    result_relative_path: "historical/report.result.json",
+    diagnostic_relative_path: "historical/report.diagnostic.json",
+    run_dimensions: { id: 9, run_id: run.id, dimension: "text_content" },
+  };
+  const row = { ...result, run_dimensions: { ...result.run_dimensions, benchmark_runs: run } };
+  return { current, result, run, row };
+}
+
+test("historical comparison requests another result for the exact case and metric and retains its provenance", async (t) => {
+  const fixture = comparisonFixture();
+  t.mock.method(globalThis, "fetch", async (url) => {
+    const { pathname, searchParams: params } = new URL(url);
+    assert.equal(pathname, "/rest/v1/case_results");
+    assert.equal(params.get("id"), `neq.${fixture.current.id}`);
+    assert.equal(params.get("benchmark_case_id"), `eq.${fixture.current.benchmark_cases.id}`);
+    assert.equal(params.get("run_dimensions.dimension"), "eq.text_content");
+    assert.equal(params.get("run_dimensions.run_id"), `neq.${fixture.current.run_dimensions.run_id}`);
+    assert.equal(params.get("primary_metric_name"), "eq.content_faithfulness");
+    assert.deepEqual(params.getAll("primary_score"), ["not.is.null"]);
+    assert.equal(params.get("order"), "primary_score.desc.nullslast,id.desc");
+    assert.equal(params.get("limit"), "1");
+    return Response.json([fixture.row]);
+  });
+  const best = await data.loadHistoricalBestResult(fixture.current);
+  assert.deepEqual(best, { result: fixture.result, run: fixture.run });
+  assert.equal(
+    data.artifactUrl(best.run, best.result.result_relative_path),
+    "https://storage.googleapis.com/historical-artifacts/runs/987654321/historical/report.result.json",
+  );
+});
+
+test("historical comparisons remain available without a substantial score improvement", async (t) => {
+  for (const [label, currentScore, candidateScore] of [
+    ["an improvement under ten percentage points", 0.8, 0.82],
+    ["a tied score", 0.8, 0.8],
+    ["a perfect current score", 1, 1],
+    ["a current result ahead of other runs", 0.8, 0.7],
+    ["an unscored current result", null, 0.8],
+  ]) {
+    await t.test(label, async (t) => {
+      const fixture = comparisonFixture(currentScore, candidateScore);
+      const fetchMock = t.mock.method(globalThis, "fetch", async () => Response.json([fixture.row]));
+      const best = await data.loadHistoricalBestResult(fixture.current);
+      assert.equal(fetchMock.mock.callCount(), 1);
+      assert.equal(best?.result.id, fixture.result.id);
+      assert.equal(best?.result.primary_score, candidateScore);
+    });
+  }
+});
+
+test("a missing comparison metric never broadens the historical lookup", async (t) => {
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("A result with no metric must not query unrelated scores");
+  });
+  for (const primary_metric_name of [null, "", "   "]) {
+    const { current } = comparisonFixture();
+    assert.equal(await data.loadHistoricalBestResult({ ...current, primary_metric_name }), null);
+  }
+  assert.equal(fetchMock.mock.callCount(), 0);
+});
+
+test("an empty comparison is distinct from a failed historical lookup", async (t) => {
+  const { current } = comparisonFixture();
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => Response.json([]));
+  assert.equal(await data.loadHistoricalBestResult(current), null);
+  fetchMock.mock.mockImplementation(async () => new Response("History unavailable", { status: 503 }));
+  await assert.rejects(
+    data.loadHistoricalBestResult(current),
+    /Could not load case_results \(503\): History unavailable/,
+  );
+});
+
+test("leaving a case cancels its in-flight historical lookup", async (t) => {
+  const { current } = comparisonFixture();
+  const controller = new AbortController();
+  let markStarted;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  t.mock.method(globalThis, "fetch", (_url, init) => new Promise((_resolve, reject) => {
+    markStarted();
+    assert.equal(init.signal, controller.signal);
+    init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+  }));
+  const request = data.loadHistoricalBestResult(current, controller.signal);
+  await started;
+  controller.abort();
+  await assert.rejects(request, { name: "AbortError" });
+});
+
 test("run scores average only each dimension's finite headline metric", async (t) => {
   t.mock.method(globalThis, "fetch", async () => Response.json([
     { run_id: 1, dimension: "chart", run_dimension_metrics: [

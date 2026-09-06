@@ -37,6 +37,7 @@ export type OriginalMarkdownState = {
 };
 
 export type HistoricalBestState = {
+  loading: boolean;
   data: HistoricalBestResult | null;
   evidenceStatus: "idle" | "loading" | "loaded";
   diagnostic: DiagnosticArtifact | null;

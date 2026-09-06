@@ -100,6 +100,7 @@ export function DocumentExplorer({
   diagnostic,
   historicalBest,
   onLoadHistoricalBest,
+  onRetryHistoricalBest,
   onBrowseQueue,
   previous,
   next,
@@ -112,6 +113,7 @@ export function DocumentExplorer({
   diagnostic: DiagnosticState;
   historicalBest: HistoricalBestState;
   onLoadHistoricalBest: () => void;
+  onRetryHistoricalBest: () => void;
   onBrowseQueue: (trigger: HTMLButtonElement) => void;
   previous: TriageCaseResult | null;
   next: TriageCaseResult | null;
@@ -220,10 +222,10 @@ export function DocumentExplorer({
   const hasHistoricalBest = historicalBest.data != null;
   const inspectorViews: ReadonlyArray<readonly [InspectorTab, string]> = [
     ["explain", "Explain"],
+    ["best", "Best result"],
     ["output", "Output"],
     ["original", "Ground truth Markdown"],
     ["expectations", "Ground truth"],
-    ...(hasHistoricalBest ? ([["best", "Best result"]] as const) : []),
     ["json", "JSON"],
   ];
   const bestEvidenceLoading = historicalBest.evidenceStatus === "loading";
@@ -835,6 +837,7 @@ export function DocumentExplorer({
                       currentDiagnostic={diagnostic.data}
                       currentDiagnosticError={diagnostic.error}
                       best={historicalBest}
+                      onRetry={onRetryHistoricalBest}
                     />
                   ) : (
                     <div className="raw-artifacts-view">

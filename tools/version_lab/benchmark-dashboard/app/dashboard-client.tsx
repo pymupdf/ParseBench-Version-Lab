@@ -4,7 +4,7 @@ import { type ReactNode, useMemo, useState, useRef, useCallback, useEffectEvent,
 import { useRouter, usePathname, useParams, useSearchParams } from "next/navigation";
 import type { View, TriageFilters, ArtifactState, DiagnosticState, HistoricalBestState } from "./dashboard/types";
 import { normalizeTriageFilters, parsePercent, parsePage, triageQuery, hrefWithTriageFilters } from "./dashboard/filters";
-import { DIMENSION_ORDER, EMPTY_BUNDLE, EMPTY_ARTIFACT, EMPTY_DIAGNOSTIC, EMPTY_HISTORICAL_BEST, TRIAGE_PAGE_SIZE, BEST_SCORE_MINIMUM_IMPROVEMENT } from "./dashboard/constants";
+import { DIMENSION_ORDER, EMPTY_BUNDLE, EMPTY_ARTIFACT, EMPTY_DIAGNOSTIC, EMPTY_HISTORICAL_BEST, TRIAGE_PAGE_SIZE } from "./dashboard/constants";
 import { type BenchmarkRun, type RunScoreIndex, type RunBundle, type TriageCaseResult, type CaseResult, loadRuns, loadRun, loadRunScores, loadRunBundle, loadDocuments, loadDocument, artifactUrl, loadArtifact, loadDiagnostic, loadHistoricalBestResult, type ArtifactLayoutBox } from "./lib/data";
 import { orderRunDimensions } from "./dashboard/format";
 import { DashboardNavigation, RunContextBar } from "./dashboard-navigation";
@@ -81,6 +81,7 @@ export default function DashboardClient({
   const [historicalBest, setHistoricalBest] = useState<HistoricalBestState>(EMPTY_HISTORICAL_BEST);
   const [historicalBestResultId, setHistoricalBestResultId] = useState<number | null>(null);
   const [historicalBestEvidenceResultId, setHistoricalBestEvidenceResultId] = useState<number | null>(null);
+  const [historicalBestAttempt, setHistoricalBestAttempt] = useState(0);
   const [queueOpen, setQueueOpen] = useState(false);
   const queueOverlayRef = useRef<HTMLDivElement>(null);
   const queueCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -412,14 +413,12 @@ export default function DashboardClient({
     // result cannot appear while the next page is loading.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setHistoricalBestResultId(document.id);
-    setHistoricalBestEvidenceResultId(null);
-    setHistoricalBest(EMPTY_HISTORICAL_BEST);
+    setHistoricalBest({ ...EMPTY_HISTORICAL_BEST, loading: true });
 
     async function loadBest() {
       try {
         const candidate = await loadHistoricalBestResult(
           document,
-          BEST_SCORE_MINIMUM_IMPROVEMENT,
           controller.signal,
         );
         if (controller.signal.aborted) return;
@@ -441,21 +440,27 @@ export default function DashboardClient({
 
     void loadBest();
     return () => controller.abort();
-  }, [selectedDocument]);
+  }, [selectedDocument, historicalBestAttempt]);
 
   useEffect(() => {
     const candidate = historicalBest.data;
     if (
       !selectedDocument ||
       !candidate ||
-      historicalBest.evidenceStatus !== "loading" ||
+      historicalBestResultId !== selectedDocument.id ||
       historicalBestEvidenceResultId !== selectedDocument.id
     ) return;
     const bestCandidate = candidate;
     const controller = new AbortController();
+    // Remember early tab clicks while the candidate query is still pending.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHistoricalBest((current) => ({
+      ...current,
+      evidenceStatus: "loading",
+      artifact: { ...EMPTY_ARTIFACT, loading: true },
+    }));
     // Historical artifacts can be large, so fetch them only after the user
-    // opens the Best result tab. The candidate query remains eager because it
-    // determines whether the tab should be shown.
+    // opens the Best result tab or enables its source overlay.
     async function loadBestEvidence() {
       const [loadedDiagnostic, loadedArtifact] = await Promise.allSettled([
         loadDiagnostic(bestCandidate.run, bestCandidate.result, controller.signal),
@@ -499,7 +504,7 @@ export default function DashboardClient({
 
     void loadBestEvidence();
     return () => controller.abort();
-  }, [historicalBest.data, historicalBest.evidenceStatus, historicalBestEvidenceResultId, selectedDocument]);
+  }, [historicalBest.data, historicalBestResultId, historicalBestEvidenceResultId, selectedDocument]);
 
   function selectWorkflow(candidate: BenchmarkRun) {
     setLoadError(null);
@@ -662,16 +667,9 @@ export default function DashboardClient({
             artifact={displayedArtifact}
             diagnostic={displayedDiagnostic}
             historicalBest={displayedHistoricalBest}
+            onRetryHistoricalBest={() => setHistoricalBestAttempt((attempt) => attempt + 1)}
             onLoadHistoricalBest={() => {
               if (!displayedDocument) return;
-              setHistoricalBest((current) => {
-                if (!current.data || current.evidenceStatus !== "idle") return current;
-                return {
-                  ...current,
-                  evidenceStatus: "loading",
-                  artifact: { ...EMPTY_ARTIFACT, loading: true },
-                };
-              });
               setHistoricalBestEvidenceResultId(displayedDocument.id);
             }}
             onBrowseQueue={(trigger) => {

@@ -27,6 +27,7 @@ export const EMPTY_DIAGNOSTIC: DiagnosticState = {
 };
 
 export const EMPTY_HISTORICAL_BEST: HistoricalBestState = {
+  loading: false,
   data: null,
   evidenceStatus: "idle",
   diagnostic: null,
@@ -34,8 +35,6 @@ export const EMPTY_HISTORICAL_BEST: HistoricalBestState = {
   artifact: EMPTY_ARTIFACT,
   error: null,
 };
-
-export const BEST_SCORE_MINIMUM_IMPROVEMENT = 0.1;
 
 export const DIMENSION_LABELS: Record<string, string> = {
   chart: "Charts",

@@ -33,6 +33,61 @@
 .report-workspace {
   padding-top: 28px;
 }
+.run-outcome-report {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 25px;
+  border: 1px solid #d8decf;
+  border-radius: 9px;
+  background: #f0f3ea;
+}
+.run-outcome-report[data-outcome="failed"] {
+  background: #fcf5f0;
+  border-color: #e7d2c8;
+}
+.run-outcome-report h3 {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  letter-spacing: -0.035em;
+}
+.run-outcome-report p {
+  color: #435249;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 5px 0 0;
+  max-width: 660px;
+}
+.run-outcome-logs {
+  color: #344f3c;
+  border: 1px solid #b7c4ad;
+  border-radius: 5px;
+  background: white;
+  padding: 11px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.run-outcome-logs:hover {
+  background: #eaf0df;
+}
+@media (max-width: 720px) {
+  .run-outcome-report {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 17px;
+    padding: 20px;
+  }
+  .run-outcome-report h3 {
+    font-size: 21px;
+  }
+  .run-outcome-report p {
+    font-size: 12px;
+  }
+}
 .benchmark-report > .section-heading {
   align-items: center;
   margin-bottom: 20px;
@@ -136,10 +191,9 @@
 }
 .report-dimension-row.dimension-card {
   display: grid;
-  grid-template-columns: 36px minmax(120px, 1fr) minmax(85px, 0.65fr) minmax(
-      120px,
-      0.9fr
-    ) 18px;
+  grid-template-columns:
+    36px minmax(120px, 1fr) minmax(85px, 0.65fr) minmax(120px, 0.9fr)
+    18px;
   align-items: center;
   gap: 16px;
   min-height: 77px;
@@ -519,10 +573,9 @@
   border-top: 0;
   padding-top: 0;
   margin-top: 16px;
-  grid-template-columns: minmax(180px, 1.3fr) minmax(180px, 1fr) minmax(
-      155px,
-      0.65fr
-    ) auto;
+  grid-template-columns:
+    minmax(180px, 1.3fr) minmax(180px, 1fr) minmax(155px, 0.65fr)
+    auto;
   gap: 22px;
 }
 .case-workspace .triage-search,
@@ -883,10 +936,9 @@
   }
   .report-dimension-row.dimension-card {
     gap: 12px;
-    grid-template-columns: 34px minmax(100px, 1fr) minmax(75px, 0.65fr) minmax(
-        110px,
-        0.9fr
-      ) 16px;
+    grid-template-columns:
+      34px minmax(100px, 1fr) minmax(75px, 0.65fr) minmax(110px, 0.9fr)
+      16px;
     padding: 15px 20px;
   }
 }

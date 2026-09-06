@@ -26,7 +26,7 @@ test("composes the ParseBench shell with the complete workflow catalog", async (
   assert.match(dashboard, /<Overview\b/);
   assert.match(dashboard, /<TriageGrid\b/);
   assert.match(dashboard, /<DocumentExplorer\b/);
-  assert.match(catalog, /completeRuns\.filter\(\(run\) => run\.leaderboard_eligible\)/);
+  assert.match(catalog, /completeRuns\.filter\(\s*\(run\) => run\.leaderboard_eligible,?\s*\)/);
   assert.doesNotMatch(catalog, /const filtered = completeRuns\.filter/);
   assert.match(page, /redirect\("\/workflows"\)/);
   assert.doesNotMatch(`${layout}\n${page}\n${dashboard}\n${catalog}`, /codex-preview|react-loading-skeleton/i);
