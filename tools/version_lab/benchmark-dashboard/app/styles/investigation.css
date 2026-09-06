@@ -1,4 +1,4 @@
-/* Document inspection: one shared tool strip and a flexible evidence canvas. */
+/* Document inspection: controls stay with their source or analysis panel. */
 .app-view-inspect .run-command-bar {
   padding: 12px 24px;
   gap: 14px;
@@ -109,23 +109,24 @@
   color: var(--dimension-accent);
   font-weight: 650;
 }
-.investigation-toolbar {
+.analysis-view-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0 14px;
-  border-top: 1px solid var(--line-strong);
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
 }
-.investigation-toolbar .inspector-tabs {
+.analysis-view-toolbar .inspector-tabs {
   gap: 3px;
   border: 0;
   min-width: 0;
   flex: 1 1 auto;
   overflow-x: auto;
 }
-.investigation-toolbar .inspector-tabs button {
+.analysis-view-toolbar .inspector-tabs button {
+  flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: 6px;
   min-height: 38px;
@@ -135,15 +136,10 @@
   color: #435249;
   white-space: nowrap;
 }
-.investigation-toolbar .inspector-tabs .content-tab-active {
+.analysis-view-toolbar .inspector-tabs .content-tab-active {
   color: white;
   background: var(--dimension-accent);
   border-color: var(--dimension-accent);
-}
-.investigation-tools {
-  display: flex;
-  align-items: center;
-  gap: 18px;
 }
 .source-width-control {
   display: flex;
@@ -163,6 +159,7 @@
 }
 .focus-analysis-button {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 7px;
   min-height: 38px;
@@ -791,19 +788,18 @@
     grid-column: 2;
     grid-row: 2;
   }
-  .investigation-toolbar {
-    display: block;
-    padding-bottom: 11px;
+  .analysis-view-toolbar {
+    padding: 8px;
   }
-  .investigation-tools {
+  .focus-analysis-button {
     display: none;
   }
-  .investigation-toolbar .inspector-tabs {
+  .analysis-view-toolbar .inspector-tabs {
     display: flex;
     max-width: 100%;
     overflow-x: auto;
   }
-  .investigation-toolbar .inspector-tabs button {
+  .analysis-view-toolbar .inspector-tabs button {
     padding: 0 11px;
     min-height: 40px;
   }

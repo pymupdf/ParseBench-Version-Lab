@@ -31,6 +31,18 @@ test("the inspector resizes the source and gives analysis the full canvas", asyn
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(formattingCase);
   await expect(page.locator(".diagnostic-rule-row").first()).toBeVisible();
+  const tabs = page.getByRole("tablist", { name: "Case inspection views" });
+  const analysisBounds = (await page.locator(".output-card").boundingBox())!;
+  const tabsBounds = (await tabs.boundingBox())!;
+  expect(tabsBounds.x).toBeGreaterThanOrEqual(analysisBounds.x);
+  expect(tabsBounds.x + tabsBounds.width).toBeLessThanOrEqual(
+    analysisBounds.x + analysisBounds.width,
+  );
+  await expect(
+    page
+      .locator(".pdf-card")
+      .getByRole("slider", { name: "Source width", exact: true }),
+  ).toBeVisible();
   const initialWidth = (await page.locator(".pdf-card").boundingBox())!.width;
   await page
     .getByRole("slider", { name: "Source width", exact: true })
@@ -54,6 +66,22 @@ test("the inspector resizes the source and gives analysis the full canvas", asyn
   await expect(
     page.locator(".scoring-method .diagnostic-components"),
   ).toBeVisible();
+
+  const explain = tabs.getByRole("tab", { name: "Explain", exact: true });
+  await explain.focus();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(explain).toBeFocused();
+  await expect(tabs).toBeVisible();
+  const groundTruth = tabs.getByRole("tab", {
+    name: "Ground truth",
+    exact: true,
+  });
+  await groundTruth.click();
+  await page.getByRole("button", { name: "Source", exact: true }).click();
+  await expect(tabs).toBeHidden();
+  await page.getByRole("button", { name: "Analysis", exact: true }).click();
+  await expect(groundTruth).toHaveAttribute("aria-selected", "true");
+  await expect(tabs.locator('[tabindex="0"]')).toHaveCount(1);
 });
 
 test("selecting layout evidence on a phone preserves keyboard focus in the source view", async ({
@@ -61,7 +89,21 @@ test("selecting layout evidence on a phone preserves keyboard focus in the sourc
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(layoutCase);
+  await expect(
+    page.getByRole("button", { name: "Browse queue", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("tablist", { name: "Case inspection views" }),
+  ).toBeHidden();
   await page.getByRole("button", { name: "Analysis", exact: true }).click();
+  const tabs = page.getByRole("tablist", { name: "Case inspection views" });
+  await expect(tabs).toBeVisible();
+  await tabs.getByRole("tab", { name: "Explain", exact: true }).focus();
+  await page.keyboard.press("End");
+  await expect(
+    tabs.getByRole("tab", { name: "JSON", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Home");
   const element = page.locator(".layout-element-select").first();
   await expect(element).toBeVisible();
   await element.focus();
@@ -71,6 +113,7 @@ test("selecting layout evidence on a phone preserves keyboard focus in the sourc
   await expect(source).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".pdf-card")).toBeVisible();
   await expect(page.locator(".output-card")).toBeHidden();
+  await expect(tabs).toBeHidden();
 });
 
 test("the record browser searches metrics and switches to reference and manifest records", async ({

@@ -393,59 +393,6 @@ export function DocumentExplorer({
               </div>
             </header>
 
-            <div className="investigation-toolbar">
-              <div
-                className="content-tabs inspector-tabs"
-                role="tablist"
-                aria-label="Case inspection views"
-              >
-                {inspectorViews.map(([value, label], index) => (
-                  <button
-                    id={`inspector-${value}-tab`}
-                    role="tab"
-                    aria-selected={inspectorTab === value}
-                    aria-controls="inspector-panel"
-                    tabIndex={inspectorTab === value ? 0 : -1}
-                    className={
-                      inspectorTab === value ? "content-tab-active" : ""
-                    }
-                    onClick={() => selectInspectorView(value)}
-                    onKeyDown={(event) => navigateInspectorTabs(event, index)}
-                    type="button"
-                    key={value}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="investigation-tools">
-                <label className="source-width-control">
-                  Source width{" "}
-                  <input
-                    type="range"
-                    aria-label="Source width"
-                    min="30"
-                    max="60"
-                    step="5"
-                    value={sourceWidth}
-                    onChange={(event) =>
-                      setSourceWidth(Number(event.target.value))
-                    }
-                    disabled={analysisFocus}
-                  />
-                  <output>{sourceWidth}%</output>
-                </label>
-                <button
-                  className="focus-analysis-button"
-                  type="button"
-                  aria-pressed={analysisFocus}
-                  onClick={() => setAnalysisFocus((current) => !current)}
-                >
-                  <Icon name="layers" size={16} />{" "}
-                  {analysisFocus ? "Split view" : "Focus analysis"}
-                </button>
-              </div>
-            </div>
             <div
               className="mobile-viewer-tabs"
               aria-label="Document inspection panels"
@@ -483,6 +430,22 @@ export function DocumentExplorer({
                     <strong>{selectedSourceLabel}</strong>
                   </div>
                   <div className="source-toolbar-actions">
+                    <label className="source-width-control">
+                      Source width{" "}
+                      <input
+                        type="range"
+                        aria-label="Source width"
+                        min="30"
+                        max="60"
+                        step="5"
+                        value={sourceWidth}
+                        onChange={(event) =>
+                          setSourceWidth(Number(event.target.value))
+                        }
+                        disabled={analysisFocus}
+                      />
+                      <output>{sourceWidth}%</output>
+                    </label>
                     {hasLayoutEvidence && (
                       <div className="layer-legend">
                         <span className="layer-legend-label">Layers</span>
@@ -670,7 +633,47 @@ export function DocumentExplorer({
                 </div>
               </article>
 
-              <article className="viewer-card output-card">
+              <article
+                className="viewer-card output-card"
+                onFocusCapture={() => setMobileViewer("output")}
+              >
+                <div className="analysis-view-toolbar">
+                  <div
+                    className="content-tabs inspector-tabs"
+                    role="tablist"
+                    aria-label="Case inspection views"
+                  >
+                    {inspectorViews.map(([value, label], index) => (
+                      <button
+                        id={`inspector-${value}-tab`}
+                        role="tab"
+                        aria-selected={inspectorTab === value}
+                        aria-controls="inspector-panel"
+                        tabIndex={inspectorTab === value ? 0 : -1}
+                        className={
+                          inspectorTab === value ? "content-tab-active" : ""
+                        }
+                        onClick={() => selectInspectorView(value)}
+                        onKeyDown={(event) =>
+                          navigateInspectorTabs(event, index)
+                        }
+                        type="button"
+                        key={value}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="focus-analysis-button"
+                    type="button"
+                    aria-pressed={analysisFocus}
+                    onClick={() => setAnalysisFocus((current) => !current)}
+                  >
+                    <Icon name="layers" size={16} />{" "}
+                    {analysisFocus ? "Split view" : "Focus analysis"}
+                  </button>
+                </div>
                 <div className="viewer-toolbar output-toolbar">
                   <div className="analysis-panel-heading">
                     <span className="panel-number">02</span>

@@ -31,6 +31,11 @@ async function openComparison(page: Page) {
   const [current] = (await (await currentResponse).json()) as CaseResult[];
   const [best] = (await (await bestResponse).json()) as HistoricalRow[];
   expect(best).toBeTruthy();
+  await expect(
+    page.getByRole("button", { name: "Browse queue", exact: true }),
+  ).toBeVisible();
+  const analysis = page.getByRole("button", { name: "Analysis", exact: true });
+  if (await analysis.isVisible()) await analysis.click();
   await page
     .getByRole("tablist", { name: "Case inspection views" })
     .getByRole("tab", { name: "Best result", exact: true })
