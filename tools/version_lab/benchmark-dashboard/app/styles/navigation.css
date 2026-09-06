@@ -116,26 +116,37 @@
 .run-jump-control {
   display: inline-flex;
   align-items: center;
-  position: relative;
+  gap: 6px;
+  min-width: 0;
   max-width: 200px;
+  padding: 0 8px;
+  background: #f0f3e9;
+  border: 1px solid #cdd5c4;
+  border-radius: 6px;
 }
 .run-jump-control > svg {
-  position: absolute;
-  left: 10px;
+  flex-shrink: 0;
   pointer-events: none;
   color: #435249;
 }
 .run-jump-control select {
   appearance: auto;
-  width: 100%;
-  min-height: 36px;
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
   color: #20332b;
-  background: #f0f3e9;
-  border: 1px solid #cdd5c4;
-  border-radius: 6px;
-  padding: 0 10px 0 33px;
+  background: transparent;
+  border: 0;
+  padding: 0;
   font-size: 12px;
   cursor: pointer;
+}
+.run-jump-control:focus-within {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.run-jump-control select:focus-visible {
+  outline: none;
 }
 .library-index-status {
   font-size: 11px;
@@ -363,15 +374,14 @@ main:focus,
   }
   .run-jump-control {
     max-width: 162px;
+    padding: 0 5px;
+    gap: 5px;
   }
   .run-jump-control select {
-    min-height: 33px;
+    min-height: 31px;
     font-size: 11px;
-    padding-left: 28px;
-    padding-right: 3px;
   }
   .run-jump-control > svg {
-    left: 8px;
     width: 13px;
   }
   .library-index-status {
@@ -496,6 +506,9 @@ main:focus,
   }
   .run-jump-control {
     max-width: 150px;
+  }
+  .run-jump-control > svg {
+    display: none;
   }
   .location-trail li + li::before {
     padding: 0 5px;
