@@ -254,6 +254,10 @@
   padding: 18px;
 }
 .investigation-workspace .output-toolbar {
+  align-items: center;
+  flex-basis: auto;
+  flex-direction: row;
+  flex-wrap: wrap;
   position: relative;
   overflow: visible;
   z-index: 5;
