@@ -45,6 +45,7 @@ import {
 import { MarkdownPanel } from "./markdown-panel";
 import { BestResultPanel } from "./best-result-panel";
 import { DiagnosticJsonBrowser } from "./diagnostic-json";
+import { DEFAULT_SOURCE_WIDTH, PanelDivider } from "./panel-divider";
 
 const PdfPreview = dynamic(() => import("../pdf-preview"), {
   ssr: false,
@@ -118,7 +119,7 @@ export function DocumentExplorer({
 }) {
   const [analysisFocus, setAnalysisFocus] = useState(false);
   const sourceViewerButton = useRef<HTMLButtonElement>(null);
-  const [sourceWidth, setSourceWidth] = useState(40);
+  const [sourceWidth, setSourceWidth] = useState(DEFAULT_SOURCE_WIDTH);
   const [markdownMode, setMarkdownMode] = useState<MarkdownMode>("preview");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("explain");
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">(
@@ -330,7 +331,12 @@ export function DocumentExplorer({
       tabIndex={-1}
       className={`workbench-shell investigation-workspace ${analysisFocus ? "analysis-focused" : ""}`}
       data-dimension={selected?.run_dimensions.dimension}
-      style={{ "--source-width": `${sourceWidth}%` } as CSSProperties}
+      style={
+        {
+          "--source-width": `${sourceWidth}fr`,
+          "--analysis-width": `${100 - sourceWidth}fr`,
+        } as CSSProperties
+      }
     >
       <section className="inspection-workspace">
         {selected ? (
@@ -421,7 +427,10 @@ export function DocumentExplorer({
             </div>
 
             <div className={`comparison-grid mobile-view-${mobileViewer}`}>
-              <article className="viewer-card pdf-card">
+              <article
+                className="viewer-card pdf-card"
+                id="source-document-panel"
+              >
                 <div className="viewer-toolbar source-toolbar">
                   <div>
                     <span className="viewer-kicker">
@@ -430,22 +439,6 @@ export function DocumentExplorer({
                     <strong>{selectedSourceLabel}</strong>
                   </div>
                   <div className="source-toolbar-actions">
-                    <label className="source-width-control">
-                      Source width{" "}
-                      <input
-                        type="range"
-                        aria-label="Source width"
-                        min="30"
-                        max="60"
-                        step="5"
-                        value={sourceWidth}
-                        onChange={(event) =>
-                          setSourceWidth(Number(event.target.value))
-                        }
-                        disabled={analysisFocus}
-                      />
-                      <output>{sourceWidth}%</output>
-                    </label>
                     {hasLayoutEvidence && (
                       <div className="layer-legend">
                         <span className="layer-legend-label">Layers</span>
@@ -633,8 +626,18 @@ export function DocumentExplorer({
                 </div>
               </article>
 
+              <PanelDivider
+                value={sourceWidth}
+                onChange={setSourceWidth}
+                onHiddenFocus={() => {
+                  setMobileViewer("source");
+                  sourceViewerButton.current?.focus();
+                }}
+              />
+
               <article
                 className="viewer-card output-card"
+                id="analysis-document-panel"
                 onFocusCapture={() => setMobileViewer("output")}
               >
                 <div className="analysis-view-toolbar">

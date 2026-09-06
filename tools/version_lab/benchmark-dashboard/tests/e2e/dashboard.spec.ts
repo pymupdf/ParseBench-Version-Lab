@@ -4,14 +4,18 @@ const RUN_ID = "30925196627";
 
 async function openCatalogFilters(page: Page) {
   const toggle = page.locator(".catalog-filter-toggle");
-  if (await toggle.isVisible() && await toggle.getAttribute("aria-expanded") === "false") {
+  if (
+    (await toggle.isVisible()) &&
+    (await toggle.getAttribute("aria-expanded")) === "false"
+  ) {
     await toggle.click();
   }
 }
 
 function workflowNavigation(page: Page) {
-  return page.getByRole("navigation", { name: "Dashboard sections" })
-    .getByRole("link", { name: /^Workflows/ });
+  return page
+    .getByRole("navigation", { name: "Current location" })
+    .getByRole("link", { name: "Run library", exact: true });
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
@@ -25,10 +29,14 @@ async function expectNoHorizontalOverflow(page: Page) {
 test("finds workflows by commit and opens a selected run", async ({ page }) => {
   await page.goto(`/?run=${RUN_ID}&view=runs`);
 
-  await expect(page.getByRole("heading", { name: "Benchmark intelligence." })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Benchmark intelligence." }),
+  ).toBeVisible();
   await expect(page.locator(".score-leader-card")).toHaveCount(6);
   await expect(
-    page.getByText("Quick runs are excluded. Full-dataset runs compete only in the dimensions they completely evaluated."),
+    page.getByText(
+      "Quick runs are excluded. Full-dataset runs compete only in the dimensions they completely evaluated.",
+    ),
   ).toBeVisible();
   await openCatalogFilters(page);
   await expect(page.getByLabel("Result").locator("option")).toHaveText([
@@ -38,20 +46,30 @@ test("finds workflows by commit and opens a selected run", async ({ page }) => {
     "Success",
   ]);
   await page.getByLabel("Result").selectOption("success");
-  await page.getByPlaceholder("Search ID, commit, branch, pipeline, name…").fill("754c3ca2");
+  await page
+    .getByPlaceholder("Search ID, commit, branch, pipeline, name…")
+    .fill("754c3ca2");
   await expect(page.locator(".workflow-row").first()).toContainText("754c3ca2");
   await expect(page.locator(".workflow-aggregate").first()).toContainText("%");
-  await expect(page.locator(".workflow-dimension-scores").first().locator(":scope > span")).toHaveCount(5);
+  await expect(
+    page.locator(".workflow-dimension-scores").first().locator(":scope > span"),
+  ).toHaveCount(5);
 
   const firstWorkflow = page.locator(".workflow-row").first();
-  const selectedRunId = (await firstWorkflow.getAttribute("aria-label"))?.match(/\d+/)?.[0];
+  const selectedRunId = (await firstWorkflow.getAttribute("aria-label"))?.match(
+    /\d+/,
+  )?.[0];
   expect(selectedRunId).toBeTruthy();
   await firstWorkflow.click();
   await expect(page).toHaveURL(new RegExp(`/workflows/${selectedRunId}$`));
-  await expect(page.getByRole("heading", { name: /Pymupdf4llm/i }).first()).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /Pymupdf4llm/i }).first(),
+  ).toBeVisible();
 });
 
-test("reopening the selected workflow preserves its evaluation data", async ({ page }) => {
+test("reopening the selected workflow preserves its evaluation data", async ({
+  page,
+}) => {
   await page.goto(`/?run=${RUN_ID}&view=overview`);
 
   await expect(page.locator(".score-profile-grid")).toBeVisible();
@@ -62,19 +80,27 @@ test("reopening the selected workflow preserves its evaluation data", async ({ p
   await expect(page).toHaveURL(/\/workflows$/);
   await page.getByRole("searchbox", { name: "Search workflows" }).fill(RUN_ID);
   await page.getByRole("button", { name: "Show run IDs" }).click();
-  const workflow = page.locator(".workflow-row").filter({ hasText: `#${RUN_ID}` });
+  const workflow = page
+    .locator(".workflow-row")
+    .filter({ hasText: `#${RUN_ID}` });
   await expect(workflow).toHaveCount(1);
   await workflow.click();
 
   await expect(page).toHaveURL(new RegExp(`/workflows/${RUN_ID}$`));
-  await expect(page.locator(".score-profile-grid > *")).toHaveCount(evaluationCount);
+  await expect(page.locator(".score-profile-grid > *")).toHaveCount(
+    evaluationCount,
+  );
   await expect(page.getByText("No evaluation reports")).toHaveCount(0);
 });
 
-test("opens the workflow behind a leading benchmark score", async ({ page }) => {
+test("opens the workflow behind a leading benchmark score", async ({
+  page,
+}) => {
   await page.goto("/?view=runs");
 
-  const aggregateLeader = page.getByRole("button", { name: /Open Aggregate leader/ });
+  const aggregateLeader = page.getByRole("button", {
+    name: /Open Aggregate leader/,
+  });
   await expect(aggregateLeader).toContainText(/\d+(?:\.\d{1,2})?%/);
   await expect(aggregateLeader).toContainText(/Run #\d+/);
   await aggregateLeader.click();
@@ -84,7 +110,9 @@ test("opens the workflow behind a leading benchmark score", async ({ page }) => 
   await expect(page.locator(".score-profile-grid")).toBeVisible();
 });
 
-test("mobile triage browsing uses a focused grid-to-detail flow", async ({ page }) => {
+test("mobile triage browsing uses a focused grid-to-detail flow", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/?run=${RUN_ID}&view=documents`);
 
@@ -95,8 +123,12 @@ test("mobile triage browsing uses a focused grid-to-detail flow", async ({ page 
   await firstDocument.click();
 
   await expect(page).toHaveURL(new RegExp(`/workflows/${RUN_ID}/triage/\\d+`));
-  await expect(page.getByRole("link", { name: "Back to triage queue" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Browse queue" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Back to Tables results", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Browse queue" }),
+  ).toBeVisible();
   await expect(page.locator(".pdf-card")).toBeVisible();
   await page.getByRole("button", { name: "Analysis" }).click();
   await expect(page.locator(".output-card")).toBeVisible();
@@ -104,8 +136,12 @@ test("mobile triage browsing uses a focused grid-to-detail flow", async ({ page 
   await expectNoHorizontalOverflow(page);
 });
 
-test("keeps passed checks visible for compact diagnostic rule sets", async ({ page }) => {
-  await page.goto(`/workflows/${RUN_ID}/triage/38105?dimension=text_formatting&from=triage`);
+test("keeps passed checks visible for compact diagnostic rule sets", async ({
+  page,
+}) => {
+  await page.goto(
+    `/workflows/${RUN_ID}/triage/38105?dimension=text_formatting&from=triage`,
+  );
 
   const allChecks = page.getByRole("button", { name: "All", exact: true });
   await expect(allChecks).toHaveAttribute("aria-pressed", "true");
@@ -115,14 +151,20 @@ test("keeps passed checks visible for compact diagnostic rule sets", async ({ pa
 });
 
 test("renders diagnostic count metrics as numbers", async ({ page }) => {
-  await page.goto(`/workflows/${RUN_ID}/triage/37099?dimension=layout&from=triage`);
+  await page.goto(
+    `/workflows/${RUN_ID}/triage/37099?dimension=layout&from=triage`,
+  );
   await page.getByRole("tab", { name: "JSON" }).click();
 
-  const countMetric = page.locator(".diagnostic-json-metric").filter({ hasText: "Num Predictions" });
+  const countMetric = page
+    .locator(".diagnostic-json-metric")
+    .filter({ hasText: "Num Predictions" });
   await expect(countMetric.locator("summary code")).toHaveText("7");
 });
 
-test("reuses the workflow catalog and selected run across navigation", async ({ page }) => {
+test("reuses the workflow catalog and selected run across navigation", async ({
+  page,
+}) => {
   const runRequests: string[] = [];
   const dimensionRequests: string[] = [];
   const caseResultRequests: string[] = [];
@@ -142,7 +184,9 @@ test("reuses the workflow catalog and selected run across navigation", async ({ 
   await page.getByLabel("Result").selectOption("success");
   const firstWorkflow = page.locator(".workflow-row").first();
   await expect(firstWorkflow).toBeVisible();
-  await expect(firstWorkflow.locator(".workflow-aggregate strong")).not.toHaveText("…");
+  await expect(
+    firstWorkflow.locator(".workflow-aggregate strong"),
+  ).not.toHaveText("…");
   const initialRunRequestCount = runRequests.length;
   const initialDimensionRequestCount = dimensionRequests.length;
   const initialCaseResultRequestCount = caseResultRequests.length;
@@ -159,8 +203,9 @@ test("reuses the workflow catalog and selected run across navigation", async ({ 
   expect(runRequests).toHaveLength(initialRunRequestCount);
 });
 
-
-test("clears an empty workflow search and restores the catalog", async ({ page }) => {
+test("clears an empty workflow search and restores the catalog", async ({
+  page,
+}) => {
   await page.goto("/workflows");
   await expect(page.locator(".workflow-row").first()).toBeVisible();
   const initialCount = await page.locator(".workflow-row").count();
@@ -168,57 +213,102 @@ test("clears an empty workflow search and restores the catalog", async ({ page }
   await search.fill("__parsebench_no_such_workflow_e2e__");
 
   await expect(page.locator(".workflow-row")).toHaveCount(0);
-  await expect(page.getByText("No workflows match these filters")).toBeVisible();
-  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(
+    page.getByText("No workflows match these filters"),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Clear filters", exact: true })
+    .click();
 
   await expect(search).toHaveValue("");
   await expect(page.locator(".workflow-row")).toHaveCount(initialCount);
 });
 
-test("paginates workflow results without losing the active filter", async ({ page }) => {
+test("paginates workflow results without losing the active filter", async ({
+  page,
+}) => {
   await page.goto("/workflows");
   const search = page.getByRole("searchbox", { name: "Search workflows" });
   await search.fill("pymupdf4llm");
   await expect(page.locator(".workflow-row").first()).toBeVisible();
-  const firstRun = await page.locator(".workflow-row").first().getAttribute("aria-label");
+  const firstRun = await page
+    .locator(".workflow-row")
+    .first()
+    .getAttribute("aria-label");
   const pagination = page.locator(".pagination");
   await pagination.getByRole("button", { name: "Next", exact: true }).click();
   await expect(pagination).toContainText("Page 2 of");
-  await expect(page.locator(".workflow-row").first()).not.toHaveAttribute("aria-label", firstRun!);
+  await expect(page.locator(".workflow-row").first()).not.toHaveAttribute(
+    "aria-label",
+    firstRun!,
+  );
   await expect(search).toHaveValue("pymupdf4llm");
 
-  await pagination.getByRole("button", { name: "Previous", exact: true }).click();
-  await expect(page.locator(".workflow-row").first()).toHaveAttribute("aria-label", firstRun!);
+  await pagination
+    .getByRole("button", { name: "Previous", exact: true })
+    .click();
+  await expect(page.locator(".workflow-row").first()).toHaveAttribute(
+    "aria-label",
+    firstRun!,
+  );
 });
 
-test("restores triage filters and pagination after inspecting a shared result", async ({ page }) => {
-  await page.goto(`/workflows/${RUN_ID}/triage?dimension=text_formatting&sort=highest&page=2`);
+test("restores triage filters and pagination after inspecting a shared result", async ({
+  page,
+}) => {
+  await page.goto(
+    `/workflows/${RUN_ID}/triage?dimension=text_formatting&sort=highest&page=2`,
+  );
   await expect(page.locator(".triage-card").first()).toBeVisible();
-  const pagination = page.getByRole("navigation", { name: "Triage result pages" });
+  const pagination = page.getByRole("navigation", {
+    name: "Triage result pages",
+  });
   await expect(pagination).toContainText("Page 2 of");
-  await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue("highest");
-  await expect(page.locator(".dimension-pills").getByRole("button", { name: /^Formatting/ }))
-    .toHaveAttribute("aria-pressed", "true");
-  const firstCase = await page.locator(".triage-card-copy strong").first().textContent();
+  await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue(
+    "highest",
+  );
+  await expect(
+    page
+      .locator(".dimension-pills")
+      .getByRole("button", { name: /^Formatting/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  const firstCase = await page
+    .locator(".triage-card-copy strong")
+    .first()
+    .textContent();
 
   await page.locator(".triage-card").first().click();
   await expect(page).toHaveURL(/\/triage\/\d+\?.*page=2/);
-  await page.getByRole("link", { name: "Back to triage queue" }).click();
-  await expect(page).toHaveURL(/dimension=text_formatting.*sort=highest.*page=2/);
+  await page
+    .getByRole("link", { name: "Back to Formatting results", exact: true })
+    .click();
+  await expect(page).toHaveURL(
+    /dimension=text_formatting.*sort=highest.*page=2/,
+  );
   await expect(pagination).toContainText("Page 2 of");
-  await expect(page.locator(".triage-card-copy strong").first()).toHaveText(firstCase!);
+  await expect(page.locator(".triage-card-copy strong").first()).toHaveText(
+    firstCase!,
+  );
 
   await page.reload();
   await expect(pagination).toContainText("Page 2 of");
-  await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue("highest");
+  await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue(
+    "highest",
+  );
   await pagination.getByRole("button", { name: /Previous/ }).click();
   await expect(pagination).toContainText("Page 1 of");
   await expect(page).not.toHaveURL(/[?&]page=/);
-  await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue("highest");
+  await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue(
+    "highest",
+  );
 });
 
-test("traps keyboard focus in the queue and restores it on Escape", async ({ page }) => {
-  await page.goto(`/workflows/${RUN_ID}/triage/38105?dimension=text_formatting&from=triage`);
+test("traps keyboard focus in the queue and restores it on Escape", async ({
+  page,
+}) => {
+  await page.goto(
+    `/workflows/${RUN_ID}/triage/38105?dimension=text_formatting&from=triage`,
+  );
   const browseQueue = page.getByRole("button", { name: "Browse queue" });
   await expect(browseQueue).toBeVisible();
   await browseQueue.click();
@@ -228,17 +318,25 @@ test("traps keyboard focus in the queue and restores it on Escape", async ({ pag
   await expect(closeQueue).toBeFocused();
   await expect(queue.locator(".triage-card").first()).toBeVisible();
   await page.keyboard.press("Shift+Tab");
-  await expect.poll(() => queue.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await expect
+    .poll(() =>
+      queue.evaluate((element) => element.contains(document.activeElement)),
+    )
+    .toBe(true);
   await expect(closeQueue).not.toBeFocused();
   await page.keyboard.press("Tab");
   await expect(closeQueue).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(queue).toBeHidden();
   await expect(browseQueue).toBeFocused();
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .not.toBe("hidden");
 });
 
-test("keeps catalog controls and results inside a narrow mobile viewport", async ({ page }) => {
+test("keeps catalog controls and results inside a narrow mobile viewport", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/workflows");
   await expect(page.locator(".workflow-row").first()).toBeVisible();
@@ -249,8 +347,12 @@ test("keeps catalog controls and results inside a narrow mobile viewport", async
   await expectNoHorizontalOverflow(page);
 });
 
-test("navigates inspector tabs with Arrow, Home, and End keys", async ({ page }) => {
-  await page.goto(`/workflows/${RUN_ID}/triage/38105?dimension=text_formatting&from=triage`);
+test("navigates inspector tabs with Arrow, Home, and End keys", async ({
+  page,
+}) => {
+  await page.goto(
+    `/workflows/${RUN_ID}/triage/38105?dimension=text_formatting&from=triage`,
+  );
   const tabs = page.getByRole("tablist", { name: "Case inspection views" });
   const explain = tabs.getByRole("tab", { name: "Explain", exact: true });
   const output = tabs.getByRole("tab", { name: "Output", exact: true });
@@ -275,7 +377,9 @@ test("navigates inspector tabs with Arrow, Home, and End keys", async ({ page })
   await expect(tabs.locator('[tabindex="0"]')).toHaveCount(1);
 });
 
-test("releases the queue scroll lock when browser history leaves the inspector", async ({ page }) => {
+test("releases the queue scroll lock when browser history leaves the inspector", async ({
+  page,
+}) => {
   await page.goto(`/workflows/${RUN_ID}/triage?dimension=text_formatting`);
   await page.locator(".triage-card").first().click();
   await expect(page).toHaveURL(/\/triage\/\d+\?/);
@@ -283,30 +387,53 @@ test("releases the queue scroll lock when browser history leaves the inspector",
   await page.getByRole("button", { name: "Browse queue" }).click();
   const queue = page.getByRole("dialog", { name: "Browse triage queue" });
   await expect(queue).toBeVisible();
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .toBe("hidden");
 
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`/workflows/${RUN_ID}/triage\\?dimension=text_formatting$`));
+  await expect(page).toHaveURL(
+    new RegExp(`/workflows/${RUN_ID}/triage\\?dimension=text_formatting$`),
+  );
   await expect(queue).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .not.toBe("hidden");
   await page.goForward();
   await expect(page).toHaveURL(detailUrl);
-  await expect(page.getByRole("button", { name: "Browse queue" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Browse queue" }),
+  ).toBeVisible();
   await expect(queue).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .not.toBe("hidden");
 });
 
-test("opens an indexed run by ID even when its artifacts are incomplete", async ({ page }) => {
+test("opens an indexed run by ID even when its artifacts are incomplete", async ({
+  page,
+}) => {
   await page.goto("/workflows");
   await openCatalogFilters(page);
   await page.getByLabel("Result").selectOption("cancelled");
-  const incompleteRun = page.locator(".workflow-row").filter({ hasText: /artifacts/ }).first();
+  const incompleteRun = page
+    .locator(".workflow-row")
+    .filter({ hasText: /artifacts/ })
+    .first();
   await expect(incompleteRun).toBeVisible();
-  const runId = (await incompleteRun.getAttribute("aria-label"))?.match(/\d+/)?.[0];
+  const runId = (await incompleteRun.getAttribute("aria-label"))?.match(
+    /\d+/,
+  )?.[0];
   expect(runId).toBeTruthy();
-  await page.getByRole("textbox", { name: "Workflow run ID or commit" }).fill(runId!);
+  await page
+    .getByRole("textbox", { name: "Workflow run ID or commit" })
+    .fill(runId!);
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/workflows/${runId}$`));
-  await expect(page.locator(".run-title-row")).toContainText("Cancelled");
-  await expect(page.locator(".artifact-badge")).not.toHaveText("Complete artifacts");
+  await expect(
+    page.getByRole("region", { name: "Selected run", exact: true }),
+  ).toContainText("Cancelled");
+  await expect(page.locator(".artifact-badge")).not.toHaveText(
+    "Complete artifacts",
+  );
 });

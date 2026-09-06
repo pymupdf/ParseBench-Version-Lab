@@ -8,6 +8,7 @@
 | `overview.tsx` | Run summary, dimension scores, and embedded triage queue |
 | `triage-grid.tsx` | Shared document filters, thumbnails, and queue pagination |
 | `document-explorer.tsx` | Source viewer, evidence overlays, and result inspector tabs |
+| `panel-divider.tsx` | Pointer and keyboard resizing with adaptive minimum panel widths |
 | `best-result-panel.tsx` | Historical result provenance and evidence comparison |
 | `diagnostic-json.tsx` | Lazily rendered, paginated diagnostic JSON |
 | `layout-evidence.ts` | Ground-truth and prediction geometry used by overlays |
@@ -19,3 +20,5 @@
 | `constants.ts`, `types.ts` | Shared dimension configuration and UI state types |
 
 Data access remains in `../lib/data.ts`. Changes to filter or result navigation must preserve the URL so a copied link and browser back/forward navigation reconstruct the same view. Heavy artifact fetching stays tied to the selected result; historical evidence is fetched only when requested.
+
+`../dashboard-navigation.tsx` renders the library → run → dimension → document trail and the run jump control. Trail ancestors preserve the current filters; jumping to another dimension resets its page while retaining the other filters.

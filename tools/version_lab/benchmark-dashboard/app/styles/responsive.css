@@ -71,15 +71,6 @@
 }
 
 @media (max-width: 940px) {
-  .run-command-bar {
-    align-items: start;
-    grid-template-columns: 1fr;
-  }
-
-  .run-toolbar-actions {
-    justify-content: flex-start;
-  }
-
   .catalog-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -173,27 +164,6 @@
   .best-result-comparison-tabs {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 100%;
-  }
-
-  .run-command-bar {
-    gap: 16px;
-    padding: 18px 16px;
-  }
-
-  .run-context {
-    display: block;
-  }
-
-  .run-back-link {
-    align-self: auto;
-    border-right: 0;
-    margin-bottom: 12px;
-    padding-right: 0;
-  }
-
-  .run-toolbar-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
   }
 
   .content-shell {
@@ -609,14 +579,6 @@
 }
 
 @media (max-width: 500px) {
-  .run-title-row h1 {
-    flex-basis: 100%;
-  }
-
-  .run-toolbar-actions {
-    grid-template-columns: 1fr;
-  }
-
   .jump-form > div {
     flex-direction: column;
   }
@@ -868,16 +830,6 @@
   .workflow-created small {
     font-size: 11px;
   }
-  .run-command-bar {
-    padding: 22px 18px;
-  }
-  .run-title-row h1 {
-    font-size: 28px;
-    overflow-wrap: anywhere;
-  }
-  .run-toolbar-actions {
-    display: flex;
-  }
   .section-block {
     padding: 18px 14px;
   }
@@ -934,45 +886,5 @@
   .workbench-header .workbench-navigation {
     grid-column: auto;
     grid-row: auto;
-  }
-}
-
-@media (max-width: 1050px) {
-  .topbar {
-    padding: 0 24px;
-    gap: 16px;
-  }
-  .index-status {
-    display: none;
-  }
-}
-@media (max-width: 760px) {
-  .topbar {
-    position: static;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    padding: 14px 18px 12px;
-    gap: 14px;
-  }
-  .brand strong {
-    font-size: 20px;
-  }
-  .topbar-utility {
-    order: 1;
-  }
-  .view-nav {
-    order: 2;
-    width: 100%;
-  }
-  .view-nav a {
-    flex: 1;
-    justify-content: center;
-    padding: 0 7px;
-    min-height: 37px;
-    font-size: 11px;
-  }
-  .repository-link span {
-    display: none;
   }
 }

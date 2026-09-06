@@ -5,11 +5,10 @@ import { useRouter, usePathname, useParams, useSearchParams } from "next/navigat
 import type { View, TriageFilters, ArtifactState, DiagnosticState, HistoricalBestState } from "./dashboard/types";
 import { normalizeTriageFilters, parsePercent, parsePage, triageQuery, hrefWithTriageFilters } from "./dashboard/filters";
 import { DIMENSION_ORDER, EMPTY_BUNDLE, EMPTY_ARTIFACT, EMPTY_DIAGNOSTIC, EMPTY_HISTORICAL_BEST, TRIAGE_PAGE_SIZE, BEST_SCORE_MINIMUM_IMPROVEMENT } from "./dashboard/constants";
-import { type BenchmarkRun, type RunScoreIndex, type RunBundle, type TriageCaseResult, type CaseResult, loadRuns, loadRun, loadRunScores, loadRunBundle, loadDocuments, loadDocument, artifactUrl, loadArtifact, loadDiagnostic, loadHistoricalBestResult, type ArtifactLayoutBox, humanize } from "./lib/data";
-import { orderRunDimensions, formatDate, shortSha } from "./dashboard/format";
-import Link from "next/link";
-import { DashboardNavigation } from "./dashboard-navigation";
-import { StatusBadge, EmptyState } from "./dashboard/shared";
+import { type BenchmarkRun, type RunScoreIndex, type RunBundle, type TriageCaseResult, type CaseResult, loadRuns, loadRun, loadRunScores, loadRunBundle, loadDocuments, loadDocument, artifactUrl, loadArtifact, loadDiagnostic, loadHistoricalBestResult, type ArtifactLayoutBox } from "./lib/data";
+import { orderRunDimensions } from "./dashboard/format";
+import { DashboardNavigation, RunContextBar } from "./dashboard-navigation";
+import { EmptyState } from "./dashboard/shared";
 import { WorkflowBrowser } from "./dashboard/workflow-browser";
 import { Overview } from "./dashboard/overview";
 import { TriageGrid } from "./dashboard/triage-grid";
@@ -582,22 +581,6 @@ export default function DashboardClient({
   const queueHref = selectedRun
     ? hrefWithTriageFilters(`/workflows/${selectedRun.github_run_id}/triage`, filters)
     : "/workflows";
-  const overviewHref = selectedRun
-    ? hrefWithTriageFilters(`/workflows/${selectedRun.github_run_id}`, filters)
-    : "/workflows";
-  const inspectorBackHref = inspectionOrigin === "overview" ? overviewHref : queueHref;
-  const pageBackHref = view === "overview"
-    ? "/workflows"
-    : view === "triage"
-      ? overviewHref
-      : inspectorBackHref;
-  const pageBackLabel = view === "overview"
-    ? "Back to workflows"
-    : view === "triage"
-      ? "Back to overview"
-      : inspectionOrigin === "overview"
-        ? "Back to overview"
-        : "Back to triage queue";
   const displayedDocument = selectedDocument?.id === routeCaseResultId ? selectedDocument : null;
   const documentDetailsLoading = routeCaseResultId != null && (
     documentLoadState.id !== routeCaseResultId || documentLoadState.loading
@@ -614,41 +597,17 @@ export default function DashboardClient({
 
   return (
     <div className={`app-shell app-view-${view}`}>
-      <DashboardNavigation view={view} run={selectedRun} runCount={catalogLoaded ? catalogRuns.length : null} loading={catalogLoading} />
-
-      {view !== "runs" && (
-        <section className="run-command-bar">
-          <div className="run-context">
-            <Link className="run-back-link" href={pageBackHref} aria-label={pageBackLabel}>
-              <span aria-hidden="true">←</span>
-              {pageBackLabel}
-            </Link>
-            <span className="eyebrow">Selected workflow · #{selectedRun?.github_run_id ?? "—"}</span>
-            {selectedRun ? (
-              <>
-                <div className="run-title-row">
-                  <h1>{humanize(selectedRun.pipeline_name ?? selectedRun.run_name)}</h1>
-                  <StatusBadge value={selectedRun.conclusion ?? selectedRun.status} />
-                  <span className={`artifact-badge artifact-${selectedRun.artifact_state}`}>{humanize(selectedRun.artifact_state)} artifacts</span>
-                </div>
-                <div className="run-meta">
-                  <span>{formatDate(selectedRun.source_created_at)}</span>
-                  <span>{selectedRun.head_branch ?? "Unknown branch"} · <code>{shortSha(selectedRun.head_sha)}</code></span>
-                  <span>{humanize(selectedRun.effective_scope)} · {humanize(selectedRun.effective_group)}</span>
-                  <span>Attempt #{selectedRun.github_run_attempt}</span>
-                </div>
-              </>
-            ) : (
-              <h1>{selectedRunLoading ? "Loading latest workflow…" : "No workflow selected"}</h1>
-            )}
-          </div>
-          <div className="run-toolbar-actions">
-            {selectedRun?.github_run_url && (
-              <a href={selectedRun.github_run_url} target="_blank" rel="noreferrer" className="secondary-action">Open in GitHub ↗</a>
-            )}
-          </div>
-        </section>
-      )}
+      <DashboardNavigation
+        view={view}
+        runId={githubRunId}
+        caseResultId={routeCaseResultId}
+        dimensions={bundle.dimensions.filter((dimension) => dimension.run_id === selectedRunId)}
+        filters={filters}
+        runCount={catalogLoaded ? catalogRuns.length : null}
+        loading={catalogLoading}
+        onJump={(href) => router.push(href)}
+      />
+      <RunContextBar run={selectedRun} runId={githubRunId} loading={selectedRunLoading} view={view} />
 
       {loadError && (
         <div className="global-alert" role="alert">

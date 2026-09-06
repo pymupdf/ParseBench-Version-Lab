@@ -38,30 +38,41 @@ test("the inspector resizes the source and gives analysis the full canvas", asyn
   expect(tabsBounds.x + tabsBounds.width).toBeLessThanOrEqual(
     analysisBounds.x + analysisBounds.width,
   );
-  await expect(
-    page
-      .locator(".pdf-card")
-      .getByRole("slider", { name: "Source width", exact: true }),
-  ).toBeVisible();
-  const initialWidth = (await page.locator(".pdf-card").boundingBox())!.width;
-  await page
-    .getByRole("slider", { name: "Source width", exact: true })
-    .press("End");
+  const divider = page.getByRole("separator", {
+    name: "Resize source and analysis",
+  });
+  await expect(divider).toBeVisible();
   await expect(
     page.getByRole("slider", { name: "Source width", exact: true }),
-  ).toHaveValue("60");
+  ).toHaveCount(0);
+  const initialWidth = (await page.locator(".pdf-card").boundingBox())!.width;
+  const handle = (await divider.boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + 190, handle.y + 100, { steps: 12 });
+  await page.mouse.up();
   expect(
     (await page.locator(".pdf-card").boundingBox())!.width,
-  ).toBeGreaterThan(initialWidth);
+  ).toBeGreaterThan(initialWidth + 150);
+  await expect(divider).not.toHaveAttribute("data-dragging", "true");
+  const maximum = Number(await divider.getAttribute("aria-valuemax"));
+  await divider.press("End");
+  await expect(divider).toHaveAttribute("aria-valuenow", String(maximum));
+  await divider.press("ArrowLeft");
+  await expect(divider).toHaveAttribute("aria-valuenow", String(maximum - 2));
+  await divider.dblclick();
+  await expect(divider).toHaveAttribute("aria-valuenow", "40");
   await page
     .getByRole("button", { name: "Focus analysis", exact: true })
     .click();
   await expect(page.locator(".pdf-card")).toBeHidden();
+  await expect(divider).toBeHidden();
   expect(
     (await page.locator(".output-card").boundingBox())!.width,
   ).toBeGreaterThan(1200);
   await page.getByRole("button", { name: "Split view", exact: true }).click();
   await expect(page.locator(".pdf-card")).toBeVisible();
+  await expect(divider).toBeVisible();
   await page.locator(".scoring-method > summary").click();
   await expect(
     page.locator(".scoring-method .diagnostic-components"),
@@ -70,6 +81,7 @@ test("the inspector resizes the source and gives analysis the full canvas", asyn
   const explain = tabs.getByRole("tab", { name: "Explain", exact: true });
   await explain.focus();
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(divider).toBeHidden();
   await expect(explain).toBeFocused();
   await expect(tabs).toBeVisible();
   const groundTruth = tabs.getByRole("tab", {
@@ -82,6 +94,54 @@ test("the inspector resizes the source and gives analysis the full canvas", asyn
   await page.getByRole("button", { name: "Analysis", exact: true }).click();
   await expect(groundTruth).toHaveAttribute("aria-selected", "true");
   await expect(tabs.locator('[tabindex="0"]')).toHaveCount(1);
+});
+
+test("the divider keeps both panes usable at narrow desktop widths and releases pointer capture", async ({
+  page,
+}) => {
+  await page.goto(formattingCase);
+  const divider = page.getByRole("separator", {
+    name: "Resize source and analysis",
+  });
+  await expect(divider).toBeVisible();
+  for (const width of [1440, 1000, 761]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await divider.press("End");
+    await expect
+      .poll(
+        async () => (await page.locator(".output-card").boundingBox())!.width,
+      )
+      .toBeGreaterThanOrEqual(319);
+    expect(
+      (await page
+        .getByRole("tablist", { name: "Case inspection views" })
+        .boundingBox())!.width,
+    ).toBeGreaterThan(100);
+    await divider.press("Home");
+    expect(
+      (await page.locator(".pdf-card").boundingBox())!.width,
+    ).toBeGreaterThanOrEqual(239);
+  }
+  const handle = (await divider.boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(1, handle.y + 100, { steps: 5 });
+  await divider.dispatchEvent("pointercancel", { pointerId: 1 });
+  await expect(divider).not.toHaveAttribute("data-dragging", "true");
+  const value = await divider.getAttribute("aria-valuenow");
+  await page.mouse.move(500, handle.y + 100, { steps: 5 });
+  await page.mouse.up();
+  await expect(divider).toHaveAttribute("aria-valuenow", value!);
+  await expect(page.locator(".output-card")).toHaveCSS(
+    "pointer-events",
+    "auto",
+  );
+  await divider.focus();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(divider).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Source", exact: true }),
+  ).toBeFocused();
 });
 
 test("selecting layout evidence on a phone preserves keyboard focus in the source view", async ({
