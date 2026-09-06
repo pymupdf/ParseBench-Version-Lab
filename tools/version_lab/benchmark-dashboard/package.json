@@ -9,10 +9,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run build && npm run test:unit",
     "test:data": "node --env-file-if-exists=.env.local --test tests/data-contract.test.mjs",
     "test:e2e": "playwright test",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:unit": "node --test tests/rendered-html.test.mjs tests/data-unit.test.mjs tests/diagnostics-model.test.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "next": "16.3.0",

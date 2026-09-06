@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { normalizedEvidenceBounds } from "./diagnostics/evidence-geometry";
+
 export type EvidenceOverlayBox = {
   id: string;
   relatedIds?: string[];
@@ -17,14 +19,6 @@ export type EvidenceOverlayBox = {
 };
 
 export type EvidenceOverlayTone = "section" | "text" | "table" | "visual" | "other";
-
-function normalizedBounds(box: EvidenceOverlayBox) {
-  const left = Math.max(0, Math.min(1, box.x));
-  const top = Math.max(0, Math.min(1, box.y));
-  const width = Math.max(0, Math.min(1 - left, box.width));
-  const height = Math.max(0, Math.min(1 - top, box.height));
-  return { left, top, width, height };
-}
 
 export function EvidenceOverlay({
   boxes,
@@ -47,7 +41,8 @@ export function EvidenceOverlay({
     let match: { box: EvidenceOverlayBox; area: number } | null = null;
     for (const box of boxes) {
       if (box.kind !== "ground-truth") continue;
-      const bounds = normalizedBounds(box);
+      const bounds = normalizedEvidenceBounds(box);
+      if (!bounds) continue;
       const containsPoint = x >= bounds.left
         && x <= bounds.left + bounds.width
         && y >= bounds.top
@@ -68,9 +63,10 @@ export function EvidenceOverlay({
   return (
     <div
       aria-label="Evaluation evidence overlay"
+      role="group"
       className={`evidence-overlay${activeHoveredExpectedId ? " evidence-overlay-has-hovered-expected" : ""}`}
       onPointerUp={(event) => {
-        if (event.target !== event.currentTarget) return;
+        if (event.button !== 0 || event.target !== event.currentTarget) return;
         const expected = expectedAtPosition(event.clientX, event.clientY, event.currentTarget);
         if (expected) onSelect?.(expected.id, expected.kind);
       }}
@@ -86,7 +82,9 @@ export function EvidenceOverlay({
       }}
     >
       {boxes.map((box) => {
-        const { left, top, width, height } = normalizedBounds(box);
+        const bounds = normalizedEvidenceBounds(box);
+        if (!bounds) return null;
+        const { left, top, width, height } = bounds;
         const kindLabel = box.kind === "ground-truth"
           ? "Expected"
           : box.kind === "best"
@@ -96,10 +94,13 @@ export function EvidenceOverlay({
         return (
           <button
             aria-label={`${kindLabel} ${box.label}`}
+            aria-pressed={selected}
             className={`evidence-box evidence-box-${box.kind} evidence-box-${box.status ?? "neutral"} evidence-box-tone-${box.tone ?? "other"}${selected ? " evidence-box-selected" : ""}${box.kind === "ground-truth" && box.id === activeHoveredExpectedId ? " evidence-box-hovered" : ""}`}
             data-evidence-id={box.id}
             key={`${box.kind}-${box.id}`}
             onClick={() => onSelect?.(box.id, box.kind)}
+            onFocus={() => setHoveredExpectedId(box.kind === "ground-truth" ? box.id : null)}
+            onBlur={() => setHoveredExpectedId(null)}
             style={{
               height: `${height * 100}%`,
               left: `${left * 100}%`,

@@ -1,8 +1,9 @@
 const REVISION_PATTERN = /^[a-f0-9]{7,64}$/i;
+const REPOSITORY_PART_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
 
-function invalidRequest(message: string) {
-  return new Response(message, {
-    status: 400,
+function textResponse(message: string, status: number, includeBody: boolean) {
+  return new Response(includeBody ? message : null, {
+    status,
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
 }
@@ -17,13 +18,17 @@ function pdfFileName(path: string) {
   return ascii.toLowerCase().endsWith(".pdf") ? ascii : `${ascii}.pdf`;
 }
 
-function upstreamUrl(request: Request) {
+function upstreamUrl(request: Request): { error: string } | { fileName: string; url: string } {
   const query = new URL(request.url).searchParams;
   const repository = query.get("repository")?.trim();
   const revision = query.get("revision")?.trim();
   const path = query.get("path")?.trim();
 
-  if (!repository || repository.split("/").length !== 2) {
+  const repositoryParts = repository?.split("/");
+  if (
+    repositoryParts?.length !== 2 ||
+    repositoryParts.some((part) => !REPOSITORY_PART_PATTERN.test(part))
+  ) {
     return { error: "A valid dataset repository is required." } as const;
   }
   if (!revision || !REVISION_PATTERN.test(revision)) {
@@ -41,13 +46,13 @@ function upstreamUrl(request: Request) {
 
   return {
     fileName: pdfFileName(path),
-    url: `https://huggingface.co/datasets/${encodePath(repository)}/resolve/${encodeURIComponent(revision)}/${encodePath(path)}`,
+    url: `https://huggingface.co/datasets/${encodePath(repositoryParts.join("/"))}/resolve/${encodeURIComponent(revision)}/${encodePath(path)}`,
   } as const;
 }
 
 async function servePdf(request: Request, includeBody: boolean) {
   const source = upstreamUrl(request);
-  if ("error" in source) return invalidRequest(source.error ?? "Invalid source PDF request.");
+  if ("error" in source) return textResponse(source.error, 400, includeBody);
 
   const requestHeaders = new Headers();
   for (const name of ["range", "if-range", "if-none-match", "if-modified-since"] as const) {
@@ -61,16 +66,22 @@ async function servePdf(request: Request, includeBody: boolean) {
       method: includeBody ? "GET" : "HEAD",
       headers: requestHeaders,
       redirect: "follow",
+      signal: request.signal,
     });
   } catch {
-    return new Response("The source PDF could not be loaded.", { status: 502 });
+    return textResponse("The source PDF could not be loaded.", 502, includeBody);
   }
 
+  // Keep upstream error pages inert on the dashboard's origin. Range and cache
+  // responses retain their status and headers so PDF.js can retry correctly.
+  const isPdfResponse = upstream.ok || upstream.status === 304;
   const headers = new Headers({
-    "Content-Disposition": `inline; filename="${source.fileName}"`,
-    "Content-Type": "application/pdf",
+    "Content-Type": isPdfResponse ? "application/pdf" : "text/plain; charset=utf-8",
     "X-Content-Type-Options": "nosniff",
   });
+  if (isPdfResponse) {
+    headers.set("Content-Disposition", `inline; filename="${source.fileName}"`);
+  }
   for (const name of [
     "accept-ranges",
     "cache-control",

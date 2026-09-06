@@ -1,0 +1,485 @@
+:root {
+  /* Core theme palette */
+  --ink: #25332d;
+  --ink-soft: #647066;
+  --muted: #737d70;
+  --canvas: #f6f6f0;
+  --surface: #ffffff;
+  --surface-soft: #f9faf5;
+  --surface-strong: #eef0e8;
+  --line: #e2e5da;
+  --line-strong: #cdd3c4;
+  --brand: #3d7054;
+  --brand-dark: #2e5a41;
+  --brand-deep: #263d32;
+  --brand-soft: #eaf0df;
+  --good: #3d7155;
+  --good-soft: #def3eb;
+  --warning: #986b35;
+  --warning-soft: #fff1d8;
+  --critical: #b45e47;
+  --critical-soft: #fbe7e4;
+
+  /* Semantic theme colors */
+  --text-on-dark: #ffffff;
+  --navigation-surface: var(--surface);
+  --navigation-border: var(--line);
+  --navigation-text: var(--ink-soft);
+  --navigation-text-muted: var(--muted);
+  --navigation-text-subtle: #b5b5b5;
+  --navigation-copy: #b5b5b5;
+  --navigation-active-surface: var(--brand-soft);
+  --navigation-active-text: var(--brand-dark);
+  --navigation-score-text: #b5b5b5;
+  --brand-border-soft: color-mix(in srgb, var(--brand) 22%, var(--surface));
+  --brand-border: color-mix(in srgb, var(--brand) 30%, var(--surface));
+  --brand-border-strong: color-mix(in srgb, var(--brand) 45%, var(--surface));
+  --brand-border-emphasis: color-mix(in srgb, var(--brand) 40%, var(--surface));
+  --brand-border-selected: color-mix(in srgb, var(--brand) 35%, var(--surface));
+  --brand-border-card: color-mix(in srgb, var(--brand) 30%, var(--line));
+  --brand-soft-hover: color-mix(in srgb, var(--brand) 14%, var(--surface));
+  --good-border: color-mix(in srgb, var(--good) 25%, var(--surface));
+  --good-border-soft: color-mix(in srgb, var(--good) 18%, var(--surface));
+  --warning-border: color-mix(in srgb, var(--warning) 28%, var(--surface));
+  --critical-border: color-mix(in srgb, var(--critical) 25%, var(--surface));
+  --neutral-badge-surface: var(--surface-strong);
+  --neutral-badge-text: var(--ink-soft);
+  --row-hover-surface: var(--surface-soft);
+  --alert-critical-surface: color-mix(
+    in srgb,
+    var(--critical) 7%,
+    var(--surface)
+  );
+  --alert-critical-border: color-mix(
+    in srgb,
+    var(--critical) 24%,
+    var(--surface)
+  );
+  --alert-critical-text: color-mix(in srgb, var(--critical) 82%, var(--ink));
+  --notice-warning-surface: color-mix(
+    in srgb,
+    var(--warning) 8%,
+    var(--surface)
+  );
+  --notice-warning-border: color-mix(
+    in srgb,
+    var(--warning) 30%,
+    var(--surface)
+  );
+  --notice-warning-text: color-mix(in srgb, var(--warning) 72%, var(--ink));
+  --score-track: var(--line);
+  --commit-help-text: var(--ink-soft);
+  --preview-stage: var(--surface-strong);
+  --scrollbar-thumb: #b5b5b5;
+  --markdown-text: var(--ink-soft);
+  --markdown-heading: var(--ink);
+  --markdown-border: var(--line-strong);
+  --markdown-header-surface: var(--surface-strong);
+  --markdown-header-text: var(--ink);
+  --markdown-quote-border: var(--line-strong);
+  --markdown-code-surface: var(--surface-strong);
+  --markdown-code-block-surface: var(--ink);
+  --markdown-code-block-text: var(--surface-strong);
+  --markdown-source-text: var(--ink-soft);
+  --thumbnail-surface: var(--surface-strong);
+  --diagnostic-good-border: color-mix(in srgb, var(--good) 25%, var(--surface));
+  --diagnostic-warning-border: color-mix(
+    in srgb,
+    var(--warning) 30%,
+    var(--surface)
+  );
+  --diagnostic-critical-border: color-mix(
+    in srgb,
+    var(--critical) 25%,
+    var(--surface)
+  );
+  --highlight: #facc15;
+  --focus-strong: var(--brand-dark);
+  --shadow-neutral: var(--ink);
+  --shadow-deep: var(--ink);
+  --shadow-ink: #000000;
+
+  /* Translucent surfaces and effects */
+  --focus-ring: color-mix(in srgb, var(--brand) 22%, transparent);
+  --focus-ring-soft: color-mix(in srgb, var(--brand) 10%, transparent);
+  --focus-ring-selected: color-mix(in srgb, var(--brand) 12%, transparent);
+  --focus-ring-strong: color-mix(in srgb, var(--focus-strong) 28%, transparent);
+  --navigation-control-surface: var(--surface-strong);
+  --navigation-control-border: var(--line);
+  --navigation-form-border: var(--line);
+  --badge-surface: color-mix(in srgb, var(--surface) 92%, transparent);
+  --badge-surface-strong: color-mix(in srgb, var(--surface) 95%, transparent);
+  --badge-border: color-mix(in srgb, var(--line-strong) 92%, transparent);
+  --evidence-critical-surface: color-mix(
+    in srgb,
+    var(--critical) 10%,
+    transparent
+  );
+  --evidence-critical-surface-strong: color-mix(
+    in srgb,
+    var(--critical) 13%,
+    transparent
+  );
+  --evidence-critical-border: color-mix(
+    in srgb,
+    var(--critical) 90%,
+    transparent
+  );
+  --evidence-critical-border-strong: color-mix(
+    in srgb,
+    var(--critical) 92%,
+    transparent
+  );
+  --evidence-passed-surface: color-mix(in srgb, var(--good) 10%, transparent);
+  --evidence-passed-border: color-mix(in srgb, var(--good) 90%, transparent);
+  --evidence-partial-surface: color-mix(
+    in srgb,
+    var(--warning) 12%,
+    transparent
+  );
+  --evidence-partial-border: color-mix(
+    in srgb,
+    var(--warning) 92%,
+    transparent
+  );
+  --layout-region-section: #c83f35;
+  --layout-region-text: #2563c7;
+  --layout-region-table: #00866a;
+  --layout-region-visual: #7c3aed;
+  --layout-region-other: #68707d;
+  --evidence-highlight-surface: color-mix(
+    in srgb,
+    var(--highlight) 30%,
+    transparent
+  );
+  --evidence-selection-inner: color-mix(
+    in srgb,
+    var(--surface) 94%,
+    transparent
+  );
+  --evidence-selection-outer: color-mix(in srgb, var(--ink) 72%, transparent);
+  --evidence-label-surface: color-mix(in srgb, var(--ink) 90%, transparent);
+  --link-underline: color-mix(in srgb, var(--brand-dark) 35%, transparent);
+
+  /* Shadows */
+  --shadow-soft:
+    0 1px 2px color-mix(in srgb, var(--brand-deep) 4%, transparent),
+    0 8px 24px color-mix(in srgb, var(--brand-deep) 3.5%, transparent);
+  --shadow-lift: 0 16px 40px
+    color-mix(in srgb, var(--brand-deep) 10%, transparent);
+  --shadow-navigation-active: 0 2px 8px
+    color-mix(in srgb, var(--shadow-ink) 16%, transparent);
+  --shadow-card-hover: 0 7px 18px
+    color-mix(in srgb, var(--brand-deep) 7%, transparent);
+  --shadow-control: 0 3px 9px
+    color-mix(in srgb, var(--brand-deep) 10%, transparent);
+  --shadow-popover: 0 10px 28px
+    color-mix(in srgb, var(--brand-deep) 16%, transparent);
+  --shadow-preview: 0 3px 14px
+    color-mix(in srgb, var(--shadow-neutral) 14%, transparent);
+  --shadow-toggle: 0 1px 3px
+    color-mix(in srgb, var(--shadow-neutral) 10%, transparent);
+  --shadow-badge: 0 1px 4px
+    color-mix(in srgb, var(--brand-deep) 8%, transparent);
+  --shadow-dialog: 0 24px 80px
+    color-mix(in srgb, var(--shadow-deep) 28%, transparent);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--canvas);
+  color: var(--ink);
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+code {
+  font-family: var(--font-geist-mono), monospace;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.run-command-bar {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 24px 36px;
+  background: transparent;
+}
+
+.run-context {
+  align-items: center;
+  column-gap: 18px;
+  display: grid;
+  grid-template-areas:
+    "back eyebrow"
+    "back title"
+    "back meta";
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+}
+
+.run-back-link {
+  align-self: stretch;
+  align-items: center;
+  border-right: 1px solid var(--line);
+  color: var(--brand-dark);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 760;
+  gap: 7px;
+  grid-area: back;
+  padding-right: 18px;
+  text-decoration: none;
+}
+
+.run-back-link > span {
+  align-items: center;
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-border-soft);
+  display: inline-flex;
+  font-size: 15px;
+  height: 28px;
+  justify-content: center;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+  width: 28px;
+  border-radius: 6px;
+}
+
+.run-back-link:hover > span,
+.run-back-link:focus-visible > span {
+  background: var(--brand-soft-hover);
+  border-color: var(--brand-border-emphasis);
+  transform: translateX(-2px);
+}
+
+.eyebrow {
+  color: var(--muted);
+  display: block;
+  margin-bottom: 7px;
+  text-transform: uppercase;
+  font-family: var(--font-geist-mono), monospace;
+  font-weight: 500;
+  font-size: 9px;
+  letter-spacing: 0.07em;
+}
+
+.run-context > .eyebrow {
+  grid-area: eyebrow;
+  margin-bottom: 3px;
+}
+
+.run-title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  grid-area: title;
+}
+
+.run-title-row h1 {
+  line-height: 1.15;
+  margin: 0 3px 0 0;
+  font-size: clamp(23px, 2.2vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.055em;
+}
+
+.status-badge,
+.artifact-badge {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  gap: 6px;
+  line-height: 1;
+  min-height: 27px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.status-badge {
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+}
+
+.status-dot {
+  background: var(--muted);
+  border-radius: 50%;
+  height: 7px;
+  width: 7px;
+}
+
+.status-success,
+.status-completed {
+  background: var(--good-soft);
+  border-color: var(--good-border);
+  color: var(--good);
+}
+
+.status-success .status-dot,
+.status-completed .status-dot {
+  background: var(--good);
+}
+
+.status-failure,
+.status-cancelled {
+  background: var(--critical-soft);
+  border-color: var(--critical-border);
+  color: var(--critical);
+}
+
+.status-failure .status-dot,
+.status-cancelled .status-dot {
+  background: var(--critical);
+}
+
+.artifact-badge {
+  background: var(--neutral-badge-surface);
+  color: var(--neutral-badge-text);
+}
+
+.artifact-complete {
+  background: var(--good-soft);
+  border-color: var(--good-border);
+  color: var(--good);
+}
+
+.artifact-partial {
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+
+.artifact-unavailable {
+  background: var(--critical-soft);
+  border-color: var(--critical-border);
+  color: var(--critical);
+}
+
+.run-meta {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  grid-area: meta;
+  font-size: 10px;
+  gap: 8px 18px;
+  margin-top: 10px;
+}
+
+.run-meta span {
+  align-items: center;
+  display: inline-flex;
+}
+
+.run-meta code {
+  color: var(--ink-soft);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.run-toolbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+
+.secondary-action {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 15px;
+  text-decoration: none;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.secondary-action {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  color: var(--ink-soft);
+}
+
+.secondary-action:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.global-alert {
+  align-items: center;
+  background: var(--alert-critical-surface);
+  border-bottom: 1px solid var(--alert-critical-border);
+  color: var(--alert-critical-text);
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+  justify-content: center;
+  padding: 10px 20px;
+}
+
+.global-alert button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font-weight: 750;
+  min-height: 28px;
+  padding: 0 6px;
+}
+
+.content-shell {
+  margin: 0 auto;
+  max-width: 1536px;
+  padding: 30px 36px 64px;
+}

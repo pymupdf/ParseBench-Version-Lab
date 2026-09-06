@@ -29,12 +29,16 @@ export default function PdfPreview({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
+  const [loadedDocument, setLoadedDocument] = useState<{ source: string; pages: number } | null>(null);
+  const requestedPage = Number.isFinite(page) ? Math.max(1, Math.trunc(page)) : 1;
+  const pageCount = loadedDocument?.source === source ? loadedDocument.pages : null;
+  const pageUnavailable = pageCount != null && requestedPage > pageCount;
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const observer = new ResizeObserver(([entry]) => {
-      const nextWidth = Math.max(240, Math.floor(entry.contentRect.width - 16));
+      const nextWidth = Math.max(1, Math.floor(entry.contentRect.width - 16));
       setWidth((current) => (Math.abs(current - nextWidth) > 1 ? nextWidth : current));
     });
     observer.observe(host);
@@ -46,20 +50,30 @@ export default function PdfPreview({
       <Document
         file={source}
         options={PDF_OPTIONS}
-        loading={<div className="artifact-loading">Loading PDF page…</div>}
-        error={<div className="artifact-loading">PDF preview unavailable</div>}
+        onLoadSuccess={({ numPages }) => setLoadedDocument({ source, pages: numPages })}
+        loading={<div className="artifact-loading" role="status">Loading PDF page…</div>}
+        error={(
+          <div className="artifact-loading" role="status">
+            PDF preview unavailable. <a href={source} target="_blank" rel="noreferrer">Open source PDF</a>
+          </div>
+        )}
       >
-        <div className="pdf-evidence-page">
+        {pageUnavailable ? (
+          <div className="artifact-loading" role="status">
+            Page {requestedPage} is unavailable in this {pageCount}-page PDF.
+          </div>
+        ) : <div className="pdf-evidence-page">
           <Page
-            pageNumber={Math.max(1, page)}
+            pageNumber={requestedPage}
             width={width}
-            devicePixelRatio={Math.min(window.devicePixelRatio || 1, 1.5)}
+            devicePixelRatio={typeof window === "undefined" ? 1 : Math.min(window.devicePixelRatio || 1, 1.5)}
             renderAnnotationLayer={false}
             renderTextLayer={false}
-            loading={<div className="artifact-loading">Rendering PDF page…</div>}
+            loading={<div className="artifact-loading" role="status">Rendering PDF page…</div>}
+            error={<div className="artifact-loading" role="status">This PDF page could not be rendered.</div>}
           />
           <EvidenceOverlay boxes={boxes} selectedId={selectedId} onSelect={onSelect} />
-        </div>
+        </div>}
       </Document>
     </div>
   );

@@ -1,4 +1,4 @@
-import { isDiagnosticEvaluationKind, type DiagnosticArtifact } from "../diagnostics";
+import { isDiagnosticEvaluationKind, type DiagnosticArtifact } from "../diagnostics/types";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY =
@@ -202,25 +202,35 @@ function configurationError() {
   }
 }
 
+function apiRequest(
+  table: string,
+  params: URLSearchParams,
+  signal?: AbortSignal,
+  headers?: HeadersInit,
+) {
+  configurationError();
+  const requestHeaders = new Headers(headers);
+  requestHeaders.set("apikey", SUPABASE_PUBLISHABLE_KEY!);
+  return fetch(
+    `${SUPABASE_URL}/rest/v1/${table}?${params.toString()}`,
+    { headers: requestHeaders, signal },
+  );
+}
+
+async function requireSuccessfulResponse(table: string, response: Response) {
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Could not load ${table} (${response.status}): ${detail}`);
+  }
+}
+
 async function apiFetch<T>(
   table: string,
   params: URLSearchParams,
   signal?: AbortSignal,
 ): Promise<T> {
-  configurationError();
-  const response = await fetch(
-    `${SUPABASE_URL}/rest/v1/${table}?${params.toString()}`,
-    {
-      headers: {
-        apikey: SUPABASE_PUBLISHABLE_KEY!,
-      },
-      signal,
-    },
-  );
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Could not load ${table} (${response.status}): ${detail}`);
-  }
+  const response = await apiRequest(table, params, signal);
+  await requireSuccessfulResponse(table, response);
   return (await response.json()) as T;
 }
 
@@ -365,23 +375,23 @@ export async function loadRunBundle(
       signal,
     ),
   ]);
-  const headlineMetrics = metrics.filter((metric) => {
-    const dimension = dimensions.find((candidate) => candidate.id === metric.run_dimension_id);
-    return dimension != null && metric.metric_name === PRIMARY_METRIC_BY_DIMENSION[dimension.dimension];
+  const dimensionById = new Map(dimensions.map((dimension) => [dimension.id, dimension]));
+  const headlineMetrics = metrics.flatMap((metric): DimensionMetric[] => {
+    const dimension = dimensionById.get(metric.run_dimension_id);
+    if (!dimension || metric.metric_name !== PRIMARY_METRIC_BY_DIMENSION[dimension.dimension]) {
+      return [];
+    }
+    return [{ ...metric, evaluated_count: dimension.successful ?? null }];
   });
   return {
     dimensions,
-    metrics: headlineMetrics.map((metric) => ({
-      ...metric,
-      evaluated_count: dimensions.find((dimension) => dimension.id === metric.run_dimension_id)
-        ?.successful ?? null,
-    })),
+    metrics: headlineMetrics,
     components,
     errors,
   };
 }
 
-export function loadDocuments(
+export async function loadDocuments(
   runDimensionId: number,
   options: {
     search?: string;
@@ -399,15 +409,15 @@ export function loadDocuments(
     order: options.sort === "highest"
       ? "primary_score.desc.nullslast,id.asc"
       : options.sort === "document"
-        ? "benchmark_case_id.asc,id.asc"
+        ? "benchmark_cases(test_id).asc,id.asc"
         : "primary_score.asc.nullslast,id.asc",
     limit: String(options.limit ?? 120),
     offset: String(options.offset ?? 0),
   });
-  if (options.floor != null) {
+  if (options.floor != null && Number.isFinite(options.floor)) {
     params.append("primary_score", `gte.${Math.max(0, Math.min(1, options.floor))}`);
   }
-  if (options.ceiling != null) {
+  if (options.ceiling != null && Number.isFinite(options.ceiling)) {
     params.append("primary_score", `lte.${Math.max(0, Math.min(1, options.ceiling))}`);
   }
   if (options.search?.trim()) {
@@ -422,32 +432,19 @@ export function loadDocuments(
       `ilike.*${escapedSearch}*`,
     );
   }
-  configurationError();
-  return fetch(
-    `${SUPABASE_URL}/rest/v1/case_results?${params.toString()}`,
-    {
-      headers: {
-        apikey: SUPABASE_PUBLISHABLE_KEY!,
-        Prefer: "count=exact",
-      },
-      signal,
-    },
-  ).then(async (response) => {
-    const contentRange = response.headers.get("content-range");
-    const totalValue = contentRange?.split("/").at(-1);
-    const rangedTotal = totalValue && totalValue !== "*" ? Number(totalValue) : null;
-    if (response.status === 416 && rangedTotal != null && Number.isFinite(rangedTotal)) {
-      await response.body?.cancel();
-      return { documents: [], total: rangedTotal };
-    }
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`Could not load case_results (${response.status}): ${detail}`);
-    }
-    const documents = (await response.json()) as TriageCaseResult[];
-    const total = rangedTotal ?? documents.length;
-    return { documents, total: Number.isFinite(total) ? total : documents.length };
-  });
+  const response = await apiRequest("case_results", params, signal, { Prefer: "count=exact" });
+  const totalValue = response.headers.get("content-range")?.split("/").at(-1);
+  const rangedTotal = totalValue && /^\d+$/.test(totalValue) ? Number(totalValue) : null;
+  if (response.status === 416 && rangedTotal != null && Number.isSafeInteger(rangedTotal)) {
+    await response.body?.cancel();
+    return { documents: [], total: rangedTotal };
+  }
+  await requireSuccessfulResponse("case_results", response);
+  const documents = (await response.json()) as TriageCaseResult[];
+  const total = rangedTotal != null && Number.isSafeInteger(rangedTotal)
+    ? rangedTotal
+    : documents.length;
+  return { documents, total };
 }
 
 export async function loadDocument(
@@ -708,7 +705,10 @@ export async function loadArtifact(
       : "empty";
   const pages = artifact.raw_output?.pages ?? [];
   const requestedPage = result.benchmark_cases.page_number;
-  const layoutPage = pages.find((page) => page.page_number === requestedPage) ?? pages[0];
+  const layoutPage = requestedPage == null
+    ? pages[0]
+    : pages.find((page) => (page.page_number ?? (page.page_index == null ? null : page.page_index + 1)) === requestedPage)
+      ?? (pages.length === 1 ? pages[0] : undefined);
   const pageWidth = layoutPage?.width;
   const pageHeight = layoutPage?.height;
   const layoutBoxes = pageWidth && pageWidth > 0 && pageHeight && pageHeight > 0

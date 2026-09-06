@@ -43,6 +43,19 @@ test(
     );
     assert.ok(dimensions.length > 0);
 
+    const alphabeticalDocuments = await query(
+      "case_results",
+      new URLSearchParams({
+        select: "id,benchmark_cases!inner(test_id)",
+        run_dimension_id: `eq.${dimensions[0].id}`,
+        order: "benchmark_cases(test_id).asc,id.asc",
+        limit: "10",
+      }),
+    );
+    assert.ok(alphabeticalDocuments.length > 0);
+    const documentNames = alphabeticalDocuments.map((document) => document.benchmark_cases.test_id);
+    assert.deepEqual(documentNames, [...documentNames].sort());
+
     const [result] = await query(
       "case_results",
       new URLSearchParams({

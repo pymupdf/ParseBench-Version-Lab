@@ -40,3 +40,6 @@ yarn-error.log*
 
 /outputs/
 /work/
+
+# TypeScript incremental cache
+*.tsbuildinfo
