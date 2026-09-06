@@ -20,7 +20,7 @@
 
 .run-details-heading > span:last-child {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .run-facts {
@@ -52,7 +52,7 @@
 
 .run-facts span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   font-family: var(--font-geist-mono), monospace;
@@ -123,9 +123,6 @@
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
-.score-profile-grid {
-}
-
 .dimension-card {
   border: 1px solid var(--line);
   color: var(--ink);
@@ -164,7 +161,7 @@
   color: var(--muted);
   display: flex;
   flex-wrap: wrap;
-  font-size: 9px;
+  font-size: 11px;
   gap: 3px 8px;
 }
 
@@ -176,7 +173,7 @@
 
 .dimension-card > p {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   margin: 0 0 18px;
 }
@@ -199,7 +196,7 @@
 .dimension-score-row span,
 .metric-caption {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .score-track {
@@ -318,7 +315,7 @@
 
 .component-row span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 4px;
 }
 
@@ -327,7 +324,7 @@
   border: 1px solid var(--line);
   border-radius: 5px;
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   padding: 4px 6px;
 }
 
@@ -361,7 +358,7 @@
   background: transparent;
   border: 0;
   color: inherit;
-  font-size: 10px;
+  font-size: 11px;
   padding: 0;
 }
 
@@ -462,7 +459,7 @@
 
 .error-row span {
   color: var(--critical);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 760;
   text-transform: uppercase;
 }
@@ -470,7 +467,7 @@
 .error-row p {
   color: var(--ink-soft);
   display: -webkit-box;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.45;
   margin: 5px 0 0;
   overflow: hidden;
@@ -485,7 +482,7 @@
   border-radius: 8px;
   color: var(--good);
   display: flex;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 680;
   min-height: 42px;
   padding: 10px 11px;
@@ -498,7 +495,7 @@
   border-radius: 8px;
   color: var(--warning);
   display: flex;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 680;
   min-height: 42px;
   padding: 10px 11px;
@@ -560,7 +557,7 @@
   align-items: center;
   color: var(--muted);
   display: flex;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 660;
   gap: 5px;
   margin-bottom: 6px;
@@ -589,7 +586,7 @@
 
 .inspection-score span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   grid-column: 1;
 }
 
@@ -603,7 +600,7 @@
 
 .inspection-score small {
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   grid-column: 1;
   margin-top: 4px;
   max-width: 120px;
@@ -634,7 +631,7 @@
 
 .metric-chip span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -683,7 +680,7 @@
 
 .viewer-kicker {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 760;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -697,7 +694,7 @@
 
 .simple-link {
   color: var(--brand);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 720;
   text-decoration: none;
 }
@@ -895,7 +892,7 @@
   border-radius: 2px;
   color: var(--text-on-dark);
   display: none;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 720;
   left: -2px;
   line-height: 1.25;
@@ -962,7 +959,7 @@
   border-bottom: 2px solid transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 710;
   padding: 0 10px;
 }
@@ -992,7 +989,7 @@
   border-radius: 5px;
   color: var(--muted);
   cursor: pointer;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 680;
   min-height: 26px;
   padding: 0 8px;
@@ -1064,7 +1061,7 @@
   border-collapse: collapse;
   display: block;
   font-family: var(--font-geist-sans), Arial, sans-serif;
-  font-size: 10px;
+  font-size: 11px;
   margin: 16px 0;
   max-width: 100%;
   overflow-x: auto;
@@ -1115,7 +1112,7 @@
 
 .markdown-source {
   color: var(--markdown-source-text);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.58;
   margin: 0;
   min-height: 100%;

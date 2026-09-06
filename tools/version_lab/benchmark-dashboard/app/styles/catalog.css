@@ -17,7 +17,7 @@
   line-height: 0.99;
 }
 .catalog-hero h1 > span {
-  color: #738478;
+  color: #506958;
 }
 .catalog-hero > div > p {
   color: var(--ink-soft);
@@ -30,7 +30,7 @@
   align-items: center;
   gap: 8px;
   color: #8a513d;
-  font-size: 9px;
+  font-size: 11px;
 }
 .hero-eyebrow > span {
   width: 6px;
@@ -49,13 +49,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #6b7c70;
+  color: #536157;
 }
 .history-heading .eyebrow {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 8px;
+  font-size: 11px;
   margin: 0;
 }
 .history-reading {
@@ -72,13 +72,13 @@
   font-variant-numeric: tabular-nums;
 }
 .history-reading > span {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ink-soft);
 }
 .history-reading small {
   display: block;
   font:
-    8px var(--font-geist-mono),
+    11px var(--font-geist-mono),
     monospace;
   color: var(--muted);
   margin-top: 5px;
@@ -124,7 +124,7 @@
   right: 0;
   bottom: 0;
   font:
-    8px var(--font-geist-mono),
+    11px var(--font-geist-mono),
     monospace;
   color: var(--muted);
   display: flex;
@@ -135,7 +135,7 @@
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  font-size: 8px;
+  font-size: 11px;
   color: var(--muted);
   margin-top: 10px;
 }
@@ -179,7 +179,7 @@
   border: 1px solid var(--line-strong);
   border-radius: 5px;
   padding: 0 10px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ink);
 }
 .jump-form button,
@@ -188,7 +188,7 @@
   color: var(--text-on-dark);
   border: 1px solid var(--brand-deep);
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   padding: 0 14px;
   cursor: pointer;
@@ -200,7 +200,7 @@
 .field-error {
   display: block;
   color: var(--critical);
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 6px;
 }
 .score-leaders {
@@ -222,7 +222,7 @@
 }
 .score-leaders-heading p {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.6;
   max-width: 330px;
   margin: 0;
@@ -255,7 +255,7 @@
   transform: translateY(-3px);
 }
 .score-leader-card > span {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--ink-soft);
   letter-spacing: 0.02em;
 }
@@ -268,7 +268,7 @@
   font-variant-numeric: tabular-nums;
 }
 .score-leader-card > small {
-  font-size: 8px;
+  font-size: 11px;
   line-height: 1.5;
   color: var(--muted);
   overflow-wrap: anywhere;
@@ -292,7 +292,7 @@
   justify-content: space-between;
   gap: 4px;
   font-style: normal;
-  font-size: 8px;
+  font-size: 11px;
   color: var(--ink-soft);
   margin-top: auto;
 }
@@ -330,7 +330,7 @@
 }
 .catalog-section-heading > span {
   font:
-    9px var(--font-geist-mono),
+    11px var(--font-geist-mono),
     monospace;
   color: var(--muted);
 }
@@ -346,7 +346,7 @@
 .catalog-filters label > span {
   display: block;
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 500;
   margin-bottom: 7px;
 }
@@ -378,7 +378,7 @@
   padding: 0 24px 20px;
 }
 .catalog-filters select {
-  font-size: 10px;
+  font-size: 11px;
   height: 34px;
   padding: 0 7px;
 }
@@ -396,7 +396,7 @@
   background: var(--surface-soft);
 }
 .catalog-results-bar p {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
   margin: 0;
 }
@@ -415,7 +415,7 @@
   padding: 6px 9px;
   border-radius: 4px;
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   cursor: pointer;
 }
 .id-toggle[aria-pressed="true"] {
@@ -427,7 +427,7 @@
   border: 0;
   background: transparent;
   color: var(--brand);
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
   min-height: 30px;
 }
@@ -446,7 +446,7 @@
 .workflow-table-head {
   padding: 13px 24px;
   font:
-    8px var(--font-geist-mono),
+    11px var(--font-geist-mono),
     monospace;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -492,13 +492,13 @@
 }
 .workflow-title-line em {
   flex: none;
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   color: var(--muted);
 }
 .workflow-identity > small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.5;
   margin-top: 6px;
   overflow: hidden;
@@ -506,7 +506,7 @@
   white-space: nowrap;
 }
 .workflow-run-id {
-  font-size: 8px;
+  font-size: 11px;
   color: var(--brand);
   background: var(--brand-soft);
   padding: 3px;
@@ -520,7 +520,7 @@
 }
 .workflow-aggregate > small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   line-height: 1.5;
   margin-top: 5px;
 }
@@ -540,18 +540,18 @@
 }
 .workflow-dimension-scores small {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 11px;
 }
 .workflow-dimension-scores strong {
   font-family: var(--font-geist-mono), monospace;
   font-weight: 400;
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: -0.06em;
 }
 .workflow-source strong,
 .workflow-config strong,
 .workflow-created strong {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -560,7 +560,7 @@
 .workflow-source code,
 .workflow-config small,
 .workflow-created small {
-  font-size: 8px;
+  font-size: 11px;
   color: var(--muted);
   margin-top: 6px;
   line-height: 1.5;
@@ -598,7 +598,7 @@
 .pagination span {
   color: var(--muted);
   font:
-    9px var(--font-geist-mono),
+    11px var(--font-geist-mono),
     monospace;
 }
 .pagination button {
@@ -607,6 +607,6 @@
   background: var(--surface);
   border-radius: 4px;
   padding: 8px 12px;
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }

@@ -17,12 +17,19 @@ function LazyJsonDetails({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <details className={className} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details
+      className={className}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>
         {label}
         {code && <code>{code}</code>}
       </summary>
-      {open && <pre><code>{JSON.stringify(value, null, 2)}</code></pre>}
+      {open && (
+        <pre>
+          <code>{JSON.stringify(value, null, 2)}</code>
+        </pre>
+      )}
     </details>
   );
 }
@@ -52,9 +59,13 @@ function PaginatedJsonList<T>({
         <button
           className="diagnostic-load-more"
           type="button"
-          onClick={() => setVisible((current) => current + DIAGNOSTIC_LIST_PAGE_SIZE)}
+          onClick={() =>
+            setVisible((current) => current + DIAGNOSTIC_LIST_PAGE_SIZE)
+          }
         >
-          Show {Math.min(DIAGNOSTIC_LIST_PAGE_SIZE, items.length - rendered.length)} more · {(items.length - rendered.length).toLocaleString()} remaining
+          Show{" "}
+          {Math.min(DIAGNOSTIC_LIST_PAGE_SIZE, items.length - rendered.length)}{" "}
+          more · {(items.length - rendered.length).toLocaleString()} remaining
         </button>
       )}
     </div>
@@ -72,31 +83,50 @@ function DiagnosticMetricJson({ metric }: { metric: DiagnosticMetric }) {
     ...metric,
     metadata: {
       ...metadataWithoutRuleResults,
-      ...(ruleResults.length ? { rule_results: `${ruleResults.length.toLocaleString()} entries shown below` } : {}),
+      ...(ruleResults.length
+        ? {
+            rule_results: `${ruleResults.length.toLocaleString()} entries shown below`,
+          }
+        : {}),
     },
   };
   return (
-    <details className="expectation-row diagnostic-json-metric" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details
+      className="expectation-row diagnostic-json-metric"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>
         <strong>{humanize(metric.metric_name)}</strong>
         <code>{diagnosticMetricDisplay(metric)}</code>
       </summary>
       {open && (
         <>
-          <pre><code>{JSON.stringify(compactMetric, null, 2)}</code></pre>
+          <pre>
+            <code>{JSON.stringify(compactMetric, null, 2)}</code>
+          </pre>
           {ruleResults.length > 0 && (
             <PaginatedJsonList
               items={ruleResults}
               labelFor={(outcome, index) => {
-                const record = typeof outcome === "object" && outcome !== null && !Array.isArray(outcome)
-                  ? outcome as Record<string, unknown>
-                  : null;
-                return <strong>{humanize(String(record?.type ?? `Outcome ${index + 1}`))}</strong>;
+                const record =
+                  typeof outcome === "object" &&
+                  outcome !== null &&
+                  !Array.isArray(outcome)
+                    ? (outcome as Record<string, unknown>)
+                    : null;
+                return (
+                  <strong>
+                    {humanize(String(record?.type ?? `Outcome ${index + 1}`))}
+                  </strong>
+                );
               }}
               codeFor={(outcome, index) => {
-                const record = typeof outcome === "object" && outcome !== null && !Array.isArray(outcome)
-                  ? outcome as Record<string, unknown>
-                  : null;
+                const record =
+                  typeof outcome === "object" &&
+                  outcome !== null &&
+                  !Array.isArray(outcome)
+                    ? (outcome as Record<string, unknown>)
+                    : null;
                 return String(record?.id ?? index + 1);
               }}
             />
@@ -107,46 +137,143 @@ function DiagnosticMetricJson({ metric }: { metric: DiagnosticMetric }) {
   );
 }
 
-export function DiagnosticJsonBrowser({ diagnostic }: { diagnostic: DiagnosticArtifact }) {
+type JsonSection = "metrics" | "expectations" | "outcomes" | "manifest";
+
+export function DiagnosticJsonBrowser({
+  diagnostic,
+}: {
+  diagnostic: DiagnosticArtifact;
+}) {
   const { metrics, expectations, outcomes, ...manifest } = diagnostic;
+  const [section, setSection] = useState<JsonSection>("metrics");
+  const [query, setQuery] = useState("");
+  const filteredMetrics = metrics.filter((metric) =>
+    `${metric.metric_name} ${humanize(metric.metric_name)}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
+  );
+  const sections: Array<{
+    key: JsonSection;
+    label: string;
+    count: string | number;
+  }> = [
+    { key: "metrics", label: "Metrics", count: metrics.length },
+    { key: "expectations", label: "Expectations", count: expectations.length },
+    {
+      key: "outcomes",
+      label: "Outcomes",
+      count: outcomes?.length ?? "In metrics",
+    },
+    {
+      key: "manifest",
+      label: "Manifest",
+      count: `v${diagnostic.schema_version}`,
+    },
+  ];
   return (
-    <div className="diagnostic-json-browser">
-      <dl className="diagnostic-json-summary">
-        <div><dt>Schema</dt><dd>v{diagnostic.schema_version}</dd></div>
-        <div><dt>Metrics</dt><dd>{metrics.length.toLocaleString()}</dd></div>
-        <div><dt>Expectations</dt><dd>{expectations.length.toLocaleString()}</dd></div>
-        <div><dt>Outcomes</dt><dd>{outcomes?.length.toLocaleString() ?? "In metrics"}</dd></div>
-      </dl>
-      <section className="diagnostic-json-section">
-        <h3>Manifest</h3>
-        <LazyJsonDetails label={<strong>Run and source metadata</strong>} value={manifest} />
+    <div className="diagnostic-json-browser record-browser">
+      <nav className="record-sections" aria-label="Diagnostic record sections">
+        {sections.map((item) => (
+          <button
+            type="button"
+            aria-pressed={section === item.key}
+            onClick={() => setSection(item.key)}
+            key={item.key}
+          >
+            <strong>{item.label}</strong>
+            <span>{item.count}</span>
+          </button>
+        ))}
+      </nav>
+      <section
+        className="diagnostic-json-section record-section"
+        aria-label={sections.find((item) => item.key === section)?.label}
+      >
+        {section === "manifest" ? (
+          <>
+            <div className="record-section-heading">
+              <h3>Run & source manifest</h3>
+              <p>
+                Dataset identity, source location, and scoring configuration.
+              </p>
+            </div>
+            <LazyJsonDetails
+              label={<strong>Run and source metadata</strong>}
+              value={manifest}
+            />
+          </>
+        ) : section === "metrics" ? (
+          <>
+            <div className="record-section-heading">
+              <h3>Metric records</h3>
+              <p>
+                Expand a metric to inspect its value, metadata, and retained
+                rule outcomes.
+              </p>
+            </div>
+            <label className="record-search">
+              Find a metric
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search metric names"
+              />
+            </label>
+            <div className="expectation-list diagnostic-json-items">
+              {filteredMetrics.length ? (
+                filteredMetrics.map((metric, index) => (
+                  <DiagnosticMetricJson
+                    key={`${metric.metric_name}-${index}`}
+                    metric={metric}
+                  />
+                ))
+              ) : (
+                <p className="record-empty">No metrics match “{query}”.</p>
+              )}
+            </div>
+          </>
+        ) : section === "expectations" ? (
+          <>
+            <div className="record-section-heading">
+              <h3>Expected evidence</h3>
+              <p>Ground-truth rules supplied to the evaluator.</p>
+            </div>
+            <PaginatedJsonList
+              items={expectations}
+              labelFor={(expectation) => (
+                <strong>{humanize(expectation.type)}</strong>
+              )}
+              codeFor={(expectation) => expectation.id}
+            />
+          </>
+        ) : (
+          <>
+            <div className="record-section-heading">
+              <h3>Recorded outcomes</h3>
+              <p>Observed results of the evaluation checks.</p>
+            </div>
+            {outcomes?.length ? (
+              <PaginatedJsonList
+                items={outcomes}
+                labelFor={(outcome, index) => (
+                  <strong>
+                    {humanize(String(outcome.type ?? `Outcome ${index + 1}`))}
+                  </strong>
+                )}
+                codeFor={(outcome, index) =>
+                  String(outcome.id ?? outcome.rule_id ?? index + 1)
+                }
+              />
+            ) : (
+              <p className="record-empty">
+                This artifact retains outcomes within its metric records. Open
+                Metrics to inspect them.
+              </p>
+            )}
+          </>
+        )}
       </section>
-      <section className="diagnostic-json-section">
-        <h3>Metrics</h3>
-        <div className="expectation-list diagnostic-json-items">
-          {metrics.map((metric, index) => (
-            <DiagnosticMetricJson key={`${metric.metric_name}-${index}`} metric={metric} />
-          ))}
-        </div>
-      </section>
-      <section className="diagnostic-json-section">
-        <h3>Expectations</h3>
-        <PaginatedJsonList
-          items={expectations}
-          labelFor={(expectation) => <strong>{humanize(expectation.type)}</strong>}
-          codeFor={(expectation) => expectation.id}
-        />
-      </section>
-      {outcomes && outcomes.length > 0 && (
-        <section className="diagnostic-json-section">
-          <h3>Top-level outcomes</h3>
-          <PaginatedJsonList
-            items={outcomes}
-            labelFor={(outcome, index) => <strong>{humanize(String(outcome.type ?? `Outcome ${index + 1}`))}</strong>}
-            codeFor={(outcome, index) => String(outcome.id ?? outcome.rule_id ?? index + 1)}
-          />
-        </section>
-      )}
     </div>
   );
 }

@@ -613,7 +613,7 @@ export default function DashboardClient({
     : { ...EMPTY_HISTORICAL_BEST, loading: documentDetailsLoading || displayedDocument != null };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell app-view-${view}`}>
       <DashboardNavigation view={view} run={selectedRun} runCount={catalogLoaded ? catalogRuns.length : null} loading={catalogLoading} />
 
       {view !== "runs" && (

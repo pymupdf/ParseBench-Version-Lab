@@ -21,7 +21,7 @@
 
 .layer-legend-label {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 760;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -44,7 +44,7 @@
   color: var(--muted);
   cursor: pointer;
   display: inline-flex;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   gap: 5px;
   min-height: 30px;
@@ -76,7 +76,7 @@
   border-radius: 999px;
   color: var(--ink-soft);
   display: inline-flex;
-  font-size: 8px;
+  font-size: 11px;
   justify-content: center;
   min-width: 18px;
   padding: 2px 4px;
@@ -102,7 +102,7 @@
 
 .layout-region-legend-title {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 760;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -113,7 +113,7 @@
   align-items: center;
   color: var(--ink-soft);
   display: inline-flex;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 680;
   gap: 5px;
   white-space: nowrap;
@@ -143,7 +143,7 @@
 .layout-region-legend-key,
 .layout-region-legend-empty {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -264,13 +264,13 @@
 
 .best-result-score > div strong {
   color: var(--good);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .best-result-score p,
 .best-result-comparison-intro span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.45;
   margin: 3px 0 0;
 }
@@ -288,12 +288,12 @@
 
 .best-result-provenance dt {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
 .best-result-provenance dd {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   margin: 2px 0 0;
   overflow: hidden;
@@ -321,7 +321,7 @@
   border-radius: 7px;
   color: var(--brand-dark);
   display: inline-flex;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 760;
   gap: 8px;
   min-height: 34px;
@@ -351,7 +351,7 @@
 }
 
 .best-result-comparison-intro > div:first-child strong {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .best-result-comparison-tabs {
@@ -373,7 +373,7 @@
   color: var(--ink-soft);
   cursor: pointer;
   display: flex;
-  font-size: 9px;
+  font-size: 11px;
   gap: 6px;
   justify-content: center;
   min-height: 32px;
@@ -382,7 +382,7 @@
 
 .best-result-comparison-tabs button strong {
   color: var(--ink);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .best-result-comparison-tabs button[aria-selected="true"] {
@@ -432,7 +432,7 @@
 
 .best-result-extracted-output .diagnostic-section-heading a {
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 720;
   text-decoration: underline;
   text-decoration-color: var(--line-strong);
@@ -484,7 +484,7 @@
   border-radius: 999px;
   color: var(--neutral-badge-text);
   display: inline-flex;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 740;
   line-height: 1.2;
   margin-top: 6px;
@@ -645,7 +645,7 @@
 .diagnostic-eyebrow {
   color: var(--muted);
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 780;
   letter-spacing: 0.09em;
   margin-bottom: 5px;
@@ -708,7 +708,7 @@
   color: var(--ink-soft);
   display: flex;
   flex-wrap: wrap;
-  font-size: 10px;
+  font-size: 11px;
   gap: 5px;
   line-height: 1.4;
   margin: 0;
@@ -736,7 +736,7 @@
 
 .diagnostic-component span {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -748,7 +748,7 @@
 
 .diagnostic-component small {
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   grid-column: 1 / -1;
 }
 
@@ -774,7 +774,7 @@
 .diagnostic-layout-summary dt,
 .diagnostic-inline-metrics dt {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.35;
 }
 
@@ -1028,7 +1028,7 @@
 
 .diagnostic-table-pair-score span {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 720;
   text-transform: uppercase;
 }
@@ -1117,7 +1117,7 @@
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   color: var(--neutral-badge-text);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 760;
   margin-left: auto;
   padding: 3px 6px;
@@ -1149,7 +1149,7 @@
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 740;
   padding: 5px 8px;
   white-space: nowrap;
@@ -1203,7 +1203,7 @@
 .diagnostic-table-score-components article > div span,
 .diagnostic-table-score-components article > small {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 680;
 }
 
@@ -1258,7 +1258,7 @@
 
 .diagnostic-table-metric-score > small {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -1369,7 +1369,7 @@
 .diagnostic-layout-order-summary p,
 .diagnostic-layout-order-summary small {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.45;
   margin: 3px 0 0;
 }
@@ -1392,7 +1392,7 @@
 .diagnostic-layout-summary small {
   color: var(--ink-soft);
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.4;
   margin-top: 4px;
 }
@@ -1420,7 +1420,7 @@
 
 .diagnostic-impact-heading span {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .diagnostic-impact-section-headline .diagnostic-impact-heading {
@@ -1504,7 +1504,7 @@
 
 .diagnostic-facet-bar button > small {
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.25;
 }
 
@@ -1528,7 +1528,7 @@
 
 .diagnostic-facet-section-heading span {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .diagnostic-rule-groups-faceted .diagnostic-rule-list {
@@ -1560,7 +1560,7 @@
 .diagnostic-rule-group > summary small,
 .diagnostic-group-counts {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.4;
 }
 
@@ -1654,7 +1654,7 @@
 .diagnostic-text-comparison-table td small {
   color: var(--ink-muted);
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 2px;
   white-space: normal;
 }
@@ -1812,7 +1812,7 @@
 }
 
 .diagnostic-empty-state p {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.5;
   margin: 5px auto 0;
   max-width: 420px;
@@ -1860,7 +1860,7 @@
 
 .expectation-row summary code {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .expectation-row pre {
@@ -1880,7 +1880,7 @@
 
 .raw-artifact-links a {
   color: var(--brand);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 720;
   text-decoration: none;
 }
@@ -1909,7 +1909,7 @@
 
 .diagnostic-json-summary dt {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 720;
   text-transform: uppercase;
 }
@@ -1923,7 +1923,7 @@
 
 .diagnostic-json-section > h3 {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   margin: 0 0 6px;
   text-transform: uppercase;

@@ -6,3 +6,7 @@
 @import "./styles/workbench.css";
 @import "./styles/diagnostics.css";
 @import "./styles/responsive.css";
+@import "./styles/investigation.css";
+@import "./styles/triage-workspace.css";
+@import "./styles/table-chart-workspace.css";
+@import "./styles/evidence-workspace.css";

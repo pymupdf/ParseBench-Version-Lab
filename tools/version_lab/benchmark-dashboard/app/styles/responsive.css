@@ -241,7 +241,7 @@
 
   .catalog-filter-toggle small {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 11px;
     max-width: 220px;
     overflow: hidden;
     text-align: right;
@@ -755,7 +755,7 @@
     font-size: 12px;
   }
   .hero-eyebrow {
-    font-size: 8px;
+    font-size: 11px;
   }
   .run-history {
     padding: 19px;
@@ -803,14 +803,14 @@
     font-size: 30px;
   }
   .score-leader-card > span {
-    font-size: 10px;
+    font-size: 11px;
   }
   .score-leader-card > small {
-    font-size: 9px;
+    font-size: 11px;
     min-height: 40px;
   }
   .score-leader-card > em {
-    font-size: 10px;
+    font-size: 11px;
   }
   .catalog-section-heading {
     padding: 20px 15px;
@@ -844,7 +844,7 @@
     font-size: 12px;
   }
   .workflow-identity > small {
-    font-size: 10px;
+    font-size: 11px;
   }
   .workflow-dimension-scores {
     gap: 6px;
@@ -853,10 +853,10 @@
     padding: 9px 5px;
   }
   .workflow-dimension-scores strong {
-    font-size: 10px;
+    font-size: 11px;
   }
   .workflow-dimension-scores small {
-    font-size: 9px;
+    font-size: 11px;
   }
   .workflow-source strong,
   .workflow-config strong,
@@ -866,7 +866,7 @@
   .workflow-source code,
   .workflow-config small,
   .workflow-created small {
-    font-size: 10px;
+    font-size: 11px;
   }
   .run-command-bar {
     padding: 22px 18px;
@@ -970,7 +970,7 @@
     justify-content: center;
     padding: 0 7px;
     min-height: 37px;
-    font-size: 10px;
+    font-size: 11px;
   }
   .repository-link span {
     display: none;

@@ -10,7 +10,13 @@ import { humanize, scorePercent, type EvidenceStatus } from "./model";
 import type { RuleImpact } from "./rule-model";
 import type { DiagnosticMetricComponent } from "./types";
 
-export function StatusPill({ status, label }: { status: EvidenceStatus; label?: string }) {
+export function StatusPill({
+  status,
+  label,
+}: {
+  status: EvidenceStatus;
+  label?: string;
+}) {
   return (
     <span className={`diagnostic-status diagnostic-status-${status}`}>
       {label ?? humanize(status)}
@@ -18,18 +24,38 @@ export function StatusPill({ status, label }: { status: EvidenceStatus; label?: 
   );
 }
 
-export function MetricComponent({ component }: { component: DiagnosticMetricComponent }) {
-  const name = component.label ?? component.name ?? component.metric_name ?? "Component";
+export function MetricComponent({
+  component,
+}: {
+  component: DiagnosticMetricComponent;
+}) {
+  const name =
+    component.label ?? component.name ?? component.metric_name ?? "Component";
   return (
     <div className="diagnostic-component">
       <span>{humanize(name)}</span>
       <strong>{scorePercent(component.value)}</strong>
-      {component.weight != null && <small>{component.weight.toLocaleString()} weight</small>}
+      <span className="component-value-track" aria-hidden="true">
+        <span
+          style={{
+            width: `${Math.max(0, Math.min(100, component.value * 100))}%`,
+          }}
+        />
+      </span>
+      {component.weight != null && (
+        <small>{component.weight.toLocaleString()} weight</small>
+      )}
     </div>
   );
 }
 
-export function MarkdownEvidence({ markdown, empty }: { markdown: string; empty: string }) {
+export function MarkdownEvidence({
+  markdown,
+  empty,
+}: {
+  markdown: string;
+  empty: string;
+}) {
   if (!markdown.trim()) {
     return <p className="diagnostic-empty">{empty}</p>;
   }
@@ -59,7 +85,13 @@ export function EvidenceButton({
   children: ReactNode;
 }) {
   if (!onSelect) {
-    return <div className={`${className}${selected ? " diagnostic-evidence-selected" : ""}`}>{children}</div>;
+    return (
+      <div
+        className={`${className}${selected ? " diagnostic-evidence-selected" : ""}`}
+      >
+        {children}
+      </div>
+    );
   }
   return (
     <button

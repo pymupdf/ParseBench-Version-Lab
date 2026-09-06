@@ -1,6 +1,9 @@
 import { type CaseResult, humanize } from "../lib/data";
 import type { DiagnosticArtifact } from "../diagnostics/types";
-import { DiagnosticInspector, GroundTruthInspector } from "../diagnostics/lazy-inspectors";
+import {
+  DiagnosticInspector,
+  GroundTruthInspector,
+} from "../diagnostics/lazy-inspectors";
 import type { ArtifactState, HistoricalBestState } from "./types";
 import {
   alignedPrimaryMetric,
@@ -10,7 +13,11 @@ import {
 } from "./format";
 import { EmptyState, EmptyMarkdownArtifact } from "./shared";
 import { MarkdownPanel } from "./markdown-panel";
-import { useState, useId, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useState,
+  useId,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import Link from "next/link";
 
 type BestComparisonView = "ground-truth" | "current" | "best";
@@ -31,7 +38,10 @@ function ResultEvidencePanel({
   const dimension = result.run_dimensions.dimension;
   const primary = alignedPrimaryMetric(result, diagnostic);
   return (
-    <section className="best-result-evidence" aria-label={`${label} scoring evidence`}>
+    <section
+      className="best-result-evidence"
+      aria-label={`${label} scoring evidence`}
+    >
       <header className="best-result-evidence-heading">
         <div>
           <span className="diagnostic-eyebrow">{label}</span>
@@ -50,21 +60,38 @@ function ResultEvidencePanel({
       ) : (
         <EmptyState
           title="Detailed score evidence unavailable"
-          body={diagnosticError ?? "This result does not include a per-case diagnostic artifact."}
+          body={
+            diagnosticError ??
+            "This result does not include a per-case diagnostic artifact."
+          }
         />
       )}
-      <section className="best-result-extracted-output" aria-label={`${label} extracted output`}>
+      <section
+        className="best-result-extracted-output"
+        aria-label={`${label} extracted output`}
+      >
         <div className="diagnostic-section-heading">
           <div>
             <span className="diagnostic-eyebrow">Extracted result</span>
-            <h3>{dimension === "table" ? "Extracted table Markdown" : "Extracted Markdown"}</h3>
+            <h3>
+              {dimension === "table"
+                ? "Extracted table Markdown"
+                : "Extracted Markdown"}
+            </h3>
           </div>
-          {artifact.url && <a href={artifact.url} target="_blank" rel="noreferrer">Open JSON ↗</a>}
+          {artifact.url && (
+            <a href={artifact.url} target="_blank" rel="noreferrer">
+              Open JSON ↗
+            </a>
+          )}
         </div>
         {artifact.loading ? (
           <div className="artifact-loading">Loading extracted output…</div>
         ) : artifact.error ? (
-          <EmptyState title="Extracted output unavailable" body={artifact.error} />
+          <EmptyState
+            title="Extracted output unavailable"
+            body={artifact.error}
+          />
         ) : artifact.markdownState === "present" ? (
           <MarkdownPanel markdown={artifact.markdown} />
         ) : (
@@ -88,63 +115,131 @@ export function BestResultPanel({
   currentDiagnosticError: string | null;
   best: HistoricalBestState;
 }) {
-  const [comparisonView, setComparisonView] = useState<BestComparisonView>("best");
+  const [comparisonView, setComparisonView] =
+    useState<BestComparisonView>("best");
   const comparisonId = useId();
   if (!best.data) {
-    return <EmptyState title="Best result unavailable" body={best.error ?? "No substantially better historical result was found."} />;
+    return (
+      <EmptyState
+        title="Best result unavailable"
+        body={
+          best.error ?? "No substantially better historical result was found."
+        }
+      />
+    );
   }
   const { result, run } = best.data;
   const currentPrimary = alignedPrimaryMetric(current, currentDiagnostic);
   const bestPrimary = alignedPrimaryMetric(result, best.diagnostic);
-  const improvement = (bestPrimary.score ?? 0) - (currentPrimary.score ?? 0);
+  const improvement =
+    bestPrimary.score != null && currentPrimary.score != null
+      ? bestPrimary.score - currentPrimary.score
+      : null;
   const groundTruthDiagnostic = currentDiagnostic ?? best.diagnostic;
   const bestHref = `/workflows/${run.github_run_id}/triage/${result.id}?dimension=${encodeURIComponent(result.run_dimensions.dimension)}&from=triage`;
-  const views: Array<{ value: BestComparisonView; label: string; score?: string }> = [
+  const views: Array<{
+    value: BestComparisonView;
+    label: string;
+    score?: string;
+  }> = [
     { value: "ground-truth", label: "Ground truth" },
-    { value: "current", label: "Current", score: scorePercent(currentPrimary.score) },
+    {
+      value: "current",
+      label: "Current",
+      score: scorePercent(currentPrimary.score),
+    },
     { value: "best", label: "Best", score: scorePercent(bestPrimary.score) },
   ];
-  function navigateComparisonTabs(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+  function navigateComparisonTabs(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) {
     let nextIndex: number | null = null;
     if (event.key === "ArrowRight") nextIndex = (index + 1) % views.length;
-    if (event.key === "ArrowLeft") nextIndex = (index - 1 + views.length) % views.length;
+    if (event.key === "ArrowLeft")
+      nextIndex = (index - 1 + views.length) % views.length;
     if (event.key === "Home") nextIndex = 0;
     if (event.key === "End") nextIndex = views.length - 1;
     if (nextIndex == null) return;
     event.preventDefault();
     const nextView = views[nextIndex];
     setComparisonView(nextView.value);
-    const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[role='tab']");
+    const tabs =
+      event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+        "[role='tab']",
+      );
     tabs?.[nextIndex]?.focus();
   }
   return (
     <div className="best-result-view">
-      <section className="best-result-summary" aria-labelledby="best-result-heading">
-        <div className="best-result-score">
-          <span className="diagnostic-eyebrow">Best observed result</span>
-          <div>
-            <h2 id="best-result-heading">{scorePercent(bestPrimary.score)}</h2>
-            <strong>+{(improvement * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })} points</strong>
-          </div>
-          <p>Compared with the current {scorePercent(currentPrimary.score)} headline score.</p>
+      <section
+        className="best-result-summary"
+        aria-labelledby="best-result-heading"
+      >
+        <div className="best-result-score best-comparison-heading">
+          <span className="diagnostic-eyebrow">Historical comparison</span>
+          <h2 id="best-result-heading">Same document. A better result.</h2>
+          <p>
+            Compare the evidence from this run with the strongest matching
+            result in the index.
+          </p>
         </div>
-        <dl className="best-result-provenance">
+        <div className="best-score-comparison">
           <div>
-            <dt>Workflow</dt>
-            <dd>
-              <Link
-                className="best-result-workflow-link"
-                href={`/workflows/${run.github_run_id}`}
-                aria-label={`Open workflow ${run.github_run_id} overview`}
-              >
-                #{run.github_run_id} <span aria-hidden="true">↗</span>
-              </Link>
-            </dd>
+            <span>Current run</span>
+            <strong>{scorePercent(currentPrimary.score)}</strong>
+            <small>{humanize(currentPrimary.name)}</small>
           </div>
-          <div><dt>Pipeline</dt><dd>{humanize(run.pipeline_name ?? run.run_name)}</dd></div>
-          <div><dt>Source</dt><dd>{run.head_branch ?? "Unknown branch"} · <code>{shortSha(run.head_sha)}</code></dd></div>
-          <div><dt>Recorded</dt><dd>{formatShortDate(run.source_created_at)}</dd></div>
-        </dl>
+          <span className="comparison-direction" aria-hidden="true">
+            →
+          </span>
+          <div>
+            <span>Best matching run</span>
+            <strong>{scorePercent(bestPrimary.score)}</strong>
+            <small>
+              {improvement == null
+                ? "Score difference unavailable"
+                : `${improvement > 0 ? "+" : ""}${(improvement * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })} percentage points`}
+            </small>
+          </div>
+        </div>
+        <details className="best-provenance-disclosure">
+          <summary>
+            Historical run provenance{" "}
+            <span>
+              #{run.github_run_id} · {shortSha(run.head_sha)}
+            </span>
+          </summary>
+          <dl className="best-result-provenance">
+            <div>
+              <dt>Workflow</dt>
+              <dd>
+                <Link
+                  className="best-result-workflow-link"
+                  href={`/workflows/${run.github_run_id}`}
+                  aria-label={`Open workflow ${run.github_run_id} overview`}
+                >
+                  #{run.github_run_id} <span aria-hidden="true">↗</span>
+                </Link>
+              </dd>
+            </div>
+            <div>
+              <dt>Pipeline</dt>
+              <dd>{humanize(run.pipeline_name ?? run.run_name)}</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd>
+                {run.head_branch ?? "Unknown branch"} ·{" "}
+                <code>{shortSha(run.head_sha)}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Recorded</dt>
+              <dd>{formatShortDate(run.source_created_at)}</dd>
+            </div>
+          </dl>
+        </details>
         <Link className="best-result-link" href={bestHref}>
           Open best result <span aria-hidden="true">→</span>
         </Link>
@@ -152,9 +247,16 @@ export function BestResultPanel({
       <div className="best-result-comparison-intro">
         <div>
           <strong>Compare the evidence behind both scores</strong>
-          <span>The page, dataset revision, dimension, headline metric, and ground truth are identical.</span>
+          <span>
+            The page, dataset revision, dimension, headline metric, and ground
+            truth are identical.
+          </span>
         </div>
-        <div className="best-result-comparison-tabs" role="tablist" aria-label="Historical best comparison views">
+        <div
+          className="best-result-comparison-tabs"
+          role="tablist"
+          aria-label="Historical best comparison views"
+        >
           {views.map((view, index) => (
             <button
               id={`${comparisonId}-${view.value}-tab`}
