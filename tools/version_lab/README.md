@@ -3,6 +3,10 @@
 Benchmark the latest PyPI releases or current branches of MuPDF, PyMuPDF,
 PyMuPDF Layout, and PyMuPDF4LLM, built from source.
 
+Version Lab is maintained separately from the upstream ParseBench code in this
+checkout. Keep changes within the fork-owned tooling and integration files;
+see [the contribution boundary](AGENTS.md).
+
 ## Requirements
 
 - Git
