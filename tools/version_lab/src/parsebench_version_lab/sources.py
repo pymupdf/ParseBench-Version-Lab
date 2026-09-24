@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import shutil
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from urllib.request import urlopen
 
-from .model import COMPONENT_SPECS, ComponentSpec, RunConfig
-from .process import CommandError, CommandRunner
+from .model import COMPONENT_SPECS, LATEST_RELEASE, ComponentSpec, RunConfig
+from .process import CommandRunner
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,7 @@ def parse_branch_heads(output: str, repository: str) -> BranchHead:
 class SourceManager:
     def __init__(self, runner: CommandRunner) -> None:
         self.runner = runner
+        self.release_versions: dict[str, str] = {}
 
     @staticmethod
     def remote(repository: str) -> str:
@@ -63,9 +68,61 @@ class SourceManager:
 
     @staticmethod
     def git_environment() -> dict[str, str]:
-        import os
-
         return {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+    def latest_release(self, package: str) -> str:
+        if package not in self.release_versions:
+            with urlopen(f"https://pypi.org/pypi/{package}/json", timeout=30) as response:
+                version = json.load(response)["info"]["version"]
+            if not isinstance(version, str) or not re.fullmatch(r"\d+(?:\.\d+)+", version):
+                raise RuntimeError(f"PyPI returned an invalid stable release for {package}: {version!r}")
+            self.release_versions[package] = version
+        return self.release_versions[package]
+
+    def remote_ref(self, repository: str, ref: str) -> str | None:
+        result = self.runner.run(
+            ["git", "ls-remote", self.remote(repository), ref, f"{ref}^{{}}"],
+            env=self.git_environment(),
+            capture=True,
+        )
+        refs = {}
+        for line in result.stdout.splitlines():
+            sha, name = line.split("\t", 1)
+            if not re.fullmatch(r"[0-9a-f]{40}", sha):
+                raise RuntimeError(f"Git returned an invalid commit for {repository}@{ref}: {sha!r}")
+            refs[name] = sha
+        # Annotated tags point at tag objects; check out their peeled commits.
+        return refs.get(f"{ref}^{{}}", refs.get(ref))
+
+    def resolve_ref(self, component: ComponentSpec, requested_ref: str) -> ResolvedSource:
+        repository = component.repository
+        branch = None
+        ref = requested_ref.strip()
+        if not ref:
+            raise ValueError(f"A release or branch is required for {component.label}")
+        if ref == "latest-any-branch":
+            head = self.latest_branch_head(repository)
+            ref, sha, branch = head.branch, head.sha, head.branch
+        else:
+            # Resolve branches in their own namespace so old tags and arbitrary
+            # commits cannot silently bypass the current-source support policy.
+            sha = None if ref == LATEST_RELEASE else self.remote_ref(repository, f"refs/heads/{ref}")
+            if sha:
+                branch = ref
+            else:
+                release = self.latest_release(component.pypi_package)
+                if ref not in (LATEST_RELEASE, release):
+                    raise ValueError(
+                        f"Unsupported {component.label} ref {ref!r}; select 'latest' ({release}) "
+                        "or a current branch name. Historical tags and commit SHAs are not supported."
+                    )
+                ref = release
+                sha = self.remote_ref(repository, f"refs/tags/{release}")
+                if sha is None:
+                    raise RuntimeError(f"Latest PyPI release {release} has no source tag in {repository}")
+        return ResolvedSource(
+            component.name, component.label, repository, ref, sha, Path(component.checkout_dir), branch
+        )
 
     def latest_branch_head(self, repository: str) -> BranchHead:
         with tempfile.TemporaryDirectory(prefix="parsebench-version-lab-heads-") as directory:
@@ -118,33 +175,12 @@ class SourceManager:
             raise
 
     def resolve_component(self, component: ComponentSpec, config: RunConfig, root: Path) -> ResolvedSource:
-        repositories = component.repositories
-        if component.name == "pymupdf_layout" and (config.all_latest or config.latest_any_branch):
-            repositories = (repositories[-1],)
-        errors: list[str] = []
-        for repository in repositories:
-            branch: str | None = None
-            ref = config.refs[component.name]
-            try:
-                if config.latest_any_branch:
-                    head = self.latest_branch_head(repository)
-                    branch = head.branch
-                    ref = head.sha
-                destination = root / component.checkout_dir
-                sha = self.checkout(repository, ref, destination)
-                return ResolvedSource(
-                    component.name,
-                    component.label,
-                    repository,
-                    branch or ref,
-                    sha,
-                    destination,
-                    branch,
-                )
-            except (CommandError, OSError, RuntimeError) as error:
-                errors.append(f"{repository}@{ref}: {error}")
-        detail = "\n\n".join(errors)
-        raise RuntimeError(f"Could not resolve {component.label} from any supported repository:\n{detail}")
+        source = self.resolve_ref(component, config.refs[component.name])
+        destination = root / component.checkout_dir
+        sha = self.checkout(source.repository, source.resolved_sha, destination)
+        if sha != source.resolved_sha:
+            raise RuntimeError(f"Checkout of {source.repository} did not match resolved commit {source.resolved_sha}")
+        return replace(source, path=destination)
 
     def resolve_all(self, config: RunConfig, root: Path) -> dict[str, ResolvedSource]:
         root.mkdir(parents=True, exist_ok=True)

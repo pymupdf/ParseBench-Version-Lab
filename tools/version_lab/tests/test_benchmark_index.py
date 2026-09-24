@@ -46,6 +46,17 @@ class FakeDatabase:
         self.rows: dict[str, list[dict[str, Any]]] = {}
         self.next_id = 1
 
+    def select(self, table: str, query: dict[str, str]) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in self.rows.get(table, [])
+            if all(
+                str(row.get(key)) == value.removeprefix("eq.")
+                for key, value in query.items()
+                if value.startswith("eq.")
+            )
+        ]
+
     def _record(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
         recorded = {"id": self.next_id, **row}
         self.next_id += 1

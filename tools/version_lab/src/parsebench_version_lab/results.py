@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Collection
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import fmean
@@ -45,11 +46,22 @@ def display_name(value: str) -> str:
     return special_names.get(value, value.replace("_", " ").title())
 
 
-def _numeric(value: Any) -> float | None:
+def finite_number(value: Any) -> float | None:
+    """Accept finite numeric scores and weights, excluding booleans."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     number = float(value)
     return number if math.isfinite(number) else None
+
+
+def headline_metric(dimension: str | None, metric_names: Collection[str]) -> str | None:
+    """Choose the same headline metric for summaries, diagnostics, and indexing."""
+    preferred = DEFAULT_METRICS.get(dimension or "", "rule_pass_rate")
+    if preferred in metric_names:
+        return preferred
+    if "rule_pass_rate" in metric_names:
+        return "rule_pass_rate"
+    return min(metric_names, default=None)
 
 
 def category_score(category: str, report: dict[str, Any]) -> CategoryScore:
@@ -60,11 +72,9 @@ def category_score(category: str, report: dict[str, Any]) -> CategoryScore:
         if key.startswith("avg_")
         and "_predicted" not in key
         and "_judge" not in key
-        and (value := _numeric(raw_value)) is not None
+        and (value := finite_number(raw_value)) is not None
     }
-    metric: str | None = DEFAULT_METRICS.get(category, "rule_pass_rate")
-    if metric not in metrics:
-        metric = "rule_pass_rate" if "rule_pass_rate" in metrics else next(iter(sorted(metrics)), None)
+    metric = headline_metric(category, metrics)
     score = metrics.get(metric) if metric is not None else None
     total_examples = report.get("total_examples", 0)
     evaluated_cases = total_examples if isinstance(total_examples, int) and total_examples >= 0 else 0

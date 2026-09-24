@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .coverage import inspect_dataset
 from .evaluation_diagnostics import write_diagnostics_from_report
-from .util import required_env
+from .util import required_env, write_json
 
 DATASET_MARKER = ".parsebench-dataset-revision.json"
 DATASET_DOWNLOAD_ATTEMPTS = 4
@@ -21,12 +21,8 @@ DATASET_DOWNLOAD_ATTEMPTS = 4
 DATASET_RATE_LIMIT_WAIT = 310
 
 
-def run(*arguments: str) -> None:
-    subprocess.run(arguments, check=True)
-
-
 def parse_bench(*arguments: str) -> None:
-    run(sys.executable, "-m", "parsebench_version_lab.parse_bench_cli", *arguments)
+    subprocess.run([sys.executable, "-m", "parsebench_version_lab.parse_bench_cli", *arguments], check=True)
 
 
 def download() -> None:
@@ -41,7 +37,7 @@ def download() -> None:
     expected_marker = {"repository": repository, "resolved_sha": revision}
     try:
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    except (OSError, json.JSONDecodeError):
         marker = None
     if marker == expected_marker and is_dataset_ready(data_dir):
         print(f"Reusing cached immutable dataset snapshot: {repository}@{revision}")
@@ -82,7 +78,7 @@ def download() -> None:
                 time.sleep(delay)
         if not is_dataset_ready(data_dir):
             raise SystemExit(f"Dataset snapshot {repository}@{revision} is incomplete at {data_dir}")
-        marker_path.write_text(json.dumps(expected_marker, indent=2) + "\n", encoding="utf-8")
+        write_json(marker_path, expected_marker)
 
     output_dir = os.environ.get("OUTPUT_DIR")
     if output_dir:
@@ -90,7 +86,7 @@ def download() -> None:
         if dataset_path.is_file():
             dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
             dataset["manifest"] = inspect_dataset(data_dir)
-            dataset_path.write_text(json.dumps(dataset, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            write_json(dataset_path, dataset)
 
 
 def inference() -> None:
@@ -105,8 +101,9 @@ def inference() -> None:
         "--max_concurrent",
         "1",
     ]
-    if required_env("GROUP") != "all":
-        arguments.extend(("--group", required_env("GROUP")))
+    group = required_env("GROUP")
+    if group != "all":
+        arguments.extend(("--group", group))
     parse_bench(*arguments)
 
 
@@ -157,13 +154,13 @@ def evaluate() -> None:
         evaluate_group(evaluation_group, pipeline_output_dir / evaluation_group)
 
 
-def regenerate(evaluation_dir: Path, report_dir: Path) -> None:
+def regenerate(report_dir: Path) -> None:
     pipeline_output_dir = Path(required_env("OUTPUT_DIR")) / required_env("PIPELINE")
     parse_bench(
         "evaluation",
         "regenerate_report",
         "--evaluation_dir",
-        str(evaluation_dir),
+        str(report_dir),
         "--test_cases_dir",
         required_env("DATA_DIR"),
         "--output_dir",
@@ -178,12 +175,12 @@ def report() -> None:
     pipeline = required_env("PIPELINE")
     pipeline_output_dir = output_dir / pipeline
     if required_env("GROUP") != "all":
-        regenerate(pipeline_output_dir, pipeline_output_dir)
+        regenerate(pipeline_output_dir)
         return
     groups_file = pipeline_output_dir / "_eval_groups.txt"
     for group in groups_file.read_text(encoding="utf-8").splitlines():
         if group:
-            regenerate(pipeline_output_dir / group, pipeline_output_dir / group)
+            regenerate(pipeline_output_dir / group)
     parse_bench(
         "analysis",
         "generate_dashboard",

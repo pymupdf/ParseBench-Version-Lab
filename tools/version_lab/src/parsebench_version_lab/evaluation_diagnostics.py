@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import mimetypes
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 from parse_bench.schemas.evaluation import EvaluationResult, EvaluationSummary, MetricValue
+
+from .results import finite_number, headline_metric
 
 DIAGNOSTIC_SCHEMA_VERSION = 2
 DIAGNOSTIC_DIRECTORY = "_diagnostics"
@@ -28,14 +29,6 @@ _SHARED_INFERENCE_GROUPS = {
     "text_content": "text",
     "text_formatting": "text",
 }
-_PRIMARY_METRICS = {
-    "chart": "rule_pass_rate",
-    "layout": "layout_element_rule_pass_rate",
-    "table": "grits_trm_composite",
-    "text_content": "content_faithfulness",
-    "text_formatting": "semantic_formatting",
-}
-
 # These evaluator-internal fields can repeat the complete predicted page text
 # once per layout element.  They are useful while developing a metric, but the
 # canonical evaluation report already retains them and the interactive
@@ -99,8 +92,6 @@ def _test_id_for_row(row: Mapping[str, Any], fallback_dimension: str) -> str | N
 def _load_expectations(
     test_cases_dir: Path | None,
     dimensions: Iterable[str],
-    *,
-    verified_only: bool = False,
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
     by_dimension: dict[str, dict[str, list[dict[str, Any]]]] = {}
     if test_cases_dir is None:
@@ -112,8 +103,6 @@ def _load_expectations(
             continue
         by_test_id: dict[str, list[dict[str, Any]]] = {}
         for raw_row in _read_jsonl(dataset_file):
-            if verified_only and raw_row.get("verified") is False:
-                continue
             test_id = _test_id_for_row(raw_row, dimension)
             if test_id is not None:
                 by_test_id.setdefault(test_id, []).append(_normalized_expectation(raw_row))
@@ -146,12 +135,8 @@ def _dimension_for_result(
 
 def _primary_metric(result: EvaluationResult, dimension: str | None) -> MetricValue | None:
     by_name = {metric.metric_name: metric for metric in result.metrics}
-    preferred = _PRIMARY_METRICS.get(dimension or "", "rule_pass_rate")
-    if preferred in by_name:
-        return by_name[preferred]
-    if "rule_pass_rate" in by_name:
-        return by_name["rule_pass_rate"]
-    return min(result.metrics, key=lambda metric: metric.metric_name, default=None)
+    name = headline_metric(dimension, by_name)
+    return by_name.get(name) if name is not None else None
 
 
 def _validate_excluded_rule_outcomes(
@@ -178,11 +163,7 @@ def _validate_excluded_rule_outcomes(
             if not isinstance(item, Mapping):
                 continue
             outcome_id = next(
-                (
-                    item.get(key)
-                    for key in ("id", "rule_id", "element_id")
-                    if isinstance(item.get(key), str)
-                ),
+                (item.get(key) for key in ("id", "rule_id", "element_id") if isinstance(item.get(key), str)),
                 None,
             )
             if outcome_id in excluded_rule_ids:
@@ -193,13 +174,6 @@ def _validate_excluded_rule_outcomes(
                 "verified_only diagnostics require an EvaluationSummary produced "
                 f"with verified_only=True; excluded outcomes remain for {joined_ids}"
             )
-
-
-def _number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
 
 
 def _primary_formula(metric: MetricValue | None) -> dict[str, Any] | None:
@@ -220,8 +194,8 @@ def _primary_formula(metric: MetricValue | None) -> dict[str, Any] | None:
     if isinstance(weights, dict) and isinstance(category_scores, dict):
         components: list[dict[str, Any]] = []
         for name in sorted(weights):
-            weight = _number(weights.get(name))
-            value = _number(category_scores.get(name))
+            weight = finite_number(weights.get(name))
+            value = finite_number(category_scores.get(name))
             if weight is not None and value is not None:
                 components.append({"metric_name": name, "value": value, "weight": weight})
         if components:
@@ -229,14 +203,14 @@ def _primary_formula(metric: MetricValue | None) -> dict[str, Any] | None:
                 {
                     "kind": "weighted_mean",
                     "components": components,
-                    "weight_sum": _number(metadata.get("weight_sum")) or sum(c["weight"] for c in components),
+                    "weight_sum": finite_number(metadata.get("weight_sum")) or sum(c["weight"] for c in components),
                 }
             )
             return formula
 
     if metric.metric_name == "grits_trm_composite":
-        grits = _number(metadata.get("grits_con"))
-        trm = _number(metadata.get("trm"))
+        grits = finite_number(metadata.get("grits_con"))
+        trm = finite_number(metadata.get("trm"))
         fallback = metadata.get("fallback")
         if grits is not None and not fallback and trm is not None:
             formula.update(
@@ -289,7 +263,8 @@ def _outcome_summary(result: EvaluationResult, primary: MetricValue | None) -> d
         if not rule_results:
             continue
         has_explicit_outcomes = all(
-            isinstance(item.get("passed"), bool) or _number(item.get("score")) is not None for item in rule_results
+            isinstance(item.get("passed"), bool) or finite_number(item.get("score")) is not None
+            for item in rule_results
         )
         if not has_explicit_outcomes:
             # Layout element evidence deliberately stores the four component
@@ -308,7 +283,7 @@ def _outcome_summary(result: EvaluationResult, primary: MetricValue | None) -> d
             continue
         counts = {"passed": 0, "partial": 0, "failed": 0}
         for item in rule_results:
-            score = _number(item.get("score"))
+            score = finite_number(item.get("score"))
             if score is None:
                 score = 1.0 if item.get("passed") is True else 0.0
             status = _score_status(score, item.get("passed") if isinstance(item.get("passed"), bool) else None)
@@ -326,7 +301,7 @@ def _outcome_summary(result: EvaluationResult, primary: MetricValue | None) -> d
             for item in table_details:
                 if not isinstance(item, dict):
                     continue
-                score = _number(item.get("score"))
+                score = finite_number(item.get("score"))
                 if score is None:
                     continue
                 counts[_score_status(score)] += 1
@@ -413,14 +388,9 @@ def _compact_metrics(
         if not isinstance(raw_outcomes, list):
             continue
         outcomes = [
-            {
-                key: value
-                for key, value in outcome.items()
-                if key not in _HEAVY_OUTCOME_FIELDS
-            }
+            {key: value for key, value in outcome.items() if key not in _HEAVY_OUTCOME_FIELDS}
             for outcome in raw_outcomes
-            if isinstance(outcome, dict)
-            and not str(outcome.get("type", "")).endswith("_judge")
+            if isinstance(outcome, dict) and not str(outcome.get("type", "")).endswith("_judge")
         ]
         if len(outcomes) > len(longest_outcomes):
             longest_outcomes = outcomes
@@ -470,15 +440,6 @@ def write_diagnostic_artifacts(
         test_cases_dir,
         dimensions_to_load,
     )
-    expectations = (
-        _load_expectations(
-            test_cases_dir,
-            dimensions_to_load,
-            verified_only=True,
-        )
-        if verified_only
-        else all_expectations
-    )
     diagnostics_dir = report_dir / DIAGNOSTIC_VERSION_DIRECTORY
     diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
@@ -491,23 +452,17 @@ def write_diagnostic_artifacts(
         if resolved_dimension:
             resolved_dimensions.add(resolved_dimension)
         base_test_id = result.test_id.split("#q", 1)[0]
-        dimension_expectations = expectations.get(resolved_dimension or "", {})
         all_dimension_expectations = all_expectations.get(resolved_dimension or "", {})
-        expectation_rows = list(dimension_expectations.get(base_test_id, []))
-        all_expectation_rows = list(all_dimension_expectations.get(base_test_id, []))
-        included_rule_ids = {
-            row["id"] for row in expectation_rows if isinstance(row.get("id"), str)
-        }
-        all_rule_ids = {
-            row["id"] for row in all_expectation_rows if isinstance(row.get("id"), str)
-        }
-        _validate_excluded_rule_outcomes(
-            result,
-            all_rule_ids - included_rule_ids if verified_only else set(),
-        )
-        diagnostic_result = result
-        primary = _primary_metric(diagnostic_result, resolved_dimension)
-        compact_metrics, outcomes = _compact_metrics(diagnostic_result)
+        all_expectation_rows = all_dimension_expectations.get(base_test_id, [])
+        expectation_rows = [
+            row for row in all_expectation_rows if not verified_only or row.get("verified") is not False
+        ]
+        if verified_only:
+            included_rule_ids = {row["id"] for row in expectation_rows if isinstance(row.get("id"), str)}
+            all_rule_ids = {row["id"] for row in all_expectation_rows if isinstance(row.get("id"), str)}
+            _validate_excluded_rule_outcomes(result, all_rule_ids - included_rule_ids)
+        primary = _primary_metric(result, resolved_dimension)
+        compact_metrics, outcomes = _compact_metrics(result)
         filename = _diagnostic_filename(result.test_id)
         relative_path = f"{DIAGNOSTIC_VERSION_DIRECTORY}/{filename}"
         payload = {
@@ -519,7 +474,7 @@ def write_diagnostic_artifacts(
             "primary_metric": (
                 {
                     "name": primary.metric_name,
-                    "value": _number(primary.value),
+                    "value": finite_number(primary.value),
                     "formula": _primary_formula(primary),
                 }
                 if primary is not None
@@ -530,7 +485,7 @@ def write_diagnostic_artifacts(
             "metrics": compact_metrics,
             "outcomes": outcomes,
             "expectations": expectation_rows,
-            "summary": _outcome_summary(diagnostic_result, primary),
+            "summary": _outcome_summary(result, primary),
         }
         _write_json(diagnostics_dir / filename, payload)
         index_entries[result.test_id] = {

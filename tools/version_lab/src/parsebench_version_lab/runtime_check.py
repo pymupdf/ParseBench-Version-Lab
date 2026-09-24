@@ -14,6 +14,7 @@ from typing import Any
 
 from .model import COMPONENT_SPECS
 from .provenance import verify_mupdf_build_source
+from .util import write_json
 
 SMOKE_MARKERS = ("PARSEBENCH", "INVOICE NUMBER", "GRAND TOTAL")
 
@@ -135,21 +136,22 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
 
 def main(arguments: list[str] | None = None) -> int:
     args = parse_args(arguments)
-    result: dict[str, Any] = {"python": platform.python_version(), "sources": _source_metadata(args)}
+    result: dict[str, Any] = {
+        "python": platform.python_version(),
+        "sources": _source_metadata(args),
+        "installed_versions": _installed_versions(),
+    }
     try:
-        result["installed_versions"] = _installed_versions()
         result["checks"] = run_compatibility_check(args.mupdf_repository, args.mupdf_sha)
         result["status"] = "compatible"
     except Exception as error:
-        result["installed_versions"] = _installed_versions()
         result["status"] = "incompatible"
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
         if os.environ.get("GITHUB_ACTIONS") == "true":
             print(f"::error title=Incompatible PyMuPDF source stack::{_github_escape(result['error'])}")
     finally:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        write_json(args.output, result)
         print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["status"] == "compatible" else 1
 

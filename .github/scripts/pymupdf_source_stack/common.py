@@ -13,10 +13,9 @@ if not VERSION_LAB_SRC.is_dir():
 sys.path.insert(0, str(VERSION_LAB_SRC))
 
 from parsebench_version_lab.model import (  # noqa: E402, F401 - compatibility re-exports
-    COMPONENTS,
+    COMPONENT_SPECS,
     DATASET_BRANCHES,
     DATASET_REPOSITORY,
-    LAYOUT_REPOSITORIES,
 )
 from parsebench_version_lab.provenance import mupdf_build_spec  # noqa: E402, F401 - compatibility re-export
 from parsebench_version_lab.util import required_env as env  # noqa: E402, F401

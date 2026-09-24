@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .benchmark_index import JsonArtifactReader, LocalArtifactReader
+from .results import finite_number
 
 DASHBOARD_DIAGNOSTIC_SCHEMA_VERSION = 3
 SOURCE_DIAGNOSTIC_SCHEMA_VERSION = 2
@@ -31,12 +32,6 @@ def _object(value: Any) -> dict[str, Any]:
 
 def _array(value: Any) -> list[Any]:
     return list(value) if isinstance(value, list) else []
-
-
-def _number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value)
 
 
 def _evaluation_kind(diagnostic: Mapping[str, Any]) -> str:
@@ -109,8 +104,8 @@ def _headline_contribution(
     )
     if component is None:
         return contribution
-    weight = _number(component.get("weight"))
-    weight_sum = _number(formula.get("weight_sum"))
+    weight = finite_number(component.get("weight"))
+    weight_sum = finite_number(formula.get("weight_sum"))
     contribution.update(
         {
             "kind": "component",

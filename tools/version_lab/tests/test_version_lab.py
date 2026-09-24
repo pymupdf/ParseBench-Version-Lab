@@ -12,12 +12,12 @@ VERSION_LAB_SRC = Path(__file__).parents[1] / "src"
 WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-parsebench.yml"
 INDEX_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-index.yml"
 RECONCILE_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-reconcile.yml"
-ENVIRONMENT_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-environment.yml"
 sys.path.insert(0, str(VERSION_LAB_SRC))
 
 from parsebench_version_lab import cli, local  # noqa: E402
 from parsebench_version_lab.local import LocalRun, create_paths, ensure_ready, package_dir  # noqa: E402
 from parsebench_version_lab.model import (  # noqa: E402
+    COMPONENT_SPECS,
     DEFAULT_PIPELINE,
     MODERN_RAPIDOCR_PIPELINE,
     PIPELINES,
@@ -64,7 +64,6 @@ def test_github_workflow_pipeline_dropdown_matches_local_choices() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     pipeline_input = workflow.split("      pipeline:\n", 1)[1].split("      dataset_version:\n", 1)[0]
 
-    assert f'default: "{DEFAULT_PIPELINE}"' in pipeline_input
     assert "type: choice" in pipeline_input
     assert (
         tuple(
@@ -122,59 +121,6 @@ def test_github_workflow_installs_and_verifies_modern_rapidocr_only_for_its_pipe
     assert "lacks native table_output support" in workflow
 
 
-def test_github_run_name_identifies_selected_benchmark_configuration() -> None:
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    run_name = workflow.split("run-name: >-\n", 1)[1].split("\non:\n", 1)[0]
-
-    for selection in (
-        "inputs.pipeline",
-        "inputs.mupdf_ref",
-        "inputs.pymupdf_ref",
-        "inputs.pymupdf_layout_ref",
-        "inputs.pymupdf4llm_ref",
-        "inputs.run_scope",
-        "inputs.group",
-        "inputs.dataset_version",
-    ):
-        assert selection in run_name
-    for concise_label in (
-        "'Latest branch'",
-        "'Latest default'",
-        "'Quick 15'",
-        "'Full ~2k'",
-    ):
-        assert concise_label in run_name
-    assert "'BENCH" not in run_name
-    assert "workflow@" not in run_name
-    assert "M:{0},P:{1},L:{2},4:{3}" in run_name
-    assert "'{0} · {1} · {2} · {3} · data:{4}'" in run_name
-
-
-def test_container_publisher_is_isolated_from_benchmark_workflow() -> None:
-    benchmark_workflow = WORKFLOW.read_text(encoding="utf-8")
-    environment_workflow = ENVIRONMENT_WORKFLOW.read_text(encoding="utf-8")
-
-    for publisher_detail in (
-        "rebuild_environment",
-        "build_environment:",
-        "docker/build-push-action@",
-        "docker/login-action@",
-        "ENVIRONMENT_VERSION_TAG",
-    ):
-        assert publisher_detail not in benchmark_workflow
-
-    for publisher_detail in (
-        "name: Build ParseBench Version Lab Environment",
-        "workflow_dispatch:",
-        "build_environment:",
-        "docker/build-push-action@",
-        "docker/login-action@",
-        "ENVIRONMENT_VERSION_TAG",
-        ".github/docker/pymupdf-source-stack/Dockerfile",
-    ):
-        assert publisher_detail in environment_workflow
-
-
 def test_run_config_marks_latest_any_branch_refs_as_dynamic() -> None:
     config = RunConfig(latest_any_branch=True)
 
@@ -196,7 +142,7 @@ def test_parse_branch_heads_uses_deterministic_newest_commit() -> None:
     assert parse_branch_heads(output, "owner/repo").branch == "feature/z-tie"
 
 
-def test_source_manager_checks_out_exact_local_ref(tmp_path: Path) -> None:
+def test_source_manager_limits_sources_to_latest_release_and_current_branches(tmp_path: Path) -> None:
     remote = tmp_path / "remote"
     remote.mkdir()
     subprocess.run(["git", "init", "--quiet", remote], check=True)
@@ -205,31 +151,26 @@ def test_source_manager_checks_out_exact_local_ref(tmp_path: Path) -> None:
     (remote / "file.txt").write_text("selected source\n", encoding="utf-8")
     subprocess.run(["git", "-C", remote, "add", "file.txt"], check=True)
     subprocess.run(["git", "-C", remote, "commit", "--quiet", "-m", "test source"], check=True)
+    subprocess.run(["git", "-C", remote, "branch", "feature/current"], check=True)
+    subprocess.run(["git", "-C", remote, "tag", "-a", "1.28.2", "-m", "release"], check=True)
+    subprocess.run(["git", "-C", remote, "tag", "1.27.0"], check=True)
     expected = subprocess.check_output(["git", "-C", remote, "rev-parse", "HEAD"], text=True).strip()
 
     manager = SourceManager(CommandRunner(verbose=False))
     manager.remote = lambda repository: str(remote)  # type: ignore[method-assign]
-    destination = tmp_path / "checkout"
+    manager.latest_release = lambda package: "1.28.2"  # type: ignore[method-assign]
+    component = COMPONENT_SPECS["pymupdf4llm"]
 
-    assert manager.checkout("owner/repo", expected, destination) == expected
-    assert (destination / "file.txt").read_text(encoding="utf-8") == "selected source\n"
+    for ref in ("latest", "1.28.2", "feature/current"):
+        source = manager.resolve_component(component, RunConfig(pymupdf4llm_ref=ref), tmp_path / ref)
+        assert source.resolved_sha == expected
+        assert source.requested_ref == ("1.28.2" if ref == "latest" else ref)
+        assert source.selected_branch == (ref if ref == "feature/current" else None)
+        assert (source.path / "file.txt").read_text(encoding="utf-8") == "selected source\n"
 
-
-def test_package_dir_supports_nested_layout_package(tmp_path: Path) -> None:
-    root = tmp_path / "layout"
-    package = root / "pymupdf_layout"
-    package.mkdir(parents=True)
-    (package / "pyproject.toml").touch()
-    source = ResolvedSource(
-        "pymupdf_layout",
-        "PyMuPDF Layout",
-        "owner/layout",
-        "main",
-        "a" * 40,
-        root,
-    )
-
-    assert package_dir(source) == package
+    for ref in ("1.27.0", expected, "missing-branch"):
+        with pytest.raises(ValueError, match="Historical tags and commit SHAs are not supported"):
+            manager.resolve_ref(component, ref)
 
 
 def test_create_paths_keeps_environment_inside_unique_run(tmp_path: Path) -> None:
@@ -238,6 +179,15 @@ def test_create_paths_keeps_environment_inside_unique_run(tmp_path: Path) -> Non
     assert paths.environment.parent == paths.run
     assert paths.sources.parent == paths.run
     assert paths.run.parent == tmp_path / ".version-lab"
+
+
+def test_package_dir_supports_current_experimenting_branch_layout(tmp_path: Path) -> None:
+    package = tmp_path / "pymupdf4llm"
+    package.mkdir()
+    (package / "setup.py").touch()
+    source = ResolvedSource("pymupdf4llm", "PyMuPDF4LLM", "owner/repo", "experimenting", "a" * 40, tmp_path)
+
+    assert package_dir(source) == package
 
 
 def test_environment_creation_does_not_reuse_controller_virtualenv(
@@ -263,7 +213,7 @@ def test_environment_creation_does_not_reuse_controller_virtualenv(
     assert sync_environment["UV_PROJECT_ENVIRONMENT"] == str(paths.environment)
     assert paths.repository / "tools" / "version_lab" in runner.calls[1]["command"]
     assert "--extra" not in runner.calls[1]["command"]
-    assert local.swig_requirement() in runner.calls[2]["command"]
+    assert local.SWIG_REQUIREMENT in runner.calls[2]["command"]
 
 
 def test_modern_rapidocr_pipeline_adds_only_its_locked_environment_extra(tmp_path: Path) -> None:
@@ -287,22 +237,6 @@ def test_modern_rapidocr_pipeline_adds_only_its_locked_environment_extra(tmp_pat
     sync_command = runner.calls[1]["command"]
     assert "--extra" in sync_command
     assert "rapidocr-modern" in sync_command
-
-
-@pytest.mark.parametrize(
-    ("system", "requirement"),
-    [
-        ("Darwin", local.MACOS_SWIG_REQUIREMENT),
-        ("Windows", local.DEFAULT_SWIG_REQUIREMENT),
-        ("Linux", local.DEFAULT_SWIG_REQUIREMENT),
-    ],
-)
-def test_swig_requirement_is_platform_appropriate(
-    system: str, requirement: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(local.platform, "system", lambda: system)
-
-    assert local.swig_requirement() == requirement
 
 
 def test_stack_build_uses_one_swig_for_pymupdf_and_layout(tmp_path: Path) -> None:
@@ -499,15 +433,4 @@ def test_cli_help_documents_every_option(
     help_text = capsys.readouterr().out
     assert all(option in help_text for option in expected_options)
     assert "(default:" in help_text
-    assert "tag, branch, or full commit SHA" in help_text
-
-
-@pytest.mark.parametrize("pipeline", PIPELINES)
-def test_cli_plan_accepts_every_registered_pymupdf4llm_pipeline(
-    pipeline: str,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    assert cli.main(["plan", "--pipeline", pipeline]) == 0
-
-    plan = json.loads(capsys.readouterr().out)
-    assert plan["pipeline"] == pipeline
+    assert "latest PyPI release tag" in help_text

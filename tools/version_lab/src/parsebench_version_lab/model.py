@@ -3,47 +3,36 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from typing import Any
 
-LAYOUT_REPOSITORIES = (
-    "ArtifexSoftware/sce",
-    "ArtifexSoftware/pymupdf_layout",
-)
-STANDARD_REF = "1.28.2"
+LATEST_RELEASE = "latest"
 
 
 @dataclass(frozen=True)
 class ComponentSpec:
     name: str
     label: str
-    repositories: tuple[str, ...]
+    repository: str
     checkout_dir: str
     default_branch: str
+    pypi_package: str
 
 
 COMPONENT_SPECS = {
-    "mupdf": ComponentSpec("mupdf", "MuPDF", ("ArtifexSoftware/mupdf",), "mupdf", "master"),
-    "pymupdf": ComponentSpec("pymupdf", "PyMuPDF", ("pymupdf/PyMuPDF",), "pymupdf", "main"),
+    # MuPDF's matching source release is identified by the PyMuPDF distribution.
+    "mupdf": ComponentSpec("mupdf", "MuPDF", "ArtifexSoftware/mupdf", "mupdf", "master", "pymupdf"),
+    "pymupdf": ComponentSpec("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", "pymupdf", "main", "pymupdf"),
     "pymupdf_layout": ComponentSpec(
         "pymupdf_layout",
         "PyMuPDF Layout",
-        LAYOUT_REPOSITORIES,
+        "ArtifexSoftware/pymupdf_layout",
         "pymupdf-layout",
         "main",
+        "pymupdf-layout",
     ),
-    "pymupdf4llm": ComponentSpec("pymupdf4llm", "PyMuPDF4LLM", ("pymupdf/pymupdf4llm",), "pymupdf4llm", "main"),
-}
-
-# Backward-compatible view used by the existing GitHub workflow helpers.
-COMPONENTS = {
-    name: {
-        "label": component.label,
-        "repository": component.repositories[0],
-        "root": Path(f".source/{component.checkout_dir}"),
-        "default_branch": component.default_branch,
-    }
-    for name, component in COMPONENT_SPECS.items()
+    "pymupdf4llm": ComponentSpec(
+        "pymupdf4llm", "PyMuPDF4LLM", "pymupdf/pymupdf4llm", "pymupdf4llm", "main", "pymupdf4llm"
+    ),
 }
 
 DATASET_REPOSITORY = "llamaindex/ParseBench"
@@ -57,7 +46,6 @@ PIPELINES = (
     "pymupdf4llm_markdown_tesseract",
     "pymupdf4llm_markdown_rapidocr",
     "pymupdf4llm_markdown_no_ocr",
-    "pymupdf4llm_html_tables",
     MODERN_RAPIDOCR_PIPELINE,
 )
 DEFAULT_PIPELINE = PIPELINES[0]
@@ -67,10 +55,10 @@ DEFAULT_PIPELINE = PIPELINES[0]
 class RunConfig:
     """A frontend-independent description of one Version Lab run."""
 
-    mupdf_ref: str = STANDARD_REF
-    pymupdf_ref: str = STANDARD_REF
-    pymupdf_layout_ref: str = STANDARD_REF
-    pymupdf4llm_ref: str = STANDARD_REF
+    mupdf_ref: str = LATEST_RELEASE
+    pymupdf_ref: str = LATEST_RELEASE
+    pymupdf_layout_ref: str = LATEST_RELEASE
+    pymupdf4llm_ref: str = LATEST_RELEASE
     dataset_ref: str = "current"
     scope: str = "quick"
     group: str = "all"

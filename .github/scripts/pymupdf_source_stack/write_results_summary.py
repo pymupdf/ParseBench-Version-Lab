@@ -6,26 +6,7 @@ from pathlib import Path
 
 from common import VERSION_LAB_SRC, append_summary, env, write_json  # noqa: F401
 from parsebench_version_lab.coverage import execution_coverage
-from parsebench_version_lab.results import (
-    DEFAULT_METRICS,
-    CategoryScore,
-    build_summary,
-    category_score,
-    discover_reports,
-    display_name,
-    load_scores,
-)
-
-__all__ = [
-    "DEFAULT_METRICS",
-    "CategoryScore",
-    "build_summary",
-    "category_score",
-    "discover_reports",
-    "display_name",
-    "load_scores",
-    "main",
-]
+from parsebench_version_lab.results import build_summary, load_scores
 
 
 def main() -> int:

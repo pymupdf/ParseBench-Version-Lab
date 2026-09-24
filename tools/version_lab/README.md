@@ -1,7 +1,7 @@
 # ParseBench Version Lab
 
-Benchmark selected MuPDF, PyMuPDF, PyMuPDF Layout, and PyMuPDF4LLM source
-revisions.
+Benchmark the latest PyPI releases or current branches of MuPDF, PyMuPDF,
+PyMuPDF Layout, and PyMuPDF4LLM, built from source.
 
 ## Requirements
 
@@ -92,15 +92,18 @@ cd ParseBench-Version-Lab
 
 ## Source access
 
-The default PyMuPDF Layout `1.28.2` ref uses the private
-`ArtifexSoftware/sce` repository. Configure Git credentials for an account with
-access. If GitHub CLI is already authenticated:
+All four source repositories are public. Layout always comes from
+`ArtifexSoftware/pymupdf_layout`.
 
-```shell
-gh auth setup-git
-```
+By default, each package's latest stable version is read from PyPI and its
+matching Git tag is built from source. MuPDF uses the release tag matching
+PyMuPDF. PyPI wheels are not used for these source components.
 
-`--all-latest` uses the public `ArtifexSoftware/pymupdf_layout` repository.
+Each `--*-ref` accepts `latest`, the current release tag, or a current branch
+name. Historical tags and arbitrary commit SHAs are no longer supported.
+`--all-latest` selects each repository's default branch; `--latest-any-branch`
+selects the newest branch head in each repository. All selections are resolved
+to exact commits before checkout and recorded with the results.
 
 ## Run
 
@@ -117,13 +120,13 @@ Continue when `doctor` reports `"ready": true`.
 Preview the normalized selection:
 
 ```shell
-uv run --project tools/version_lab version-lab plan --all-latest --scope quick
+uv run --project tools/version_lab version-lab plan --scope quick
 ```
 
 Run the 15-document quick benchmark:
 
 ```shell
-uv run --project tools/version_lab version-lab run --all-latest --scope quick
+uv run --project tools/version_lab version-lab run --scope quick
 ```
 
 Run the full benchmark, which typically takes around one hour:
@@ -138,10 +141,11 @@ Resolve source and dataset commits without building:
 uv run --project tools/version_lab version-lab run --all-latest --resolve-only
 ```
 
-Select explicit refs and a pipeline:
+Select current branches and a pipeline (unspecified components use their latest
+release):
 
 ```shell
-uv run --project tools/version_lab version-lab run --mupdf-ref 1.28.2 --pymupdf-ref 1.28.2 --pymupdf-layout-ref 1.28.2 --pymupdf4llm-ref 1.28.2 --pipeline pymupdf4llm_markdown_150dpi --scope quick --group all
+uv run --project tools/version_lab version-lab run --pymupdf4llm-ref main --pipeline pymupdf4llm_markdown_150dpi --scope quick --group all
 ```
 
 View all arguments and accepted values:
@@ -164,12 +168,15 @@ upstream ParseBench. Version Lab registers only these additional configurations:
 | `pymupdf4llm_markdown_tesseract` | Tesseract OCR backend |
 | `pymupdf4llm_markdown_rapidocr` | Bundled RapidOCR backend |
 | `pymupdf4llm_markdown_no_ocr` | OCR disabled |
-| `pymupdf4llm_html_tables` | Native HTML tables at 150 DPI |
 | `pymupdf4llm_html_tables_rapidocr_v3` | Native HTML tables with modern RapidOCR |
 
-Selected historical source revisions must support the current upstream
-PyMuPDF4LLM provider API. Incompatible revisions fail rather than receiving a
-Version Lab-specific output transformation.
+All pipelines use upstream's native HTML table output. The former
+`pymupdf4llm_html_tables` alias duplicated `pymupdf4llm_markdown_150dpi` and has
+been removed from new runs; existing results remain readable.
+
+Selected branches must support the current upstream PyMuPDF4LLM provider API.
+The runtime smoke check verifies the built source stack before benchmarking;
+Version Lab does not adapt older provider APIs or incompatible dependencies.
 
 ## Diagnostic boundary
 

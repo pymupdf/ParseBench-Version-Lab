@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import re
 import subprocess
@@ -18,7 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from .coverage import execution_coverage
-from .results import DEFAULT_METRICS, report_dimension
+from .results import finite_number, headline_metric, report_dimension
 
 KNOWN_DIMENSIONS = ("chart", "table", "layout", "text_content", "text_formatting")
 INGESTION_SCHEMA_VERSION = 4
@@ -40,13 +39,6 @@ def _now_expression_payload() -> str:
     from datetime import UTC, datetime
 
     return datetime.now(UTC).isoformat()
-
-
-def _finite_number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
 
 
 def _integer(value: Any) -> int | None:
@@ -448,19 +440,13 @@ def _dataset_row(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
 
 def _primary_metric(dimension: str, metrics: list[dict[str, Any]]) -> tuple[str | None, float | None]:
     values = {
-        str(metric.get("metric_name")): _finite_number(metric.get("value"))
+        name: value
         for metric in metrics
-        if isinstance(metric.get("metric_name"), str)
+        if isinstance((name := metric.get("metric_name")), str)
+        and (value := finite_number(metric.get("value"))) is not None
     }
-    preferred = DEFAULT_METRICS.get(dimension, "rule_pass_rate")
-    if values.get(preferred) is not None:
-        return preferred, values[preferred]
-    if values.get("rule_pass_rate") is not None:
-        return "rule_pass_rate", values["rule_pass_rate"]
-    for name in sorted(values):
-        if values[name] is not None:
-            return name, values[name]
-    return None, None
+    name = headline_metric(dimension, values)
+    return name, values.get(name) if name is not None else None
 
 
 def _error_fingerprint(error: Mapping[str, Any]) -> str:
@@ -548,19 +534,16 @@ class BenchmarkIndexer:
             dataset_record = self.database.upsert_one("dataset_versions", dataset, "repository,resolved_sha")
             dataset_id = int(dataset_record["id"])
         else:
-            try:
-                existing_runs = self.database.select(
-                    "benchmark_runs",
-                    {
-                        "select": "dataset_version_id,execution_metadata",
-                        "github_repository": f"eq.{github_repository}",
-                        "github_run_id": f"eq.{run_id_value}",
-                        "github_run_attempt": f"eq.{run_attempt}",
-                        "limit": "1",
-                    },
-                )
-            except AttributeError:
-                existing_runs = []
+            existing_runs = self.database.select(
+                "benchmark_runs",
+                {
+                    "select": "dataset_version_id,execution_metadata",
+                    "github_repository": f"eq.{github_repository}",
+                    "github_run_id": f"eq.{run_id_value}",
+                    "github_run_attempt": f"eq.{run_attempt}",
+                    "limit": "1",
+                },
+            )
             if existing_runs:
                 dataset_id = _coerce_integer(existing_runs[0].get("dataset_version_id"))
                 if dataset_id is not None:
@@ -663,14 +646,17 @@ class BenchmarkIndexer:
         self._index_components(database_run_id, run_metadata)
         self._index_errors(database_run_id, inference_errors, github_failures)
         if reader is not None and isinstance(pipeline_name, str):
-            self._index_reports(
-                database_run_id,
-                dataset_id,
-                dataset_record or dataset or {},
-                pipeline_name,
-                reports,
-                reader,
-            )
+            for dimension, relative_path, report in reports:
+                self._index_report(
+                    database_run_id,
+                    dataset_id,
+                    dataset_record or dataset or {},
+                    pipeline_name,
+                    dimension,
+                    relative_path,
+                    report,
+                    reader,
+                )
         return database_run_id
 
     def _artifact_reports(
@@ -747,27 +733,6 @@ class BenchmarkIndexer:
         if rows:
             self.database.upsert_many("run_errors", rows, "run_id,error_fingerprint")
 
-    def _index_reports(
-        self,
-        run_id: int,
-        dataset_id: int | None,
-        dataset: Mapping[str, Any],
-        pipeline_name: str,
-        reports: list[tuple[str, str, dict[str, Any]]],
-        reader: JsonArtifactReader,
-    ) -> None:
-        for dimension, relative_path, report in reports:
-            self._index_report(
-                run_id,
-                dataset_id,
-                dataset,
-                pipeline_name,
-                dimension,
-                relative_path,
-                report,
-                reader,
-            )
-
     def _index_report(
         self,
         run_id: int,
@@ -797,7 +762,7 @@ class BenchmarkIndexer:
         run_dimension_id = int(dimension_record["id"])
         aggregate_rows = []
         for name, value in _object(report.get("aggregate_metrics")).items():
-            if (number := _finite_number(value)) is not None:
+            if (number := finite_number(value)) is not None:
                 aggregate_rows.append(
                     {
                         "run_dimension_id": run_dimension_id,

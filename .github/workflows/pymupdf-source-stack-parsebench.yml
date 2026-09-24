@@ -50,7 +50,6 @@ on:
           - "pymupdf4llm_markdown_tesseract"
           - "pymupdf4llm_markdown_rapidocr"
           - "pymupdf4llm_markdown_no_ocr"
-          - "pymupdf4llm_html_tables"
           - "pymupdf4llm_html_tables_rapidocr_v3"
       dataset_version:
         description: "Dataset version: current, or a full 40-character Hugging Face commit SHA."
@@ -58,24 +57,24 @@ on:
         default: current
         type: string
       mupdf_ref:
-        description: "MuPDF version, branch or full 40-character commit SHA. Standard: 1.28.2. Ignored by either automatic latest mode."
+        description: "MuPDF: latest PyPI release or a current branch name. Ignored by either automatic branch mode."
         required: true
-        default: "1.28.2"
+        default: "latest"
         type: string
       pymupdf_ref:
-        description: "PyMuPDF version, branch or full 40-character commit SHA. Standard: 1.28.2. Ignored by either automatic latest mode."
+        description: "PyMuPDF: latest PyPI release or a current branch name. Ignored by either automatic branch mode."
         required: true
-        default: "1.28.2"
+        default: "latest"
         type: string
       pymupdf_layout_ref:
-        description: "PyMuPDF Layout version, branch or commit. Standard: 1.28.2. Ignored by either automatic latest mode."
+        description: "PyMuPDF Layout: latest PyPI release or a current branch name. Ignored by either automatic branch mode."
         required: true
-        default: "1.28.2"
+        default: "latest"
         type: string
       pymupdf4llm_ref:
-        description: "PyMuPDF4LLM version, branch or commit. Standard: 1.28.2. Ignored by either automatic latest mode."
+        description: "PyMuPDF4LLM: latest PyPI release or a current branch name. Ignored by either automatic branch mode."
         required: true
-        default: "1.28.2"
+        default: "latest"
         type: string
       run_scope:
         description: "How much data should be tested?"
@@ -145,23 +144,11 @@ jobs:
           RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
         run: python3 "$WORKFLOW_SCRIPTS/configure.py"
 
-      - name: Resolve newest branch-head commits
-        id: latest-branches
-        if: ${{ steps.config.outputs.latest_any_branch == 'true' }}
+      - name: Resolve latest releases or current branch heads
+        id: refs
         env:
-          GITHUB_TOKEN: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
-        run: python3 "$WORKFLOW_SCRIPTS/resolve_latest_branches.py"
-
-      - name: Resolve PyMuPDF Layout repository and commit
-        id: layout-source
-        if: ${{ steps.config.outputs.latest_any_branch != 'true' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
-          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
-          PREFER_CURRENT_REPOSITORY: ${{ steps.config.outputs.all_latest }}
-          PYMUPDF_LAYOUT_REF: ${{ steps.config.outputs.pymupdf_layout_ref }}
-        run: python3 "$WORKFLOW_SCRIPTS/resolve_layout_source.py"
+        run: python3 "$WORKFLOW_SCRIPTS/resolve_refs.py"
 
       - name: Record and verify pinned container environment
         env:
@@ -204,41 +191,37 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: pymupdf/PyMuPDF
-          ref: ${{ steps.latest-branches.outputs.pymupdf_sha || steps.config.outputs.pymupdf_ref }}
+          ref: ${{ steps.refs.outputs.pymupdf_sha }}
           path: .source/pymupdf
           fetch-depth: 1
           persist-credentials: false
-          token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
 
       - name: Checkout MuPDF
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ArtifexSoftware/mupdf
-          ref: ${{ steps.latest-branches.outputs.mupdf_sha || steps.config.outputs.mupdf_ref }}
+          ref: ${{ steps.refs.outputs.mupdf_sha }}
           path: .source/mupdf
           fetch-depth: 1
           persist-credentials: false
-          token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
 
       - name: Checkout PyMuPDF Layout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ steps.latest-branches.outputs.pymupdf_layout_repository || steps.layout-source.outputs.repository }}
-          ref: ${{ steps.latest-branches.outputs.pymupdf_layout_sha || steps.layout-source.outputs.sha }}
+          repository: ArtifexSoftware/pymupdf_layout
+          ref: ${{ steps.refs.outputs.pymupdf_layout_sha }}
           path: .source/pymupdf-layout
           fetch-depth: 1
           persist-credentials: false
-          token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
 
       - name: Checkout PyMuPDF4LLM
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: pymupdf/pymupdf4llm
-          ref: ${{ steps.latest-branches.outputs.pymupdf4llm_sha || steps.config.outputs.pymupdf4llm_ref }}
+          ref: ${{ steps.refs.outputs.pymupdf4llm_sha }}
           path: .source/pymupdf4llm
           fetch-depth: 1
           persist-credentials: false
-          token: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
 
       - name: Trust container-mounted Git checkouts
         run: |
@@ -248,34 +231,22 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf-layout"
           git config --global --add safe.directory "$GITHUB_WORKSPACE/.source/pymupdf4llm"
 
+      - name: Verify pinned source checkouts
+        id: sources
+        env:
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
+        run: python3 "$WORKFLOW_SCRIPTS/resolve_sources.py"
+
       - name: Add selected configuration to workflow summary
         env:
-          ALL_LATEST: ${{ steps.config.outputs.all_latest }}
           BENCHMARK_REF: ${{ github.ref_name }}
-          DATASET_BRANCH: ${{ steps.dataset.outputs.branch }}
           DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
           DATASET_REQUESTED_REF: ${{ steps.dataset.outputs.requested_ref }}
           DATASET_SHA: ${{ steps.dataset.outputs.sha }}
-          GITHUB_TOKEN: ${{ secrets.PYMUPDF_SOURCE_TOKEN || github.token }}
           GROUP_SELECTION: ${{ inputs.group }}
-          LATEST_ANY_BRANCH: ${{ steps.config.outputs.latest_any_branch }}
-          MUPDF_REF: ${{ steps.latest-branches.outputs.mupdf_branch || steps.config.outputs.mupdf_ref }}
-          PYMUPDF4LLM_REF: ${{ steps.latest-branches.outputs.pymupdf4llm_branch || steps.config.outputs.pymupdf4llm_ref }}
-          PYMUPDF_LAYOUT_REF: ${{ steps.latest-branches.outputs.pymupdf_layout_branch || steps.config.outputs.pymupdf_layout_ref }}
-          PYMUPDF_LAYOUT_REPOSITORY: ${{ steps.latest-branches.outputs.pymupdf_layout_repository || steps.layout-source.outputs.repository }}
-          PYMUPDF_REF: ${{ steps.latest-branches.outputs.pymupdf_branch || steps.config.outputs.pymupdf_ref }}
+          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
           RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
         run: python3 "$WORKFLOW_SCRIPTS/write_run_summary.py"
-
-      - name: Resolve source packages and commits
-        id: sources
-        env:
-          MUPDF_REF: ${{ steps.latest-branches.outputs.mupdf_branch || steps.config.outputs.mupdf_ref }}
-          OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
-          PYMUPDF4LLM_REF: ${{ steps.latest-branches.outputs.pymupdf4llm_branch || steps.config.outputs.pymupdf4llm_ref }}
-          PYMUPDF_LAYOUT_REF: ${{ steps.latest-branches.outputs.pymupdf_layout_branch || steps.config.outputs.pymupdf_layout_ref }}
-          PYMUPDF_REF: ${{ steps.latest-branches.outputs.pymupdf_branch || steps.config.outputs.pymupdf_ref }}
-        run: python3 "$WORKFLOW_SCRIPTS/resolve_sources.py"
 
       - name: Install ParseBench dependencies without selected PyMuPDF packages
         env:
@@ -292,9 +263,6 @@ jobs:
             --no-install-package pymupdf4llm
           uv pip install --python .venv "pipcl==12" "swig==4.3.1"
           .venv/bin/swig -version
-
-      - name: Install temporary PyMuPDF4LLM branch dependency
-        run: uv pip install --python .venv "psutil==7.2.2"
 
       - name: Verify RapidOCR native runtime
         if: ${{ inputs.pipeline != 'pymupdf4llm_html_tables_rapidocr_v3' }}
@@ -316,15 +284,14 @@ jobs:
 
       - name: Build and install selected PyMuPDF Layout
         env:
-          PACKAGE_DIR: ${{ steps.sources.outputs.layout_dir }}
+          PACKAGE_DIR: ${{ steps.sources.outputs.pymupdf_layout_dir }}
           PYMUPDF_LAYOUT_SETUP_BUILD_PYMUPDF: "1"
           PYMUPDF_LAYOUT_SETUP_SWIG: ${{ github.workspace }}/.venv/bin/swig
         run: uv pip install --python .venv --reinstall --no-build-isolation --no-deps "$PACKAGE_DIR"
 
       - name: Build and install selected PyMuPDF4LLM
         env:
-          PACKAGE_DIR: ${{ steps.sources.outputs.llm_dir }}
-          PYMUPDF_SETUP_VERSION: "1"
+          PACKAGE_DIR: ${{ steps.sources.outputs.pymupdf4llm_dir }}
         run: uv pip install --python .venv --reinstall --no-deps "$PACKAGE_DIR"
 
       - name: Verify modern RapidOCR and native HTML capabilities
@@ -342,12 +309,12 @@ jobs:
 
       - name: Check source stack compatibility
         env:
-          MUPDF_REF: ${{ steps.latest-branches.outputs.mupdf_branch || steps.config.outputs.mupdf_ref }}
+          MUPDF_REF: ${{ steps.refs.outputs.mupdf_ref }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
-          PYMUPDF4LLM_REF: ${{ steps.latest-branches.outputs.pymupdf4llm_branch || steps.config.outputs.pymupdf4llm_ref }}
-          PYMUPDF_LAYOUT_REF: ${{ steps.latest-branches.outputs.pymupdf_layout_branch || steps.config.outputs.pymupdf_layout_ref }}
-          PYMUPDF_LAYOUT_REPOSITORY: ${{ steps.latest-branches.outputs.pymupdf_layout_repository || steps.layout-source.outputs.repository }}
-          PYMUPDF_REF: ${{ steps.latest-branches.outputs.pymupdf_branch || steps.config.outputs.pymupdf_ref }}
+          PYMUPDF4LLM_REF: ${{ steps.refs.outputs.pymupdf4llm_ref }}
+          PYMUPDF_LAYOUT_REF: ${{ steps.refs.outputs.pymupdf_layout_ref }}
+          PYMUPDF_LAYOUT_REPOSITORY: ArtifexSoftware/pymupdf_layout
+          PYMUPDF_REF: ${{ steps.refs.outputs.pymupdf_ref }}
         run: |
           .venv/bin/python "$WORKFLOW_SCRIPTS/check_compatibility.py" \
             --output "$OUTPUT_DIR/_compatibility.json" \
@@ -359,10 +326,10 @@ jobs:
             --pymupdf-sha "${{ steps.sources.outputs.pymupdf_sha }}" \
             --pymupdf-layout-repository "$PYMUPDF_LAYOUT_REPOSITORY" \
             --pymupdf-layout-ref "$PYMUPDF_LAYOUT_REF" \
-            --pymupdf-layout-sha "${{ steps.sources.outputs.layout_sha }}" \
+            --pymupdf-layout-sha "${{ steps.sources.outputs.pymupdf_layout_sha }}" \
             --pymupdf4llm-repository pymupdf/pymupdf4llm \
             --pymupdf4llm-ref "$PYMUPDF4LLM_REF" \
-            --pymupdf4llm-sha "${{ steps.sources.outputs.llm_sha }}"
+            --pymupdf4llm-sha "${{ steps.sources.outputs.pymupdf4llm_sha }}"
 
       - name: Prepare versioned ParseBench dataset
         env:

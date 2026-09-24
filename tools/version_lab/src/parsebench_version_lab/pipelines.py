@@ -73,43 +73,23 @@ class VersionLabPyMuPDF4LLMProvider(PyMuPDF4LLMProvider):
         return cast(Callable[..., Any], ocr_function)
 
 
-VERSION_LAB_PIPELINES = (
+VERSION_LAB_PIPELINES = tuple(
     PipelineSpec(
-        pipeline_name="pymupdf4llm_markdown_150dpi",
+        pipeline_name=name,
         provider_name=VERSION_LAB_PROVIDER,
         product_type=ProductType.PARSE,
-        config={"ocr_dpi": 150},
-    ),
-    PipelineSpec(
-        pipeline_name="pymupdf4llm_markdown_tesseract",
-        provider_name=VERSION_LAB_PROVIDER,
-        product_type=ProductType.PARSE,
-        config={"ocr_backend": "tesseract"},
-    ),
-    PipelineSpec(
-        pipeline_name="pymupdf4llm_markdown_rapidocr",
-        provider_name=VERSION_LAB_PROVIDER,
-        product_type=ProductType.PARSE,
-        config={"ocr_backend": "rapidocr"},
-    ),
-    PipelineSpec(
-        pipeline_name="pymupdf4llm_markdown_no_ocr",
-        provider_name=VERSION_LAB_PROVIDER,
-        product_type=ProductType.PARSE,
-        config={"use_ocr": False},
-    ),
-    PipelineSpec(
-        pipeline_name="pymupdf4llm_html_tables",
-        provider_name=VERSION_LAB_PROVIDER,
-        product_type=ProductType.PARSE,
-        config={"ocr_dpi": 150, "table_output": "html"},
-    ),
-    PipelineSpec(
-        pipeline_name="pymupdf4llm_html_tables_rapidocr_v3",
-        provider_name=VERSION_LAB_PROVIDER,
-        product_type=ProductType.PARSE,
-        config={"ocr_backend": "rapidocr_modern", "ocr_dpi": 150, "table_output": "html"},
-    ),
+        config=config,
+    )
+    for name, config in (
+        ("pymupdf4llm_markdown_150dpi", {"ocr_dpi": 150}),
+        ("pymupdf4llm_markdown_tesseract", {"ocr_backend": "tesseract"}),
+        ("pymupdf4llm_markdown_rapidocr", {"ocr_backend": "rapidocr"}),
+        ("pymupdf4llm_markdown_no_ocr", {"use_ocr": False}),
+        (
+            "pymupdf4llm_html_tables_rapidocr_v3",
+            {"ocr_backend": "rapidocr_modern", "ocr_dpi": 150, "table_output": "html"},
+        ),
+    )
 )
 
 

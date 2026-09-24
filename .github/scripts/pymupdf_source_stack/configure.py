@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from common import COMPONENTS, LAYOUT_REPOSITORIES, append_summary, env, write_github_outputs, write_json
+from common import COMPONENT_SPECS, append_summary, env, write_github_outputs, write_json
 
 RUN_SCOPES = {
     "Quick test (15 cases)": ("test", "data/test"),
@@ -20,7 +20,7 @@ GROUPS = {
     "Text content": "text_content",
     "Text formatting": "text_formatting",
 }
-LATEST_REFS = {name: str(component["default_branch"]) for name, component in COMPONENTS.items()}
+LATEST_REFS = {name: component.default_branch for name, component in COMPONENT_SPECS.items()}
 LATEST_ANY_BRANCH_REFS = dict.fromkeys(LATEST_REFS, "latest-any-branch")
 
 
@@ -84,28 +84,18 @@ def main() -> int:
     artifact_name = f"pymupdf-source-stack-{env('GITHUB_RUN_ID')}-{env('GITHUB_RUN_ATTEMPT')}"
 
     request = {
-        name: {"repository": component["repository"], "ref": refs[name]} for name, component in COMPONENTS.items()
-    }
-    request["pymupdf_layout"] = {
-        "ref": refs["pymupdf_layout"],
-        "repositories": list(LAYOUT_REPOSITORIES),
+        name: {"repository": component.repository, "ref": refs[name]} for name, component in COMPONENT_SPECS.items()
     }
     write_json(output_dir / "_source_request.json", request)
     write_github_outputs(
         {
-            "all_latest": str(all_latest).lower(),
             "artifact_name": artifact_name,
             "benchmark_ref": benchmark_ref,
             "data_dir": data_dir,
             "dataset_ref": refs["dataset"],
             "destination": destination,
             "group": group,
-            "latest_any_branch": str(latest_any_branch).lower(),
-            "mupdf_ref": refs["mupdf"],
             "output_dir": str(output_dir),
-            "pymupdf4llm_ref": refs["pymupdf4llm"],
-            "pymupdf_layout_ref": refs["pymupdf_layout"],
-            "pymupdf_ref": refs["pymupdf"],
             "run_scope": run_scope,
         }
     )

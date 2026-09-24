@@ -1,81 +1,46 @@
 #!/usr/bin/env python3
-"""Locate installable packages in the checked-out source repositories."""
+"""Verify pinned source checkouts and locate their installable packages."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from common import COMPONENTS, env, git_sha, mupdf_build_spec, write_github_outputs, write_json
-
-CANDIDATES = {
-    "pymupdf": [Path(".source/pymupdf")],
-    "pymupdf_layout": [Path(".source/pymupdf-layout"), Path(".source/pymupdf-layout/pymupdf_layout")],
-    "pymupdf4llm": [Path(".source/pymupdf4llm"), Path(".source/pymupdf4llm/pymupdf4llm")],
-}
-
-
-class SourceResolutionError(RuntimeError):
-    pass
-
-
-def package_dir(name: str, requested_ref: str, output_dir: Path) -> tuple[Path, str]:
-    component = COMPONENTS[name]
-    root = component["root"]
-    resolved_sha = git_sha(root)
-    candidates = CANDIDATES[name]
-    for candidate in candidates:
-        if (candidate / "pyproject.toml").is_file() or (candidate / "setup.py").is_file():
-            return candidate, resolved_sha
-
-    locations = ", ".join(map(str, candidates))
-    error = (
-        f"{component['label']} at commit {resolved_sha} is not an installable Python package. "
-        f"No pyproject.toml or setup.py was found in: {locations}."
-    )
-    write_json(
-        output_dir / "_failure.json",
-        {
-            "title": f"Cannot build {component['label']}",
-            "error": error,
-            "component": component["label"],
-            "requested_ref": requested_ref,
-            "resolved_sha": resolved_sha,
-            "details": (
-                "Compatibility checks and benchmark execution were skipped because this source cannot be built."
-            ),
-        },
-    )
-    print(f"::error title=Cannot build {component['label']}::{error}")
-    raise SourceResolutionError(error)
+from common import COMPONENT_SPECS, env, git_sha, mupdf_build_spec, write_github_outputs, write_json
+from parsebench_version_lab.local import package_dir
+from parsebench_version_lab.sources import ResolvedSource
 
 
 def main() -> int:
     output_dir = Path(env("OUTPUT_DIR"))
-    refs = {
-        "mupdf": env("MUPDF_REF"),
-        "pymupdf": env("PYMUPDF_REF"),
-        "pymupdf_layout": env("PYMUPDF_LAYOUT_REF"),
-        "pymupdf4llm": env("PYMUPDF4LLM_REF"),
-    }
-    resolved = {name: package_dir(name, refs[name], output_dir) for name in CANDIDATES}
-    mupdf_sha = git_sha(COMPONENTS["mupdf"]["root"])
-    write_github_outputs(
-        {
-            "mupdf_build": mupdf_build_spec(mupdf_sha),
-            "mupdf_sha": mupdf_sha,
-            "pymupdf_dir": str(resolved["pymupdf"][0]),
-            "pymupdf_sha": resolved["pymupdf"][1],
-            "layout_dir": str(resolved["pymupdf_layout"][0]),
-            "layout_sha": resolved["pymupdf_layout"][1],
-            "llm_dir": str(resolved["pymupdf4llm"][0]),
-            "llm_sha": resolved["pymupdf4llm"][1],
-        }
-    )
+    request = json.loads((output_dir / "_source_request.json").read_text(encoding="utf-8"))
+    outputs = {}
+    for name, component in COMPONENT_SPECS.items():
+        root = Path(".source") / component.checkout_dir
+        sha = git_sha(root)
+        source = ResolvedSource(name, component.label, component.repository, request[name]["ref"], sha, root)
+        try:
+            if sha != request[name]["resolved_sha"]:
+                raise RuntimeError(f"{component.label} checkout {sha} differs from the resolved commit.")
+            package = root if name == "mupdf" else package_dir(source)
+        except RuntimeError as error:
+            write_json(
+                output_dir / "_failure.json",
+                {
+                    "title": f"Cannot build {component.label}",
+                    "error": str(error),
+                    "component": component.label,
+                    "requested_ref": request[name]["ref"],
+                    "resolved_sha": sha,
+                },
+            )
+            raise SystemExit(str(error)) from error
+        outputs[f"{name}_dir"] = str(package)
+        outputs[f"{name}_sha"] = sha
+    outputs["mupdf_build"] = mupdf_build_spec(outputs["mupdf_sha"])
+    write_github_outputs(outputs)
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except SourceResolutionError:
-        raise SystemExit(1) from None
+    raise SystemExit(main())

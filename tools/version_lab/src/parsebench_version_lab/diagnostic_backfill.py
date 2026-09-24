@@ -115,26 +115,16 @@ def _dimension_case_rows(database: SupabaseRestClient, run_dimension_id: int) ->
 
 def _all_case_rows(database: SupabaseRestClient) -> list[dict[str, Any]]:
     """Load indexed case IDs once so discovery does not make one request per dimension."""
-
-    rows: list[dict[str, Any]] = []
-    offset = 0
-    while True:
-        page = database.select(
-            "case_results",
-            {
-                "select": (
-                    "id,run_dimension_id,diagnostic_relative_path,diagnostic_schema_version,"
-                    "benchmark_cases!inner(test_id)"
-                ),
-                "order": "id.asc",
-                "limit": str(PAGE_SIZE),
-                "offset": str(offset),
-            },
-        )
-        rows.extend(page)
-        if len(page) < PAGE_SIZE:
-            return rows
-        offset += PAGE_SIZE
+    return _select_all(
+        database,
+        "case_results",
+        {
+            "select": (
+                "id,run_dimension_id,diagnostic_relative_path,diagnostic_schema_version,benchmark_cases!inner(test_id)"
+            ),
+            "order": "id.asc",
+        },
+    )
 
 
 def _case_test_id(row: Mapping[str, Any]) -> str:

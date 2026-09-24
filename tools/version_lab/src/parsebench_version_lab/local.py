@@ -27,8 +27,8 @@ from .util import write_json
 
 SUPPORTED_SYSTEMS = ("Linux", "Darwin", "Windows")
 REQUIRED_TOOLS = ("compiler", "git", "uv", "tesseract")
-MACOS_SWIG_REQUIREMENT = "swig==4.3.1"
-DEFAULT_SWIG_REQUIREMENT = "swig==4.3.1"
+# Both native modules must use the same SWIG to share their generated types.
+SWIG_REQUIREMENT = "swig==4.3.1"
 COMPILER_CANDIDATES = {
     "Linux": ("cc", "gcc", "clang"),
     "Darwin": ("cc", "clang", "gcc"),
@@ -58,14 +58,6 @@ def first_executable(candidates: tuple[str, ...]) -> str | None:
     return None
 
 
-def swig_requirement() -> str:
-    # Newer SWIG releases can generate incompatible director code for older
-    # PyMuPDF refs; both native modules must use this known-compatible version.
-    if platform.system() == "Darwin":
-        return MACOS_SWIG_REQUIREMENT
-    return DEFAULT_SWIG_REQUIREMENT
-
-
 def doctor() -> dict[str, Any]:
     system = platform.system()
     supported_platform = system in SUPPORTED_SYSTEMS
@@ -93,7 +85,6 @@ def doctor() -> dict[str, Any]:
         "notes": [
             "Native benchmark execution supports Linux, macOS, and Windows when their build tools are installed.",
             "On Windows, run from a developer shell where the selected C/C++ compiler is available.",
-            "Private Layout refs use the developer's existing Git credential helper.",
         ],
     }
 
@@ -129,18 +120,11 @@ def create_paths(repository: Path, workspace_root: Path) -> LocalPaths:
 
 
 def package_dir(source: ResolvedSource) -> Path:
-    candidates = [source.path]
-    if source.name == "pymupdf_layout":
-        candidates.append(source.path / "pymupdf_layout")
-    elif source.name == "pymupdf4llm":
-        candidates.append(source.path / "pymupdf4llm")
-    for candidate in candidates:
-        if (candidate / "pyproject.toml").is_file() or (candidate / "setup.py").is_file():
+    # Some live branches still package the distribution in a nested directory.
+    for candidate in (source.path, source.path / source.name):
+        if any((candidate / filename).is_file() for filename in ("pyproject.toml", "setup.py")):
             return candidate
-    raise RuntimeError(
-        f"{source.label} at {source.resolved_sha} is not an installable package; checked: "
-        + ", ".join(str(candidate) for candidate in candidates)
-    )
+    raise RuntimeError(f"{source.label} at {source.resolved_sha} is not an installable package in {source.path}")
 
 
 class LocalRun:
@@ -211,49 +195,46 @@ class LocalRun:
             env=project_env,
         )
         python = venv_executable(self.paths.environment, "python")
-        self.runner.run(["uv", "pip", "install", "--python", python, "pipcl==12", swig_requirement()])
+        self.runner.run(["uv", "pip", "install", "--python", python, "pipcl==12", SWIG_REQUIREMENT])
         return python
 
+    def install_source(
+        self,
+        python: Path,
+        name: str,
+        *,
+        environment: dict[str, str] | None = None,
+        build_isolation: bool = True,
+    ) -> None:
+        command: list[str | Path] = ["uv", "pip", "install", "--python", python, "--reinstall", "--no-deps"]
+        if not build_isolation:
+            command.append("--no-build-isolation")
+        command.append(package_dir(self.sources[name]))
+        self.runner.run(
+            command,
+            env=self.command_environment(environment),
+        )
+
     def build_stack(self, python: Path) -> None:
-        mupdf = self.sources["mupdf"]
-        pymupdf = self.sources["pymupdf"]
-        layout = self.sources["pymupdf_layout"]
-        llm = self.sources["pymupdf4llm"]
-        swig = venv_executable(self.paths.environment, "swig")
-        build_env = self.command_environment(
-            {
-                "PYMUPDF_SETUP_MUPDF_BUILD": mupdf_build_spec(mupdf.resolved_sha),
-                "PYMUPDF_SETUP_SWIG": str(swig),
-            }
+        swig = str(venv_executable(self.paths.environment, "swig"))
+        self.install_source(
+            python,
+            "pymupdf",
+            environment={
+                "PYMUPDF_SETUP_MUPDF_BUILD": mupdf_build_spec(self.sources["mupdf"].resolved_sha),
+                "PYMUPDF_SETUP_SWIG": swig,
+            },
         )
-        self.runner.run(
-            ["uv", "pip", "install", "--python", python, "--reinstall", "--no-deps", package_dir(pymupdf)],
-            env=build_env,
-        )
-        layout_env = self.command_environment(
-            {
+        self.install_source(
+            python,
+            "pymupdf_layout",
+            environment={
                 "PYMUPDF_LAYOUT_SETUP_BUILD_PYMUPDF": "1",
-                "PYMUPDF_LAYOUT_SETUP_SWIG": str(swig),
-            }
+                "PYMUPDF_LAYOUT_SETUP_SWIG": swig,
+            },
+            build_isolation=False,
         )
-        self.runner.run(
-            [
-                "uv",
-                "pip",
-                "install",
-                "--python",
-                python,
-                "--reinstall",
-                "--no-build-isolation",
-                "--no-deps",
-                package_dir(layout),
-            ],
-            env=layout_env,
-        )
-        self.runner.run(
-            ["uv", "pip", "install", "--python", python, "--reinstall", "--no-deps", package_dir(llm)],
-            env=self.command_environment({"PYMUPDF_SETUP_VERSION": "1"}),
-        )
+        self.install_source(python, "pymupdf4llm")
 
     def runtime_env(self) -> dict[str, str]:
         assert self.dataset is not None

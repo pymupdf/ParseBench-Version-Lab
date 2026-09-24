@@ -5,26 +5,13 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+from pathlib import Path
 
-from common import COMPONENTS, append_summary, env, git_sha, markdown_cell
+from common import COMPONENT_SPECS, append_summary, env, git_sha, markdown_cell
 
 
-@dataclass(frozen=True)
-class SourceRevision:
-    label: str
-    repository: str
-    requested_ref: str
-    sha: str
-    commit_date: str
-    commits_after: int | None
-
-
-def commit_date(root: object) -> str:
+def commit_date(root: Path) -> str:
     value = subprocess.check_output(
         ["git", "-C", str(root), "show", "-s", "--format=%cI", "HEAD"],
         text=True,
@@ -33,136 +20,34 @@ def commit_date(root: object) -> str:
     return parsed.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-def commits_after_default_branch(repository: str, sha: str, token: str, default_branch: str) -> int | None:
-    comparison = f"{quote(sha, safe='')}...{quote(default_branch, safe='')}"
-    request = Request(  # noqa: S310 - fixed GitHub API host
-        f"https://api.github.com/repos/{repository}/compare/{comparison}",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "ParseBench-source-stack-workflow",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-    )
-    try:
-        with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API host
-            metadata = json.load(response)
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
-        return None
-    count = metadata.get("ahead_by")
-    return count if isinstance(count, int) and count >= 0 else None
-
-
 def github_link(label: str, repository: str, suffix: str = "") -> str:
     url = f"https://github.com/{repository}{suffix}"
     return f"[{markdown_cell(label)}]({url})"
 
 
-def commit_label(commits_after: int | None) -> str:
-    if commits_after == 0:
-        return "Latest commit"
-    if commits_after == 1:
-        return "1 commit ago"
-    if commits_after is not None:
-        return f"{commits_after} commits ago"
-    return "Selected commit"
-
-
-def source_table(
-    revisions: list[SourceRevision],
-    all_latest: bool,
-    latest_any_branch: bool = False,
-) -> list[str]:
-    lines = ["### Source-stack commits", ""]
-    if latest_any_branch:
-        lines.extend(
-            [
-                "The newest branch-head commit was requested from each source repository.",
-                "",
-                "| Component | Repository | Branch selected | Commit used | Commit date |",
-                "| --- | --- | --- | --- | --- |",
-            ]
-        )
-        lines.extend(
-            f"| {markdown_cell(revision.label)} | "
-            f"{github_link(revision.repository, revision.repository)} | "
-            f"`{markdown_cell(revision.requested_ref)}` | "
-            f"{github_link('Latest branch-head commit', revision.repository, f'/commit/{revision.sha}')} | "
-            f"{markdown_cell(revision.commit_date)} |"
-            for revision in revisions
-        )
-        return lines
-    if all_latest:
-        lines.extend(
-            [
-                "Latest default-branch commits were requested for all four source repositories.",
-                "",
-                "| Component | Repository | Commit used | Commit date |",
-                "| --- | --- | --- | --- |",
-            ]
-        )
-        lines.extend(
-            f"| {markdown_cell(revision.label)} | "
-            f"{github_link(revision.repository, revision.repository)} | "
-            f"{github_link('Latest commit', revision.repository, f'/commit/{revision.sha}')} | "
-            f"{markdown_cell(revision.commit_date)} |"
-            for revision in revisions
-        )
-        return lines
-
-    lines.extend(
-        [
-            "| Component | Repository | Requested selection | Commit used | Commit date |",
-            "| --- | --- | --- | --- | --- |",
-        ]
-    )
-    for revision in revisions:
+def source_table(sources: dict[str, dict[str, str]]) -> list[str]:
+    lines = [
+        "### Source-stack commits",
+        "",
+        "| Component | Repository | Release or branch | Commit used | Commit date |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for name, component in COMPONENT_SPECS.items():
+        source = sources[name]
+        repository = source["repository"]
+        sha = source["resolved_sha"]
         lines.append(
-            f"| {markdown_cell(revision.label)} | "
-            f"{github_link(revision.repository, revision.repository)} | "
-            f"`{markdown_cell(revision.requested_ref)}` | "
-            f"{github_link(commit_label(revision.commits_after), revision.repository, f'/commit/{revision.sha}')} | "
-            f"{markdown_cell(revision.commit_date)} |"
+            f"| {markdown_cell(component.label)} | "
+            f"{github_link(repository, repository)} | "
+            f"`{markdown_cell(source['ref'])}` | "
+            f"{github_link(sha[:12], repository, f'/commit/{sha}')} | "
+            f"{commit_date(Path('.source') / component.checkout_dir)} |"
         )
     return lines
 
 
 def main() -> int:
-    all_latest = env("ALL_LATEST").strip().lower() == "true"
-    latest_any_branch = env("LATEST_ANY_BRANCH").strip().lower() == "true"
-    refs = {
-        "mupdf": env("MUPDF_REF"),
-        "pymupdf": env("PYMUPDF_REF"),
-        "pymupdf_layout": env("PYMUPDF_LAYOUT_REF"),
-        "pymupdf4llm": env("PYMUPDF4LLM_REF"),
-    }
-    token = env("GITHUB_TOKEN")
-    revisions = []
-    for name, component in COMPONENTS.items():
-        repository = (
-            env("PYMUPDF_LAYOUT_REPOSITORY")
-            if name == "pymupdf_layout"
-            else str(component["repository"])
-        )
-        sha = git_sha(component["root"])
-        revisions.append(
-            SourceRevision(
-                label=str(component["label"]),
-                repository=repository,
-                requested_ref=refs[name],
-                sha=sha,
-                commit_date=commit_date(component["root"]),
-                commits_after=None
-                if all_latest or latest_any_branch
-                else commits_after_default_branch(
-                    repository,
-                    sha,
-                    token,
-                    str(component["default_branch"]),
-                ),
-            )
-        )
-
+    sources = json.loads((Path(env("OUTPUT_DIR")) / "_source_request.json").read_text(encoding="utf-8"))
     benchmark_repository = env("GITHUB_REPOSITORY")
     benchmark_sha = git_sha()
     dataset_repository = env("DATASET_REPOSITORY")
@@ -175,7 +60,7 @@ def main() -> int:
         f"- **Pipeline:** {markdown_cell(env('PIPELINE'))}",
         "- **Dataset download:** immutable SHA cache; downloads only on a cache miss",
         "",
-        *source_table(revisions, all_latest, latest_any_branch),
+        *source_table(sources),
         "",
         "### Benchmark revisions",
         "",

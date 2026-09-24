@@ -11,7 +11,7 @@ from pathlib import Path
 from .benchmark_index import backfill_repository
 from .diagnostic_backfill import backfill_diagnostics
 from .local import LocalRun, create_paths, doctor, ensure_ready
-from .model import COMPONENT_SPECS, GROUPS, PIPELINES, RUN_SCOPES, STANDARD_REF, RunConfig
+from .model import COMPONENT_SPECS, GROUPS, LATEST_RELEASE, PIPELINES, RUN_SCOPES, RunConfig
 from .util import repository_root
 
 
@@ -28,8 +28,8 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
     for name, component in COMPONENT_SPECS.items():
         parser.add_argument(
             f"--{name.replace('_', '-')}-ref",
-            default=STANDARD_REF,
-            help=f"{component.label} tag, branch, or full commit SHA",
+            default=LATEST_RELEASE,
+            help=f"{component.label}: 'latest', the latest PyPI release tag, or a current branch name",
         )
     parser.add_argument(
         "--dataset-ref",
@@ -192,8 +192,7 @@ def main(arguments: list[str] | None = None) -> int:
     if args.command == "backfill-index":
         repository = repository_root()
         workspace = (
-            args.workspace
-            or repository / "tools" / "version_lab" / ".version-lab" / "benchmark-index-backfill"
+            args.workspace or repository / "tools" / "version_lab" / ".version-lab" / "benchmark-index-backfill"
         ).resolve()
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_secret_key = os.environ.get("SUPABASE_SECRET_KEY")
