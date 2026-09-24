@@ -28,7 +28,7 @@ from parse_bench.schemas.layout_detection_output import (
     LayoutOutput,
     LayoutPrediction,
 )
-from parse_bench.schemas.layout_ontology import CANONICAL_TO_CORE
+from parse_bench.schemas.layout_ontology import CANONICAL_TO_CORE, CanonicalLabel
 
 
 def _parse_int_label(raw_label: str) -> int:
@@ -48,6 +48,7 @@ def _build_canonical(  # type: ignore[no-untyped-def]
     attributes.update(prediction.attributes)
     return CanonicalLayoutPrediction(
         bbox=prediction.bbox,
+        r=prediction.r,
         score=prediction.score,
         canonical_class=canonical_class,
         attributes=attributes,
@@ -120,6 +121,24 @@ def project_to_canonical_predictions(
             canonical_predictions.append(_build_canonical(pred, canonical_class, attrs))
         return canonical_predictions
 
+    if model == LayoutDetectionModel.HUNYUANOCR_LAYOUT:
+        for pred in predictions:
+            try:
+                canonical_class = CanonicalLabel(pred.label)
+            except ValueError as exc:
+                raise UnknownRawLayoutLabelError(f"Unknown HunyuanOCR layout label '{pred.label}'") from exc
+            canonical_predictions.append(_build_canonical(pred, canonical_class, {}))
+        return canonical_predictions
+
+    if model == LayoutDetectionModel.TELEOCR_LAYOUT:
+        for pred in predictions:
+            try:
+                canonical_class = CanonicalLabel(pred.label)
+            except ValueError as exc:
+                raise UnknownRawLayoutLabelError(f"Unknown TeleOCR layout label '{pred.label}'") from exc
+            canonical_predictions.append(_build_canonical(pred, canonical_class, {}))
+        return canonical_predictions
+
     for pred in predictions:
         if model == LayoutDetectionModel.YOLO_DOCLAYNET:
             canonical_predictions.append(_map_via_int_adapter(pred, yolo_adapter.to_canonical, model))
@@ -168,6 +187,7 @@ def project_to_core_predictions(
         core_predictions.append(
             CoreLayoutPrediction(
                 bbox=canonical.bbox,
+                r=canonical.r,
                 score=canonical.score,
                 core_class=core_class,
                 attributes=canonical.attributes,

@@ -1192,6 +1192,63 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
     )
 
     # =========================================================================
+    # Jina-OCR-v1 (DeepSeek-OCR fine-tune, 3B MoE + FastMTP speculative decoding)
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="jinaocr_vllm",
+            provider_name="jinaocr",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",  # Set via JINAOCR_SERVER_URL or override
+                # The model card's recommended default prompt, plus a chart clause.
+                # The bare default renders charts as a "![Chart: ...]" placeholder,
+                # which scores 0 on chart_data_point even though the model can read
+                # the values off the plot when asked. The card's other documented
+                # prompt — the OmniDocBench one — is the wrong direction here: it
+                # instructs the model to ignore all graphical content.
+                "prompt": (
+                    "Transcribe the provided document image into a clean Markdown format, "
+                    "preserving the natural reading order. Convert every table into an HTML table. "
+                    "Convert every chart or graph into an HTML table of its underlying data values, "
+                    "including the axis and series labels."
+                ),
+            },
+        )
+    )
+
+    # =========================================================================
+    # HunyuanOCR-1.5 (tencent/HunyuanOCR, end-to-end OCR VLM)
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="hunyuanocr_1_5",
+            provider_name="hunyuanocr",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",  # Set via HUNYUANOCR_SERVER_URL or override
+            },
+        )
+    )
+
+    # =========================================================================
+    # OvisOCR2 (ATH-MaaS, 0.8B end-to-end page parsing VLM)
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="ovisocr2_vllm",
+            provider_name="ovisocr2",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",  # Set via OVISOCR2_SERVER_URL or override
+            },
+        )
+    )
+
+    # =========================================================================
     # Unlimited-OCR (baidu/Unlimited-OCR, DeepSeek-OCR successor with grounding)
     # =========================================================================
 
@@ -1495,6 +1552,25 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
                 "model": "gemma-4-e4b",
                 "prompt_mode": "layout",
                 "swap_bbox": True,
+            },
+        )
+    )
+
+    # =========================================================================
+    # HPD-Parsing (PaddlePaddle/HPD-Parsing, 1B InternVL3.5 backbone)
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="hpd_parsing_vllm_parse",
+            provider_name="hpd_parsing",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url_env": "HPD_PARSING_SERVER_URL",
+                "model": "PaddlePaddle/HPD-Parsing",
+                "prompt_mode": "fork",
+                "dpi": 200,
+                "timeout": 900,
             },
         )
     )
@@ -2162,6 +2238,25 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             )
         )
 
+    # OpenAI GPT-6 Sol / Luna - Parse with Layout File - Reasoning None / Med
+    # A no-reasoning baseline and the model default, medium, pinned explicitly.
+    # The `med` token in the name is medium reasoning effort.
+    for _gpt6_suffix, _gpt6_model in (("sol", "gpt-6-sol"), ("luna", "gpt-6-luna")):
+        for _gpt6_name_effort, _gpt6_effort in (("none", "none"), ("med", "medium")):
+            register_fn(
+                PipelineSpec(
+                    pipeline_name=(f"openai_gpt_6_{_gpt6_suffix}_reasoning_{_gpt6_name_effort}_parse_with_layout_file"),
+                    provider_name="openai",
+                    product_type=ProductType.PARSE,
+                    config={
+                        "model": _gpt6_model,
+                        "max_tokens": 32768,
+                        "mode": "parse_with_layout_file",
+                        "reasoning_effort": _gpt6_effort,
+                    },
+                )
+            )
+
     # OpenAI GPT-5.4 Nano - Parse with Layout
     register_fn(
         PipelineSpec(
@@ -2260,6 +2355,22 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             product_type=ProductType.PARSE,
             config={
                 "model": "claude-opus-4-8",
+                "max_tokens": 32768,
+                "mode": "parse_with_layout_file",
+            },
+        )
+    )
+
+    # Anthropic Opus 5.5 - Parse with Layout File
+    # Adaptive thinking is always on and cannot be disabled, so no `thinking`
+    # key here; effort defaults to "medium" server-side.
+    register_fn(
+        PipelineSpec(
+            pipeline_name="anthropic_opus_5_5_parse_with_layout_file",
+            provider_name="anthropic",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "claude-opus-5-5",
                 "max_tokens": 32768,
                 "mode": "parse_with_layout_file",
             },
@@ -2504,6 +2615,18 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # TeleOCR (StarDoc-AI/TeleOCR, two-stage layout detection and recognition)
+    register_fn(
+        PipelineSpec(
+            pipeline_name="teleocr_vllm",
+            provider_name="teleocr",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",  # Set via TELEOCR_SERVER_URL or override
+            },
+        )
+    )
+
     # =========================================================================
     # Surya OCR 2 (datalab-to/surya-ocr-2, 650M VLM)
     # =========================================================================
@@ -2668,5 +2791,85 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             # default public endpoint. Left unset here so the env override is honored
             # (matches the LlamaParse configurable-base-URL convention).
             config={},
+        )
+    )
+
+    # =========================================================================
+    # anyformat (hosted v3 API, one-node parse workflow per tier)
+    # =========================================================================
+    for tier in ("standard", "agentic", "lite", "flash"):
+        register_fn(
+            PipelineSpec(
+                pipeline_name=f"anyformat_{tier}",
+                provider_name="anyformat",
+                product_type=ProductType.PARSE,
+                config={"mode": tier},
+                per_file_timeout=900.0,
+            )
+        )
+
+    # =========================================================================
+    # WeVisDoc 2B and 4B
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="wevisdoc_2b_vllm",
+            provider_name="wevisdoc",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",
+                "server_url_env": "WEVISDOC_2B_SERVER_URL",
+                "served_model_name": "wevisdoc-2b",
+            },
+        )
+    )
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="wevisdoc_4b_vllm",
+            provider_name="wevisdoc",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",
+                "server_url_env": "WEVISDOC_4B_SERVER_URL",
+                "served_model_name": "wevisdoc-4b",
+            },
+        )
+    )
+
+    # Nutrient DWS Data Extraction (hosted API), one pipeline per mode.
+    # Credits per page: text 1.0, structure 1.5, understand 9.0, agentic 18.0.
+    # `text` returns no spatial elements, so it scores no Visual Grounding.
+    for _dws_mode, _dws_timeout in (
+        ("text", 300),
+        ("structure", 600),
+        ("understand", 900),
+        ("agentic", 1800),
+    ):
+        register_fn(
+            PipelineSpec(
+                pipeline_name=f"nutrient_dws_{_dws_mode}",
+                provider_name="nutrient_dws",
+                product_type=ProductType.PARSE,
+                config={
+                    "mode": _dws_mode,
+                    "timeout_s": _dws_timeout,
+                },
+            )
+        )
+
+    # =========================================================================
+    # Cohere Parse Pipelines
+    # =========================================================================
+    register_fn(
+        PipelineSpec(
+            pipeline_name="cohere_parse_v5",
+            provider_name="cohere_parse",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "parse-v5.0",
+                "max_pages": 50,
+            },
         )
     )
