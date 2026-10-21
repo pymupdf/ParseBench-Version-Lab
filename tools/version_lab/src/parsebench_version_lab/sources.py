@@ -79,6 +79,24 @@ class SourceManager:
             self.release_versions[package] = version
         return self.release_versions[package]
 
+    def resolve_mupdf(self, pymupdf: ResolvedSource) -> ResolvedSource:
+        # Read the native version from the selected immutable PyMuPDF source,
+        # including feature branches, without executing its build script.
+        url = f"https://raw.githubusercontent.com/{pymupdf.repository}/{pymupdf.resolved_sha}/setup.py"
+        with urlopen(url, timeout=30) as response:
+            setup = response.read().decode("utf-8")
+        match = re.search(r"^version_mupdf\s*=\s*['\"](\d+(?:\.\d+)+)['\"]\s*$", setup, re.MULTILINE)
+        if match is None:
+            raise RuntimeError(f"PyMuPDF {pymupdf.resolved_sha} does not declare version_mupdf in setup.py")
+        release = match.group(1)
+        component = COMPONENT_SPECS["mupdf"]
+        sha = self.remote_ref(component.repository, f"refs/tags/{release}")
+        if sha is None:
+            raise RuntimeError(f"MuPDF version {release} declared by PyMuPDF has no source tag")
+        return ResolvedSource(
+            component.name, component.label, component.repository, release, sha, Path(component.checkout_dir)
+        )
+
     def remote_ref(self, repository: str, ref: str) -> str | None:
         result = self.runner.run(
             ["git", "ls-remote", self.remote(repository), ref, f"{ref}^{{}}"],
@@ -174,8 +192,14 @@ class SourceManager:
             shutil.rmtree(destination, ignore_errors=True)
             raise
 
-    def resolve_component(self, component: ComponentSpec, config: RunConfig, root: Path) -> ResolvedSource:
-        source = self.resolve_ref(component, config.refs[component.name])
+    def resolve_component(
+        self, component: ComponentSpec, config: RunConfig, root: Path, *, pymupdf: ResolvedSource | None = None
+    ) -> ResolvedSource:
+        if component.name == "mupdf":
+            assert pymupdf is not None
+            source = self.resolve_mupdf(pymupdf)
+        else:
+            source = self.resolve_ref(component, config.refs[component.name])
         destination = root / component.checkout_dir
         sha = self.checkout(source.repository, source.resolved_sha, destination)
         if sha != source.resolved_sha:
@@ -184,4 +208,7 @@ class SourceManager:
 
     def resolve_all(self, config: RunConfig, root: Path) -> dict[str, ResolvedSource]:
         root.mkdir(parents=True, exist_ok=True)
-        return {name: self.resolve_component(component, config, root) for name, component in COMPONENT_SPECS.items()}
+        sources: dict[str, ResolvedSource] = {}
+        for name, component in COMPONENT_SPECS.items():
+            sources[name] = self.resolve_component(component, config, root, pymupdf=sources.get("pymupdf"))
+        return sources

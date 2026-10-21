@@ -7,13 +7,11 @@ run-name: >-
       inputs.pipeline,
       inputs.latest_any_branch && 'Latest branch' ||
         inputs.all_latest && 'Latest default' ||
-        inputs.mupdf_ref == inputs.pymupdf_ref &&
-        inputs.mupdf_ref == inputs.pymupdf_layout_ref &&
-        inputs.mupdf_ref == inputs.pymupdf4llm_ref &&
-        inputs.mupdf_ref ||
+        inputs.pymupdf_ref == inputs.pymupdf_layout_ref &&
+        inputs.pymupdf_ref == inputs.pymupdf4llm_ref &&
+        inputs.pymupdf_ref ||
         format(
-          'M:{0},P:{1},L:{2},4:{3}',
-          inputs.mupdf_ref,
+          'P:{0},L:{1},4:{2}',
           inputs.pymupdf_ref,
           inputs.pymupdf_layout_ref,
           inputs.pymupdf4llm_ref
@@ -30,12 +28,12 @@ on:
   workflow_dispatch:
     inputs:
       all_latest:
-        description: "Use latest default-branch commits for MuPDF, PyMuPDF, Layout and PyMuPDF4LLM. Their ref inputs are ignored."
+        description: "Use default branches for PyMuPDF, Layout and PyMuPDF4LLM. MuPDF follows PyMuPDF. Ref inputs are ignored."
         required: true
         default: false
         type: boolean
       latest_any_branch:
-        description: "Use the newest branch-head commit in each of the four source repositories. Cannot be combined with latest default-branch commits."
+        description: "Use newest branch heads for PyMuPDF, Layout and PyMuPDF4LLM. MuPDF follows PyMuPDF. Cannot combine with latest default branches."
         required: true
         default: false
         type: boolean
@@ -56,23 +54,18 @@ on:
         required: true
         default: current
         type: string
-      mupdf_ref:
-        description: "MuPDF: latest PyPI release or a current branch name. Ignored by either automatic branch mode."
-        required: true
-        default: "latest"
-        type: string
       pymupdf_ref:
         description: "PyMuPDF: latest PyPI release or a current branch name. Ignored by either automatic branch mode."
         required: true
         default: "latest"
         type: string
       pymupdf_layout_ref:
-        description: "PyMuPDF Layout: latest PyPI release or a current branch name. Ignored by either automatic branch mode."
+        description: "PyMuPDF Layout: current PyMuPDF release tag or a current branch name. Ignored by either automatic branch mode."
         required: true
         default: "latest"
         type: string
       pymupdf4llm_ref:
-        description: "PyMuPDF4LLM: latest PyPI release or a current branch name. Ignored by either automatic branch mode."
+        description: "PyMuPDF4LLM: current PyMuPDF release tag or a current branch name. Ignored by either automatic branch mode."
         required: true
         default: "latest"
         type: string
@@ -137,7 +130,6 @@ jobs:
           DATASET_REF: ${{ inputs.dataset_version }}
           GROUP_SELECTION: ${{ inputs.group }}
           LATEST_ANY_BRANCH: ${{ inputs.latest_any_branch }}
-          MUPDF_REF: ${{ inputs.mupdf_ref }}
           PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
           PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
           PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
@@ -249,63 +241,29 @@ jobs:
         run: python3 "$WORKFLOW_SCRIPTS/write_run_summary.py"
 
       - name: Install ParseBench dependencies without selected PyMuPDF packages
-        env:
-          MODERN_RAPIDOCR_PIPELINE: pymupdf4llm_html_tables_rapidocr_v3
         run: |
           export UV_PROJECT_ENVIRONMENT="$GITHUB_WORKSPACE/.venv"
-          sync_args=(--project tools/version_lab --locked)
-          if [[ "$PIPELINE" == "$MODERN_RAPIDOCR_PIPELINE" ]]; then
-            sync_args+=(--extra rapidocr-modern)
-          fi
-          uv sync "${sync_args[@]}" \
+          uv sync --project tools/version_lab --locked \
             --no-install-package pymupdf \
             --no-install-package pymupdf-layout \
             --no-install-package pymupdf4llm
-          uv pip install --python .venv "pipcl==12" "swig==4.3.1"
+          uv pip install --python .venv "swig==4.3.1"
           .venv/bin/swig -version
 
       - name: Verify RapidOCR native runtime
-        if: ${{ inputs.pipeline != 'pymupdf4llm_html_tables_rapidocr_v3' }}
-        run: .venv/bin/python -c "from rapidocr_onnxruntime import RapidOCR; print(RapidOCR)"
-
-      - name: Verify modern RapidOCR native runtime
-        if: ${{ inputs.pipeline == 'pymupdf4llm_html_tables_rapidocr_v3' }}
         run: >-
           .venv/bin/python -c
           "from importlib.metadata import version; from rapidocr import RapidOCR; import onnxruntime;
           print(f'rapidocr={version(\"rapidocr\")} onnxruntime={onnxruntime.__version__} engine={RapidOCR}')"
 
-      - name: Build and install selected PyMuPDF
+      - name: Build and install integrated PyMuPDF
         env:
           PACKAGE_DIR: ${{ steps.sources.outputs.pymupdf_dir }}
           PYMUPDF_SETUP_MUPDF_BUILD: ${{ steps.sources.outputs.mupdf_build }}
           PYMUPDF_SETUP_SWIG: ${{ github.workspace }}/.venv/bin/swig
+          PYMUPDF_SETUP_PATH_LAYOUT: ${{ steps.sources.outputs.pymupdf_layout_dir }}
+          PYMUPDF_SETUP_PATH_4LLM: ${{ steps.sources.outputs.pymupdf4llm_dir }}
         run: uv pip install --python .venv --reinstall --no-deps "$PACKAGE_DIR"
-
-      - name: Build and install selected PyMuPDF Layout
-        env:
-          PACKAGE_DIR: ${{ steps.sources.outputs.pymupdf_layout_dir }}
-          PYMUPDF_LAYOUT_SETUP_BUILD_PYMUPDF: "1"
-          PYMUPDF_LAYOUT_SETUP_SWIG: ${{ github.workspace }}/.venv/bin/swig
-        run: uv pip install --python .venv --reinstall --no-build-isolation --no-deps "$PACKAGE_DIR"
-
-      - name: Build and install selected PyMuPDF4LLM
-        env:
-          PACKAGE_DIR: ${{ steps.sources.outputs.pymupdf4llm_dir }}
-        run: uv pip install --python .venv --reinstall --no-deps "$PACKAGE_DIR"
-
-      - name: Verify modern RapidOCR and native HTML capabilities
-        if: ${{ inputs.pipeline == 'pymupdf4llm_html_tables_rapidocr_v3' }}
-        run: >-
-          .venv/bin/python -c
-          "import inspect, pymupdf4llm; from pymupdf4llm.helpers.pymupdf_rag import to_markdown as rag_to_markdown;
-          from pymupdf4llm.ocr.detect_rapidocr import detect_rapidocr_backend;
-          backend = detect_rapidocr_backend(); assert backend == 'rapidocr',
-          f'Expected modern rapidocr backend, received {backend!r}';
-          assert 'table_output' in inspect.signature(rag_to_markdown).parameters and
-          'table_output' in inspect.getsource(pymupdf4llm.to_markdown),
-          'Selected PyMuPDF4LLM revision lacks native table_output support';
-          print('modern RapidOCR and native HTML table output are available')"
 
       - name: Check source stack compatibility
         env:

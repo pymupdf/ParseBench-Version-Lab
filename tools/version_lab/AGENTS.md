@@ -28,3 +28,9 @@ tests for deleted behavior; avoid adding a large new test suite for cleanup.
 Source builds support the latest PyPI release tags and current branches.
 Historical dependency combinations and arbitrary source commits are outside
 the supported scope.
+
+Support only the current integrated PyMuPDF packaging. Build Layout and
+PyMuPDF4LLM into the PyMuPDF wheel from their selected source checkouts;
+do not add separate package installs or compatibility paths for PyMuPDF 1.x.
+Derive MuPDF from the selected PyMuPDF commit's declared native version;
+keep its provenance, but do not expose a separate MuPDF selector.

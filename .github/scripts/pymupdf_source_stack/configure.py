@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from common import COMPONENT_SPECS, append_summary, env, write_github_outputs, write_json
+from common import COMPONENT_SPECS, SELECTABLE_COMPONENTS, append_summary, env, write_github_outputs, write_json
 
 RUN_SCOPES = {
     "Quick test (15 cases)": ("test", "data/test"),
@@ -20,7 +20,7 @@ GROUPS = {
     "Text content": "text_content",
     "Text formatting": "text_formatting",
 }
-LATEST_REFS = {name: component.default_branch for name, component in COMPONENT_SPECS.items()}
+LATEST_REFS = {name: component.default_branch for name, component in SELECTABLE_COMPONENTS.items()}
 LATEST_ANY_BRANCH_REFS = dict.fromkeys(LATEST_REFS, "latest-any-branch")
 
 
@@ -53,7 +53,7 @@ def main() -> int:
         raise SystemExit("Select either all latest default-branch commits or latest commits from any branch, not both")
     requested_refs = {
         "dataset": env("DATASET_REF"),
-        "mupdf": env("MUPDF_REF"),
+        "mupdf": "auto",
         "pymupdf": env("PYMUPDF_REF"),
         "pymupdf_layout": env("PYMUPDF_LAYOUT_REF"),
         "pymupdf4llm": env("PYMUPDF4LLM_REF"),
@@ -70,7 +70,6 @@ def main() -> int:
 
     stack_label = "_".join(
         (
-            f"mupdf-{safe_ref(refs['mupdf'])}",
             f"pymupdf-{safe_ref(refs['pymupdf'])}",
             f"layout-{safe_ref(refs['pymupdf_layout'])}",
             f"4llm-{safe_ref(refs['pymupdf4llm'])}",

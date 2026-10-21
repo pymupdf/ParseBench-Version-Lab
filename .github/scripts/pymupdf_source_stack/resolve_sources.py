@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify pinned source checkouts and locate their installable packages."""
+"""Verify pinned source checkouts for the integrated PyMuPDF build."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ import json
 from pathlib import Path
 
 from common import COMPONENT_SPECS, env, git_sha, mupdf_build_spec, write_github_outputs, write_json
-from parsebench_version_lab.local import package_dir
-from parsebench_version_lab.sources import ResolvedSource
 
 
 def main() -> int:
@@ -18,11 +16,9 @@ def main() -> int:
     for name, component in COMPONENT_SPECS.items():
         root = Path(".source") / component.checkout_dir
         sha = git_sha(root)
-        source = ResolvedSource(name, component.label, component.repository, request[name]["ref"], sha, root)
         try:
             if sha != request[name]["resolved_sha"]:
                 raise RuntimeError(f"{component.label} checkout {sha} differs from the resolved commit.")
-            package = root if name == "mupdf" else package_dir(source)
         except RuntimeError as error:
             write_json(
                 output_dir / "_failure.json",
@@ -35,7 +31,7 @@ def main() -> int:
                 },
             )
             raise SystemExit(str(error)) from error
-        outputs[f"{name}_dir"] = str(package)
+        outputs[f"{name}_dir"] = str(root.resolve())
         outputs[f"{name}_sha"] = sha
     outputs["mupdf_build"] = mupdf_build_spec(outputs["mupdf_sha"])
     write_github_outputs(outputs)

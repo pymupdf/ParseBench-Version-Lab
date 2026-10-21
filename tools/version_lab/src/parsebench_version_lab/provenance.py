@@ -2,9 +2,26 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 MUPDF_REMOTE = "https://github.com/ArtifexSoftware/mupdf.git"
+
+
+def verify_integrated_build_sources(sources: dict[str, dict[str, str]]) -> dict[str, dict[str, Any]]:
+    """Check the commits embedded in the wheel, not the empty compatibility packages."""
+    result = {}
+    for name, module_name, attribute in (
+        ("pymupdf", "pymupdf._build", "pymupdf_git_sha"),
+        ("pymupdf_layout", "pymupdf.layout._build", "git_sha"),
+        ("pymupdf4llm", "pymupdf4llm._build", "pymupdf4llm_git_sha"),
+    ):
+        actual = getattr(importlib.import_module(module_name), attribute, None)
+        expected = sources[name]["resolved_sha"]
+        if actual != expected:
+            raise RuntimeError(f"Installed {name} source mismatch: expected {expected!r}, received {actual!r}")
+        result[name] = {"expected_sha": expected, "installed_sha": actual, "verified": True}
+    return result
 
 
 def mupdf_build_spec(sha: str) -> str:

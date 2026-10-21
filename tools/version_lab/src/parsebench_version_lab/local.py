@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .dataset import DatasetRevision, resolve_dataset
-from .model import COMPONENT_SPECS, DATASET_REPOSITORY, MODERN_RAPIDOCR_PIPELINE, RunConfig
+from .model import COMPONENT_SPECS, DATASET_REPOSITORY, RunConfig
 from .process import (
     CommandRunner,
     executable,
@@ -27,7 +27,7 @@ from .util import write_json
 
 SUPPORTED_SYSTEMS = ("Linux", "Darwin", "Windows")
 REQUIRED_TOOLS = ("compiler", "git", "uv", "tesseract")
-# Both native modules must use the same SWIG to share their generated types.
+# The integrated native build uses one SWIG for all generated types.
 SWIG_REQUIREMENT = "swig==4.3.1"
 COMPILER_CANDIDATES = {
     "Linux": ("cc", "gcc", "clang"),
@@ -119,14 +119,6 @@ def create_paths(repository: Path, workspace_root: Path) -> LocalPaths:
     )
 
 
-def package_dir(source: ResolvedSource) -> Path:
-    # Some live branches still package the distribution in a nested directory.
-    for candidate in (source.path, source.path / source.name):
-        if any((candidate / filename).is_file() for filename in ("pyproject.toml", "setup.py")):
-            return candidate
-    raise RuntimeError(f"{source.label} at {source.resolved_sha} is not an installable package in {source.path}")
-
-
 class LocalRun:
     def __init__(self, config: RunConfig, paths: LocalPaths, runner: CommandRunner | None = None) -> None:
         self.config = config
@@ -177,8 +169,6 @@ class LocalRun:
             self.paths.repository / "tools" / "version_lab",
             "--locked",
         ]
-        if self.config.pipeline == MODERN_RAPIDOCR_PIPELINE:
-            sync_command.extend(("--extra", "rapidocr-modern"))
         sync_command.extend(
             (
                 "--no-install-package",
@@ -195,46 +185,23 @@ class LocalRun:
             env=project_env,
         )
         python = venv_executable(self.paths.environment, "python")
-        self.runner.run(["uv", "pip", "install", "--python", python, "pipcl==12", SWIG_REQUIREMENT])
+        self.runner.run(["uv", "pip", "install", "--python", python, SWIG_REQUIREMENT])
         return python
 
-    def install_source(
-        self,
-        python: Path,
-        name: str,
-        *,
-        environment: dict[str, str] | None = None,
-        build_isolation: bool = True,
-    ) -> None:
-        command: list[str | Path] = ["uv", "pip", "install", "--python", python, "--reinstall", "--no-deps"]
-        if not build_isolation:
-            command.append("--no-build-isolation")
-        command.append(package_dir(self.sources[name]))
-        self.runner.run(
-            command,
-            env=self.command_environment(environment),
-        )
-
     def build_stack(self, python: Path) -> None:
-        swig = str(venv_executable(self.paths.environment, "swig"))
-        self.install_source(
-            python,
-            "pymupdf",
-            environment={
-                "PYMUPDF_SETUP_MUPDF_BUILD": mupdf_build_spec(self.sources["mupdf"].resolved_sha),
-                "PYMUPDF_SETUP_SWIG": swig,
-            },
+        # PyMuPDF owns the wheel; Layout and 4LLM are embedded source trees,
+        # not independently installable distributions.
+        self.runner.run(
+            ["uv", "pip", "install", "--python", python, "--reinstall", "--no-deps", self.sources["pymupdf"].path],
+            env=self.command_environment(
+                {
+                    "PYMUPDF_SETUP_MUPDF_BUILD": mupdf_build_spec(self.sources["mupdf"].resolved_sha),
+                    "PYMUPDF_SETUP_SWIG": str(venv_executable(self.paths.environment, "swig")),
+                    "PYMUPDF_SETUP_PATH_LAYOUT": str(self.sources["pymupdf_layout"].path.resolve()),
+                    "PYMUPDF_SETUP_PATH_4LLM": str(self.sources["pymupdf4llm"].path.resolve()),
+                }
+            ),
         )
-        self.install_source(
-            python,
-            "pymupdf_layout",
-            environment={
-                "PYMUPDF_LAYOUT_SETUP_BUILD_PYMUPDF": "1",
-                "PYMUPDF_LAYOUT_SETUP_SWIG": swig,
-            },
-            build_isolation=False,
-        )
-        self.install_source(python, "pymupdf4llm")
 
     def runtime_env(self) -> dict[str, str]:
         assert self.dataset is not None

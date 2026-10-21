@@ -16,7 +16,8 @@ see [the contribution boundary](AGENTS.md).
 - Network access to GitHub, PyPI, Hugging Face, and `astral.sh`
 - At least 5 GB of free space for a quick run; allow more for the full dataset
 
-SWIG is installed in the benchmark environment.
+SWIG and RapidOCR 3.9.2 are installed in the benchmark environment.
+The legacy `rapidocr-onnxruntime` package is not used.
 
 ### Linux
 
@@ -99,15 +100,26 @@ cd ParseBench-Version-Lab
 All four source repositories are public. Layout always comes from
 `ArtifexSoftware/pymupdf_layout`.
 
-By default, each package's latest stable version is read from PyPI and its
-matching Git tag is built from source. MuPDF uses the release tag matching
-PyMuPDF. PyPI wheels are not used for these source components.
+Version Lab supports the current integrated PyMuPDF package (2.0 onward).
+By default, the latest stable PyMuPDF version is read from PyPI and its
+matching Git tag is selected in the PyMuPDF, Layout, and PyMuPDF4LLM repositories.
+MuPDF is automatic: it uses the native version declared in the selected
+PyMuPDF commit's `setup.py`, including when selecting a feature branch. There
+is no separate MuPDF selector. Its exact source commit is still recorded.
+PyPI wheels are not used for these source components.
+
+The four repositories are resolved and recorded separately, then PyMuPDF builds
+one wheel containing the selected Layout and PyMuPDF4LLM sources. Both local
+runs and GitHub Actions pass `PYMUPDF_SETUP_PATH_LAYOUT` and
+`PYMUPDF_SETUP_PATH_4LLM` to the PyMuPDF build. Layout and PyMuPDF4LLM are not
+installed separately. Older packaging layouts and PyMuPDF 1.x are unsupported.
 
 Each `--*-ref` accepts `latest`, the current release tag, or a current branch
 name. Historical tags and arbitrary commit SHAs are no longer supported.
-`--all-latest` selects each repository's default branch; `--latest-any-branch`
-selects the newest branch head in each repository. All selections are resolved
-to exact commits before checkout and recorded with the results.
+`--all-latest` selects the default branches of PyMuPDF, Layout, and PyMuPDF4LLM;
+`--latest-any-branch` selects their newest branch heads. In both modes MuPDF
+follows the selected PyMuPDF source. All selections are resolved to exact
+commits before checkout and recorded with the results.
 
 ## Run
 
@@ -145,8 +157,15 @@ Resolve source and dataset commits without building:
 uv run --project tools/version_lab version-lab run --all-latest --resolve-only
 ```
 
-Select current branches and a pipeline (unspecified components use their latest
-release):
+Select any existing PyMuPDF branch (replace `main` with your branch name).
+MuPDF follows that branch automatically:
+
+```shell
+uv run --project tools/version_lab version-lab run --pymupdf-ref main --scope quick
+```
+
+Select Layout or PyMuPDF4LLM branches and a pipeline (unspecified components
+use the current release):
 
 ```shell
 uv run --project tools/version_lab version-lab run --pymupdf4llm-ref main --pipeline pymupdf4llm_markdown_150dpi --scope quick --group all
@@ -170,7 +189,7 @@ upstream ParseBench. Version Lab registers only these additional configurations:
 |---|---|
 | `pymupdf4llm_markdown_150dpi` | OCR at 150 DPI |
 | `pymupdf4llm_markdown_tesseract` | Tesseract OCR backend |
-| `pymupdf4llm_markdown_rapidocr` | Bundled RapidOCR backend |
+| `pymupdf4llm_markdown_rapidocr` | Explicit RapidOCR backend |
 | `pymupdf4llm_markdown_no_ocr` | OCR disabled |
 | `pymupdf4llm_html_tables_rapidocr_v3` | Native HTML tables with modern RapidOCR |
 
@@ -178,9 +197,14 @@ All pipelines use upstream's native HTML table output. The former
 `pymupdf4llm_html_tables` alias duplicated `pymupdf4llm_markdown_150dpi` and has
 been removed from new runs; existing results remain readable.
 
-Selected branches must support the current upstream PyMuPDF4LLM provider API.
-The runtime smoke check verifies the built source stack before benchmarking;
-Version Lab does not adapt older provider APIs or incompatible dependencies.
+Selected branches must support the integrated PyMuPDF build and current
+upstream PyMuPDF4LLM provider API. The runtime gate checks the embedded source
+commits for PyMuPDF, Layout, and PyMuPDF4LLM, verifies MuPDF build provenance,
+and exercises `Document.to_markdown()` with Layout and OCR before benchmarking.
+Component versions come from the bundled modules, not the empty compatibility
+distributions. Upstream ParseBench continues to call the bundled
+`pymupdf4llm.to_markdown()` API. Version Lab does not adapt older provider APIs
+or incompatible dependencies.
 
 ## Diagnostic boundary
 

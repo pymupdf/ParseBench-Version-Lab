@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .model import COMPONENT_SPECS
-from .provenance import verify_mupdf_build_source
+from .provenance import verify_integrated_build_sources, verify_mupdf_build_source
 from .util import write_json
 
 SMOKE_MARKERS = ("PARSEBENCH", "INVOICE NUMBER", "GRAND TOTAL")
@@ -42,13 +42,16 @@ def _source_metadata(args: argparse.Namespace) -> dict[str, dict[str, str]]:
 
 
 def _installed_versions() -> dict[str, str | None]:
+    import pymupdf
+    import pymupdf.layout._build
+    import pymupdf4llm
+
     return {
         "onnxruntime": _distribution_version("onnxruntime"),
-        "pymupdf": _distribution_version("PyMuPDF"),
-        "pymupdf_layout": _distribution_version("pymupdf-layout"),
-        "pymupdf4llm": _distribution_version("pymupdf4llm"),
+        "pymupdf": pymupdf.__version__,
+        "pymupdf_layout": pymupdf.layout._build.version,
+        "pymupdf4llm": pymupdf4llm.__version__,
         "rapidocr": _distribution_version("rapidocr"),
-        "rapidocr_onnxruntime": _distribution_version("rapidocr-onnxruntime"),
     }
 
 
@@ -73,28 +76,30 @@ def _make_smoke_pdf(path: Path) -> None:
     document.close()
 
 
-def run_compatibility_check(mupdf_repository: str, mupdf_sha: str) -> dict[str, Any]:
+def run_compatibility_check(sources: dict[str, dict[str, str]]) -> dict[str, Any]:
     import pymupdf
 
-    build_provenance = verify_mupdf_build_source(pymupdf, mupdf_repository, mupdf_sha)
+    build_provenance = verify_mupdf_build_source(
+        pymupdf, sources["mupdf"]["repository"], sources["mupdf"]["resolved_sha"]
+    )
+    integrated_provenance = verify_integrated_build_sources(sources)
 
     import pymupdf.layout
 
     pymupdf.layout.activate()
 
-    import pymupdf4llm  # type: ignore[import-untyped]
-
     with tempfile.TemporaryDirectory(prefix="parsebench-pymupdf-compat-") as temp_dir:
         smoke_pdf = Path(temp_dir) / "compatibility.pdf"
         _make_smoke_pdf(smoke_pdf)
-        chunks = pymupdf4llm.to_markdown(
-            smoke_pdf,
-            page_chunks=True,
-            show_progress=False,
-            use_ocr=True,
-            force_ocr=True,
-            ocr_dpi=200,
-        )
+        with pymupdf.open(smoke_pdf) as document:
+            chunks = document.to_markdown(
+                page_chunks=True,
+                show_progress=False,
+                use_ocr=True,
+                force_ocr=True,
+                ocr_dpi=200,
+                table_output="html",
+            )
 
     if not isinstance(chunks, list) or len(chunks) != 1:
         raise RuntimeError(f"Expected one page chunk, received {type(chunks).__name__}: {chunks!r}")
@@ -116,6 +121,7 @@ def run_compatibility_check(mupdf_repository: str, mupdf_sha: str) -> dict[str, 
         raise RuntimeError("PyMuPDF4LLM output did not contain non-empty Layout page_boxes")
     return {
         "mupdf_build_provenance": build_provenance,
+        "integrated_build_provenance": integrated_provenance,
         "layout_mode": True,
         "ocr_markers_found": list(SMOKE_MARKERS),
         "page_box_count": len(page_boxes),
@@ -139,10 +145,10 @@ def main(arguments: list[str] | None = None) -> int:
     result: dict[str, Any] = {
         "python": platform.python_version(),
         "sources": _source_metadata(args),
-        "installed_versions": _installed_versions(),
     }
     try:
-        result["checks"] = run_compatibility_check(args.mupdf_repository, args.mupdf_sha)
+        result["installed_versions"] = _installed_versions()
+        result["checks"] = run_compatibility_check(result["sources"])
         result["status"] = "compatible"
     except Exception as error:
         result["status"] = "incompatible"

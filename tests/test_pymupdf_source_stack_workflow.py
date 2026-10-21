@@ -61,7 +61,6 @@ def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monk
         "GITHUB_RUN_ID": "123",
         "GROUP_SELECTION": "Page layout",
         "LATEST_ANY_BRANCH": "false",
-        "MUPDF_REF": "feature/native",
         "PYMUPDF4LLM_REF": "feature/llm",
         "PYMUPDF_LAYOUT_REF": "latest",
         "PYMUPDF_REF": "main",
@@ -81,7 +80,7 @@ def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monk
     assert "4llm-feature-llm" in outputs["destination"]
 
     request = json.loads((tmp_path / "parsebench-output" / "_source_request.json").read_text())
-    assert request["mupdf"] == {"ref": "feature/native", "repository": "ArtifexSoftware/mupdf"}
+    assert request["mupdf"] == {"ref": "auto", "repository": "ArtifexSoftware/mupdf"}
     assert request["pymupdf"] == {"ref": "main", "repository": "pymupdf/PyMuPDF"}
     assert request["pymupdf_layout"] == {
         "ref": "latest",
@@ -104,7 +103,6 @@ def test_configure_all_latest_overrides_source_inputs_but_preserves_dataset_vers
         "GITHUB_RUN_ID": "456",
         "GROUP_SELECTION": "All categories",
         "LATEST_ANY_BRANCH": "false",
-        "MUPDF_REF": "1.27.0",
         "PYMUPDF4LLM_REF": "1.28.0",
         "PYMUPDF_LAYOUT_REF": "1.28.0",
         "PYMUPDF_REF": "a" * 40,
@@ -120,7 +118,7 @@ def test_configure_all_latest_overrides_source_inputs_but_preserves_dataset_vers
     assert outputs["dataset_ref"] == "d" * 40
 
     request = json.loads((tmp_path / "parsebench-output" / "_source_request.json").read_text())
-    assert request["mupdf"] == {"ref": "master", "repository": "ArtifexSoftware/mupdf"}
+    assert request["mupdf"] == {"ref": "auto", "repository": "ArtifexSoftware/mupdf"}
     assert request["pymupdf"] == {"ref": "main", "repository": "pymupdf/PyMuPDF"}
 
 
@@ -139,7 +137,6 @@ def test_configure_latest_any_branch_uses_resolver_placeholders(
         "GITHUB_RUN_ID": "789",
         "GROUP_SELECTION": "All categories",
         "LATEST_ANY_BRANCH": "true",
-        "MUPDF_REF": "1.28.0",
         "PYMUPDF4LLM_REF": "1.28.0",
         "PYMUPDF_LAYOUT_REF": "1.28.0",
         "PYMUPDF_REF": "1.28.0",
@@ -154,7 +151,8 @@ def test_configure_latest_any_branch_uses_resolver_placeholders(
     outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
     assert "pymupdf-latest-any-branch" in outputs["destination"]
     request = json.loads((tmp_path / "parsebench-output" / "_source_request.json").read_text())
-    assert all(source["ref"] == "latest-any-branch" for source in request.values())
+    assert request["mupdf"]["ref"] == "auto"
+    assert all(request[name]["ref"] == "latest-any-branch" for name in configure.SELECTABLE_COMPONENTS)
 
 
 def test_configure_rejects_both_automatic_latest_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -181,26 +179,35 @@ def test_resolve_refs_records_pinned_shas(tmp_path: Path, monkeypatch: pytest.Mo
         assert selection == "latest"
         return SimpleNamespace(
             repository=component.repository,
-            requested_ref="1.28.2",
+            requested_ref="2.0",
             selected_branch=None,
             resolved_sha="a" * 40,
         )
 
     monkeypatch.setattr(resolve_refs.SourceManager, "resolve_ref", resolve_ref)
 
+    def resolve_mupdf(self, pymupdf):
+        assert pymupdf.resolved_sha == "a" * 40
+        return SimpleNamespace(
+            repository="ArtifexSoftware/mupdf", requested_ref="1.28.5", selected_branch=None, resolved_sha="b" * 40
+        )
+
+    monkeypatch.setattr(resolve_refs.SourceManager, "resolve_mupdf", resolve_mupdf)
+
     assert resolve_refs.main() == 0
 
     outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
     request = json.loads(request_path.read_text())
     for name, component in configure.COMPONENT_SPECS.items():
-        assert outputs[f"{name}_sha"] == "a" * 40
-        assert outputs[f"{name}_ref"] == "1.28.2"
+        sha, ref = ("b" * 40, "1.28.5") if name == "mupdf" else ("a" * 40, "2.0")
+        assert outputs[f"{name}_sha"] == sha
+        assert outputs[f"{name}_ref"] == ref
         assert request[name] == {
             "selection": "latest",
-            "ref": "1.28.2",
+            "ref": ref,
             "branch": None,
             "repository": component.repository,
-            "resolved_sha": "a" * 40,
+            "resolved_sha": sha,
         }
 
 
@@ -220,22 +227,43 @@ def test_resolve_refs_preserves_diagnostics_on_failure(tmp_path: Path, monkeypat
         resolve_refs.main()
 
     failure = json.loads((tmp_path / "_failure.json").read_text())
-    assert failure["component"] == "MuPDF"
+    assert failure["component"] == "PyMuPDF"
     assert failure["requested_ref"] == "old-release"
     assert not github_output.exists()
 
 
 def test_resolve_sources_rejects_changed_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
-    (tmp_path / "_source_request.json").write_text(json.dumps({"mupdf": {"ref": "master", "resolved_sha": "a" * 40}}))
+    (tmp_path / "_source_request.json").write_text(json.dumps({"pymupdf": {"ref": "main", "resolved_sha": "a" * 40}}))
     monkeypatch.setattr(resolve_sources, "git_sha", lambda root: "b" * 40)
 
     with pytest.raises(SystemExit, match="differs from the resolved commit"):
         resolve_sources.main()
 
     failure = json.loads((tmp_path / "_failure.json").read_text())
-    assert failure["component"] == "MuPDF"
+    assert failure["component"] == "PyMuPDF"
     assert failure["resolved_sha"] == "b" * 40
+
+
+def test_resolve_sources_exports_absolute_roots_without_standalone_packages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    github_output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(github_output))
+    request = {name: {"ref": "main", "resolved_sha": "a" * 40} for name in configure.COMPONENT_SPECS}
+    (tmp_path / "_source_request.json").write_text(json.dumps(request))
+    monkeypatch.setattr(resolve_sources, "git_sha", lambda root: "a" * 40)
+    for component in configure.COMPONENT_SPECS.values():
+        (tmp_path / ".source" / component.checkout_dir).mkdir(parents=True)
+
+    assert resolve_sources.main() == 0
+
+    outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
+    for name, component in configure.COMPONENT_SPECS.items():
+        assert outputs[f"{name}_dir"] == str(tmp_path / ".source" / component.checkout_dir)
+        assert outputs[f"{name}_sha"] == "a" * 40
 
 
 def test_source_summary_links_resolved_commits(monkeypatch: pytest.MonkeyPatch) -> None:

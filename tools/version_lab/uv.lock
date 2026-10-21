@@ -895,13 +895,8 @@ dependencies = [
     { name = "parse-bench" },
     { name = "psutil" },
     { name = "pyyaml" },
-    { name = "rapidocr-onnxruntime" },
-    { name = "tabulate" },
-]
-
-[package.optional-dependencies]
-rapidocr-modern = [
     { name = "rapidocr" },
+    { name = "tabulate" },
 ]
 
 [package.metadata]
@@ -911,11 +906,9 @@ requires-dist = [
     { name = "parse-bench", editable = "../../" },
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "rapidocr", marker = "extra == 'rapidocr-modern'", specifier = "==3.9.2" },
-    { name = "rapidocr-onnxruntime", specifier = "==1.2.3" },
+    { name = "rapidocr", specifier = "==3.9.2" },
     { name = "tabulate", specifier = ">=0.9.0" },
 ]
-provides-extras = ["rapidocr-modern"]
 
 [[package]]
 name = "pillow"
@@ -1365,24 +1358,6 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/55/ed/0ee9b9281986974be9d2406ae0134c8d7c91d2fc613f16ffda9701eeda6f/rapidocr-3.9.2-py3-none-any.whl", hash = "sha256:04d6b8d151f823d930bd91910555f57bea897c0c44fa6794267b94cf9c1ef9a0", size = 27275208, upload-time = "2026-07-21T10:59:01.599Z" },
-]
-
-[[package]]
-name = "rapidocr-onnxruntime"
-version = "1.2.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "onnxruntime" },
-    { name = "opencv-python" },
-    { name = "pillow" },
-    { name = "pyclipper" },
-    { name = "pyyaml" },
-    { name = "shapely" },
-    { name = "six" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/ef/0df9a58310895ab357f85df67935af6a8fb98f0965c7476cee6fcb966a7e/rapidocr_onnxruntime-1.2.3-py3-none-any.whl", hash = "sha256:c707d3a6eb72d13119afe9602d3cc36d8b2a4a4d74e9575cf1b0e67ed6a27819", size = 12326259, upload-time = "2023-03-11T06:25:37.618Z" },
 ]
 
 [[package]]

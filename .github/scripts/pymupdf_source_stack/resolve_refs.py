@@ -17,10 +17,16 @@ def main() -> int:
     request = json.loads(request_path.read_text(encoding="utf-8"))
     manager = SourceManager(CommandRunner())
     outputs = {}
+    resolved = {}
     for name, component in COMPONENT_SPECS.items():
         selection = request[name]["ref"]
         try:
-            source = manager.resolve_ref(component, selection)
+            source = (
+                manager.resolve_mupdf(resolved["pymupdf"])
+                if name == "mupdf"
+                else manager.resolve_ref(component, selection)
+            )
+            resolved[name] = source
         except (OSError, RuntimeError, ValueError) as error:
             message = f"Cannot resolve {component.label} selection {selection!r}: {error}"
             write_json(

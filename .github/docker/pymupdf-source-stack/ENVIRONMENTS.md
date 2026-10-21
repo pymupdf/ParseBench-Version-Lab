@@ -17,7 +17,8 @@ rebuilt; they must not be used by benchmark jobs.
 
 Container publication is restricted to the repository's default branch and
 serialized so two publishers cannot race to update a version tag. The publisher
-checks the system environment and RapidOCR import, but does not promote its
+checks the system environment and RapidOCR/ONNX imports using the dependencies
+in `tools/version_lab/uv.lock`, but does not promote its
 digest into the benchmark workflow automatically. Before changing the pinned
 benchmark digest, run the all-latest 15-case benchmark against the candidate,
 verify exact MuPDF provenance and Layout/OCR compatibility, compare aggregate
@@ -61,12 +62,18 @@ The latest image uses:
 
 The image contains system and build dependencies, not the selected PyMuPDF
 source stack or the ParseBench Python environment. The benchmark workflow still
-needs to install its locked dependencies and build the selected MuPDF,
-PyMuPDF, PyMuPDF Layout, and PyMuPDF4LLM revisions inside the container. The
+needs to install its locked dependencies and build one PyMuPDF wheel containing
+the selected Layout and PyMuPDF4LLM sources. MuPDF is built from the native
+version declared by the selected PyMuPDF revision. The
 image includes `unzip` because current MuPDF source uses it while generating
 the Extract DOCX template. `rapidocr-onnxruntime==1.2.3` and
 `opencv-python==4.13.0.92` were installed only inside the publisher's
 validation environment; they were not baked into the image.
+
+The current publisher mounts the repository read-only and installs the Version
+Lab lockfile into a temporary environment, skipping the two local projects.
+This validates the same RapidOCR and ONNX dependencies used by benchmark runs
+without duplicating their version pins in the workflow.
 
 The image writes its principal versions to
 `/usr/local/share/parsebench/environment.txt` for runtime verification.
@@ -101,9 +108,11 @@ The production workflow uses the following integration:
 3. Run workflow shell steps with Bash inside the container.
 4. Mark the workspace and the four source checkouts as Git safe directories,
    because Actions mounts them with host ownership.
-5. Use `uv sync --locked --extra runners`, excluding the three source-built
-   PyMuPDF packages as the current workflow does.
+5. Use `uv sync --project tools/version_lab --locked`, excluding `pymupdf`,
+   `pymupdf-layout`, and `pymupdf4llm` as the current workflow does.
 6. Verify `/usr/local/share/parsebench/environment.txt`, Python, Tesseract,
    SWIG, and the RapidOCR import before compiling the selected source stack.
-7. Keep the existing behavioral Layout/OCR compatibility test as the final
-   environment and source-stack gate.
+7. Build PyMuPDF with `PYMUPDF_SETUP_PATH_LAYOUT` and `PYMUPDF_SETUP_PATH_4LLM`
+   pointing to the selected source checkouts, and the resolved MuPDF source.
+8. Verify all four source revisions and run the behavioral Layout/OCR
+   compatibility test before benchmarking.

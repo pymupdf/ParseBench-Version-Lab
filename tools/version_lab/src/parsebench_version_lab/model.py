@@ -19,21 +19,20 @@ class ComponentSpec:
 
 
 COMPONENT_SPECS = {
-    # MuPDF's matching source release is identified by the PyMuPDF distribution.
-    "mupdf": ComponentSpec("mupdf", "MuPDF", "ArtifexSoftware/mupdf", "mupdf", "master", "pymupdf"),
+    # Resolve PyMuPDF first: the selected source declares the native MuPDF version.
     "pymupdf": ComponentSpec("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", "pymupdf", "main", "pymupdf"),
+    "mupdf": ComponentSpec("mupdf", "MuPDF", "ArtifexSoftware/mupdf", "mupdf", "master", "pymupdf"),
     "pymupdf_layout": ComponentSpec(
         "pymupdf_layout",
         "PyMuPDF Layout",
         "ArtifexSoftware/pymupdf_layout",
         "pymupdf-layout",
         "main",
-        "pymupdf-layout",
+        "pymupdf",
     ),
-    "pymupdf4llm": ComponentSpec(
-        "pymupdf4llm", "PyMuPDF4LLM", "pymupdf/pymupdf4llm", "pymupdf4llm", "main", "pymupdf4llm"
-    ),
+    "pymupdf4llm": ComponentSpec("pymupdf4llm", "PyMuPDF4LLM", "pymupdf/pymupdf4llm", "pymupdf4llm", "main", "pymupdf"),
 }
+SELECTABLE_COMPONENTS = {name: component for name, component in COMPONENT_SPECS.items() if name != "mupdf"}
 
 DATASET_REPOSITORY = "llamaindex/ParseBench"
 DATASET_BRANCHES = {"full": "main", "test": "test-data"}
@@ -55,7 +54,6 @@ DEFAULT_PIPELINE = PIPELINES[0]
 class RunConfig:
     """A frontend-independent description of one Version Lab run."""
 
-    mupdf_ref: str = LATEST_RELEASE
     pymupdf_ref: str = LATEST_RELEASE
     pymupdf_layout_ref: str = LATEST_RELEASE
     pymupdf4llm_ref: str = LATEST_RELEASE
@@ -77,11 +75,12 @@ class RunConfig:
             raise ValueError(f"Unsupported group {self.group!r}; expected one of: {', '.join(GROUPS)}")
         if self.all_latest and self.latest_any_branch:
             raise ValueError("Select all-latest or latest-any-branch, not both")
-        requested = {name: getattr(self, f"{name}_ref") for name in COMPONENT_SPECS}
+        requested = {name: getattr(self, f"{name}_ref") for name in SELECTABLE_COMPONENTS}
         if self.latest_any_branch:
-            requested = dict.fromkeys(COMPONENT_SPECS, "latest-any-branch")
+            requested = dict.fromkeys(SELECTABLE_COMPONENTS, "latest-any-branch")
         elif self.all_latest:
-            requested = {name: component.default_branch for name, component in COMPONENT_SPECS.items()}
+            requested = {name: component.default_branch for name, component in SELECTABLE_COMPONENTS.items()}
+        requested["mupdf"] = "auto"
         object.__setattr__(self, "refs", requested)
 
     @property

@@ -10,9 +10,9 @@ the adapters in this directory translate GitHub environment variables and
 output files to that shared core. GitHub-only publishing and failure-summary
 behavior remains here.
 
-MuPDF is an independently selected source component. The workflow resolves its
-latest PyPI release tag or current branch head to a full SHA before checkout, then gives
-PyMuPDF's build system a reproducible
+MuPDF follows the version declared in the selected PyMuPDF commit's `setup.py`;
+developers do not select it separately. The workflow resolves that native
+release tag to a full SHA before checkout, then gives PyMuPDF's build system a reproducible
 `git:--sha <sha> https://github.com/ArtifexSoftware/mupdf.git` selector through
 `PYMUPDF_SETUP_MUPDF_BUILD`. The compatibility gate independently compares
 that selector with the source embedded in the installed
@@ -36,12 +36,16 @@ reports, scores, or upstream modules.
 Each adapter is a small command with one responsibility. `resolve_dataset.py`
 resolves the `current` Hugging Face branch or validates a user-supplied full
 commit SHA. `resolve_refs.py` uses the shared source resolver for all four
-components. Source inputs default to `latest`, which resolves the current
-PyPI release to its Git tag. Existing branch names, all default branches, and
-the newest branch head per repository are also supported. Historical release
+components. PyMuPDF, Layout, and PyMuPDF4LLM inputs default to `latest`, which
+resolves the current PyMuPDF PyPI release to its Git tag in each repository.
+Existing branch names, all default branches, and the newest branch head per
+repository are also supported; MuPDF always follows the selected PyMuPDF commit. Historical release
 tags and arbitrary source commits are rejected. Layout always comes from
 `ArtifexSoftware/pymupdf_layout`. `resolve_sources.py` verifies every source
-checkout against its resolved SHA before the source builds begin. Finally,
+checkout against its resolved SHA and exports absolute source roots. PyMuPDF
+builds one wheel using `PYMUPDF_SETUP_PATH_LAYOUT` and
+`PYMUPDF_SETUP_PATH_4LLM`; the embedded commit IDs are checked before benchmarking.
+There are no standalone Layout/4LLM installs or older packaging fallbacks. Finally,
 `benchmark.py download` reuses only a complete cached snapshot whose internal
 revision marker matches that SHA. A missing, stale, or incomplete snapshot is
 removed and downloaded again. Inputs supplied by the workflow are passed

@@ -60,7 +60,7 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.candidate.outputs.tag }}
         run: |
-          docker run --rm "$IMAGE_TAG" bash -euo pipefail -c '
+          docker run --rm --volume "$GITHUB_WORKSPACE:/workspace:ro" "$IMAGE_TAG" bash -euo pipefail -c '
             set -x
             test "$(python --version)" = "Python 3.12.13"
             test "$(uv --version | cut -d" " -f2)" = "0.11.29"
@@ -76,11 +76,11 @@ jobs:
             cc --version
             swig -version
             cat /usr/local/share/parsebench/environment.txt
-            uv venv /tmp/rapidocr-smoke
-            uv pip install --python /tmp/rapidocr-smoke/bin/python \
-              "rapidocr-onnxruntime==1.2.3" "opencv-python==4.13.0.92"
+            UV_PROJECT_ENVIRONMENT=/tmp/rapidocr-smoke \
+              uv sync --project /workspace/tools/version_lab --locked \
+                --no-install-project --no-install-package parse-bench
             /tmp/rapidocr-smoke/bin/python -c \
-              "from rapidocr_onnxruntime import RapidOCR; print(RapidOCR)"
+              "from importlib.metadata import version; from rapidocr import RapidOCR; import onnxruntime; print(version(\"rapidocr\"), onnxruntime.__version__, RapidOCR)"
           '
 
       - name: Log in to GitHub Container Registry

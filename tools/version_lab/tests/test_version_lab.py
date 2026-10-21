@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,12 +16,11 @@ INDEX_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-
 RECONCILE_WORKFLOW = Path(__file__).parents[3] / ".github" / "workflows" / "pymupdf-source-stack-reconcile.yml"
 sys.path.insert(0, str(VERSION_LAB_SRC))
 
-from parsebench_version_lab import cli, local  # noqa: E402
-from parsebench_version_lab.local import LocalRun, create_paths, ensure_ready, package_dir  # noqa: E402
+from parsebench_version_lab import cli, local, provenance, runtime_check, sources  # noqa: E402
+from parsebench_version_lab.local import LocalRun, create_paths, ensure_ready  # noqa: E402
 from parsebench_version_lab.model import (  # noqa: E402
     COMPONENT_SPECS,
     DEFAULT_PIPELINE,
-    MODERN_RAPIDOCR_PIPELINE,
     PIPELINES,
     RunConfig,
 )
@@ -36,7 +37,7 @@ def test_run_config_normalizes_latest_refs_and_scope() -> None:
     config = RunConfig(all_latest=True, scope="quick", group="table")
 
     assert config.refs == {
-        "mupdf": "master",
+        "mupdf": "auto",
         "pymupdf": "main",
         "pymupdf_layout": "main",
         "pymupdf4llm": "main",
@@ -110,24 +111,23 @@ def test_github_indexing_is_independent_from_the_benchmark_outcome() -> None:
     assert 'run: python3 "$WORKFLOW_SCRIPTS/reconcile_results.py"' in reconcile_workflow
 
 
-def test_github_workflow_installs_and_verifies_modern_rapidocr_only_for_its_pipeline() -> None:
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-
-    assert f"MODERN_RAPIDOCR_PIPELINE: {MODERN_RAPIDOCR_PIPELINE}" in workflow
-    assert "sync_args+=(--extra rapidocr-modern)" in workflow
-    assert f"inputs.pipeline == '{MODERN_RAPIDOCR_PIPELINE}'" in workflow
-    assert f"inputs.pipeline != '{MODERN_RAPIDOCR_PIPELINE}'" in workflow
-    assert "Expected modern rapidocr backend" in workflow
-    assert "lacks native table_output support" in workflow
+def test_github_workflow_uses_current_rapidocr_for_every_pipeline() -> None:
+    publisher = WORKFLOW.with_name("pymupdf-source-stack-environment.yml").read_text(encoding="utf-8")
+    for workflow in (WORKFLOW.read_text(encoding="utf-8"), publisher):
+        assert "from rapidocr import RapidOCR" in workflow
+        assert "rapidocr_onnxruntime" not in workflow
+        assert "rapidocr-onnxruntime" not in workflow
+        assert "--extra rapidocr-modern" not in workflow
+    assert "uv sync --project /workspace/tools/version_lab --locked" in publisher
 
 
 def test_run_config_marks_latest_any_branch_refs_as_dynamic() -> None:
     config = RunConfig(latest_any_branch=True)
 
     assert config.refs == dict.fromkeys(
-        ("mupdf", "pymupdf", "pymupdf_layout", "pymupdf4llm"),
+        ("pymupdf", "pymupdf_layout", "pymupdf4llm"),
         "latest-any-branch",
-    )
+    ) | {"mupdf": "auto"}
 
 
 def test_parse_branch_heads_uses_deterministic_newest_commit() -> None:
@@ -152,19 +152,19 @@ def test_source_manager_limits_sources_to_latest_release_and_current_branches(tm
     subprocess.run(["git", "-C", remote, "add", "file.txt"], check=True)
     subprocess.run(["git", "-C", remote, "commit", "--quiet", "-m", "test source"], check=True)
     subprocess.run(["git", "-C", remote, "branch", "feature/current"], check=True)
-    subprocess.run(["git", "-C", remote, "tag", "-a", "1.28.2", "-m", "release"], check=True)
+    subprocess.run(["git", "-C", remote, "tag", "-a", "2.0", "-m", "release"], check=True)
     subprocess.run(["git", "-C", remote, "tag", "1.27.0"], check=True)
     expected = subprocess.check_output(["git", "-C", remote, "rev-parse", "HEAD"], text=True).strip()
 
     manager = SourceManager(CommandRunner(verbose=False))
     manager.remote = lambda repository: str(remote)  # type: ignore[method-assign]
-    manager.latest_release = lambda package: "1.28.2"  # type: ignore[method-assign]
+    manager.latest_release = lambda package: "2.0"  # type: ignore[method-assign]
     component = COMPONENT_SPECS["pymupdf4llm"]
 
-    for ref in ("latest", "1.28.2", "feature/current"):
+    for ref in ("latest", "2.0", "feature/current"):
         source = manager.resolve_component(component, RunConfig(pymupdf4llm_ref=ref), tmp_path / ref)
         assert source.resolved_sha == expected
-        assert source.requested_ref == ("1.28.2" if ref == "latest" else ref)
+        assert source.requested_ref == ("2.0" if ref == "latest" else ref)
         assert source.selected_branch == (ref if ref == "feature/current" else None)
         assert (source.path / "file.txt").read_text(encoding="utf-8") == "selected source\n"
 
@@ -181,13 +181,75 @@ def test_create_paths_keeps_environment_inside_unique_run(tmp_path: Path) -> Non
     assert paths.run.parent == tmp_path / ".version-lab"
 
 
-def test_package_dir_supports_current_experimenting_branch_layout(tmp_path: Path) -> None:
-    package = tmp_path / "pymupdf4llm"
-    package.mkdir()
-    (package / "setup.py").touch()
-    source = ResolvedSource("pymupdf4llm", "PyMuPDF4LLM", "owner/repo", "experimenting", "a" * 40, tmp_path)
+def test_mupdf_release_uses_native_version_from_pinned_pymupdf_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = SourceManager(CommandRunner(verbose=False))
+    manager.release_versions["pymupdf"] = "2.0"
+    refs = {
+        ("pymupdf/PyMuPDF", "refs/tags/2.0"): "a" * 40,
+        ("ArtifexSoftware/mupdf", "refs/tags/1.28.5"): "b" * 40,
+    }
+    monkeypatch.setattr(manager, "remote_ref", lambda repository, ref: refs.get((repository, ref)))
 
-    assert package_dir(source) == package
+    def read_setup(url: str, *, timeout: int) -> io.BytesIO:
+        assert url == f"https://raw.githubusercontent.com/pymupdf/PyMuPDF/{'a' * 40}/setup.py"
+        return io.BytesIO(b"version_p = '2.0'\nversion_mupdf = '1.28.5'\nraise RuntimeError('do not execute')\n")
+
+    monkeypatch.setattr(sources, "urlopen", read_setup)
+    pymupdf = ResolvedSource("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", "feature/current", "a" * 40, Path("."))
+    source = manager.resolve_mupdf(pymupdf)
+    assert source.requested_ref == "1.28.5"
+    assert source.resolved_sha == "b" * 40
+    assert all(component.pypi_package == "pymupdf" for component in COMPONENT_SPECS.values())
+
+
+def test_github_workflow_builds_one_integrated_package() -> None:
+    import yaml
+
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+    builds = [step for step in steps if step.get("name", "").startswith("Build and install")]
+    assert len(builds) == 1
+    environment = builds[0]["env"]
+    assert environment["PYMUPDF_SETUP_PATH_LAYOUT"] == "${{ steps.sources.outputs.pymupdf_layout_dir }}"
+    assert environment["PYMUPDF_SETUP_PATH_4LLM"] == "${{ steps.sources.outputs.pymupdf4llm_dir }}"
+    assert environment["PYMUPDF_SETUP_MUPDF_BUILD"] == "${{ steps.sources.outputs.mupdf_build }}"
+
+
+@pytest.mark.parametrize("mismatch", [None, "pymupdf", "pymupdf_layout", "pymupdf4llm"])
+def test_integrated_provenance_checks_each_embedded_commit(
+    mismatch: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selected = {name: {"resolved_sha": "a" * 40} for name in COMPONENT_SPECS}
+    modules = {
+        "pymupdf._build": SimpleNamespace(pymupdf_git_sha="a" * 40),
+        "pymupdf.layout._build": SimpleNamespace(git_sha="a" * 40),
+        "pymupdf4llm._build": SimpleNamespace(pymupdf4llm_git_sha="a" * 40),
+    }
+    monkeypatch.setattr(provenance.importlib, "import_module", modules.__getitem__)
+    if mismatch:
+        selected[mismatch]["resolved_sha"] = "b" * 40
+        with pytest.raises(RuntimeError, match=f"Installed {mismatch} source mismatch"):
+            provenance.verify_integrated_build_sources(selected)
+    else:
+        checks = provenance.verify_integrated_build_sources(selected)
+        assert set(checks) == {"pymupdf", "pymupdf_layout", "pymupdf4llm"}
+        assert all(check["verified"] for check in checks.values())
+
+
+def test_runtime_import_failure_still_writes_diagnostics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken_import() -> dict[str, str | None]:
+        raise ImportError("missing embedded layout")
+
+    monkeypatch.setattr(runtime_check, "_installed_versions", broken_import)
+    output = tmp_path / "compatibility.json"
+    args = ["--output", str(output)]
+    for name in COMPONENT_SPECS:
+        for field, value in (("repository", f"owner/{name}"), ("ref", "main"), ("sha", "a" * 40)):
+            args.extend([f"--{name.replace('_', '-')}-{field}", value])
+    assert runtime_check.main(args) == 1
+    result = json.loads(output.read_text())
+    assert result["status"] == "incompatible"
+    assert result["error"] == "ImportError: missing embedded layout"
 
 
 def test_environment_creation_does_not_reuse_controller_virtualenv(
@@ -216,30 +278,7 @@ def test_environment_creation_does_not_reuse_controller_virtualenv(
     assert local.SWIG_REQUIREMENT in runner.calls[2]["command"]
 
 
-def test_modern_rapidocr_pipeline_adds_only_its_locked_environment_extra(tmp_path: Path) -> None:
-    class RecordingRunner:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, object]] = []
-
-        def run(self, command: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-            self.calls.append({"command": command, **kwargs})
-            return subprocess.CompletedProcess([], 0, stdout="", stderr="")
-
-    paths = create_paths(tmp_path, tmp_path / ".version-lab")
-    runner = RecordingRunner()
-
-    LocalRun(
-        RunConfig(pipeline=MODERN_RAPIDOCR_PIPELINE),
-        paths,
-        runner=runner,
-    ).create_environment()  # type: ignore[arg-type]
-
-    sync_command = runner.calls[1]["command"]
-    assert "--extra" in sync_command
-    assert "rapidocr-modern" in sync_command
-
-
-def test_stack_build_uses_one_swig_for_pymupdf_and_layout(tmp_path: Path) -> None:
+def test_stack_build_embeds_sources_in_one_pymupdf_install(tmp_path: Path) -> None:
     class RecordingRunner:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
@@ -260,7 +299,7 @@ def test_stack_build_uses_one_swig_for_pymupdf_and_layout(tmp_path: Path) -> Non
     ):
         source_path = tmp_path / name
         source_path.mkdir()
-        if name != "mupdf":
+        if name == "pymupdf":
             (source_path / "pyproject.toml").touch()
         sources[name] = ResolvedSource(name, label, f"owner/{name}", "main", "a" * 40, source_path)
     run.sources = sources
@@ -269,11 +308,15 @@ def test_stack_build_uses_one_swig_for_pymupdf_and_layout(tmp_path: Path) -> Non
 
     expected_swig = str(venv_executable(paths.environment, "swig"))
     pymupdf_environment = runner.calls[0]["env"]
-    layout_environment = runner.calls[1]["env"]
+    assert len(runner.calls) == 1
+    assert runner.calls[0]["command"][-1] == sources["pymupdf"].path
     assert isinstance(pymupdf_environment, dict)
-    assert isinstance(layout_environment, dict)
     assert pymupdf_environment["PYMUPDF_SETUP_SWIG"] == expected_swig
-    assert layout_environment["PYMUPDF_LAYOUT_SETUP_SWIG"] == expected_swig
+    assert pymupdf_environment["PYMUPDF_SETUP_PATH_LAYOUT"] == str(sources["pymupdf_layout"].path.resolve())
+    assert pymupdf_environment["PYMUPDF_SETUP_PATH_4LLM"] == str(sources["pymupdf4llm"].path.resolve())
+    assert pymupdf_environment["PYMUPDF_SETUP_MUPDF_BUILD"] == (
+        f"git:--sha {'a' * 40} https://github.com/ArtifexSoftware/mupdf.git"
+    )
 
 
 def test_venv_python_path_is_platform_specific(tmp_path: Path) -> None:
@@ -370,7 +413,7 @@ def test_cli_plan_is_machine_readable(capsys: pytest.CaptureFixture[str]) -> Non
     assert cli.main(["plan", "--all-latest", "--scope", "quick", "--group", "layout"]) == 0
 
     plan = json.loads(capsys.readouterr().out)
-    assert plan["refs"]["mupdf"] == "master"
+    assert plan["refs"]["mupdf"] == "auto"
     assert plan["run_scope"] == "test"
     assert plan["group"] == "layout"
 
@@ -379,7 +422,8 @@ def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.Capture
     assert cli.main(["plan", "--latest-any-branch"]) == 0
 
     plan = json.loads(capsys.readouterr().out)
-    assert set(plan["refs"].values()) == {"latest-any-branch"}
+    assert plan["refs"]["mupdf"] == "auto"
+    assert {value for name, value in plan["refs"].items() if name != "mupdf"} == {"latest-any-branch"}
 
 
 @pytest.mark.parametrize(
@@ -388,7 +432,6 @@ def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.Capture
         (
             "plan",
             (
-                "--mupdf-ref",
                 "--pymupdf-ref",
                 "--pymupdf-layout-ref",
                 "--pymupdf4llm-ref",
@@ -404,7 +447,6 @@ def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.Capture
         (
             "run",
             (
-                "--mupdf-ref",
                 "--pymupdf-ref",
                 "--pymupdf-layout-ref",
                 "--pymupdf4llm-ref",
@@ -432,5 +474,6 @@ def test_cli_help_documents_every_option(
     assert exit_info.value.code == 0
     help_text = capsys.readouterr().out
     assert all(option in help_text for option in expected_options)
+    assert "--mupdf-ref" not in help_text
     assert "(default:" in help_text
     assert "latest PyPI release tag" in help_text

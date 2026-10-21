@@ -11,7 +11,7 @@ from pathlib import Path
 from .benchmark_index import backfill_repository
 from .diagnostic_backfill import backfill_diagnostics
 from .local import LocalRun, create_paths, doctor, ensure_ready
-from .model import COMPONENT_SPECS, GROUPS, LATEST_RELEASE, PIPELINES, RUN_SCOPES, RunConfig
+from .model import GROUPS, LATEST_RELEASE, PIPELINES, RUN_SCOPES, SELECTABLE_COMPONENTS, RunConfig
 from .util import repository_root
 
 
@@ -25,11 +25,11 @@ class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
 
 
 def add_run_options(parser: argparse.ArgumentParser) -> None:
-    for name, component in COMPONENT_SPECS.items():
+    for name, component in SELECTABLE_COMPONENTS.items():
         parser.add_argument(
             f"--{name.replace('_', '-')}-ref",
             default=LATEST_RELEASE,
-            help=f"{component.label}: 'latest', the latest PyPI release tag, or a current branch name",
+            help=f"{component.label}: 'latest', the latest PyPI release tag of PyMuPDF, or any existing branch name",
         )
     parser.add_argument(
         "--dataset-ref",
@@ -58,12 +58,12 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
     latest.add_argument(
         "--all-latest",
         action="store_true",
-        help="Use the latest commit on every component's default branch; ignore explicit component refs",
+        help="Use default branches for PyMuPDF, Layout, and 4LLM; derive MuPDF from PyMuPDF",
     )
     latest.add_argument(
         "--latest-any-branch",
         action="store_true",
-        help="Use each component's newest branch-head commit; ignore explicit component refs",
+        help="Use the newest branch head for PyMuPDF, Layout, and 4LLM; derive MuPDF from PyMuPDF",
     )
     parser.add_argument(
         "--python",
@@ -74,7 +74,7 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
 
 def config_from_args(args: argparse.Namespace) -> RunConfig:
     return RunConfig(
-        **{f"{name}_ref": getattr(args, f"{name}_ref") for name in COMPONENT_SPECS},
+        **{f"{name}_ref": getattr(args, f"{name}_ref") for name in SELECTABLE_COMPONENTS},
         dataset_ref=args.dataset_ref,
         pipeline=args.pipeline,
         scope=args.scope,
