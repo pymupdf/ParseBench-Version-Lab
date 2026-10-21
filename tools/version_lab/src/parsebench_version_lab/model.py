@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-LATEST_RELEASE = "latest"
-
 
 @dataclass(frozen=True)
 class ComponentSpec:
@@ -15,70 +13,51 @@ class ComponentSpec:
     repository: str
     checkout_dir: str
     default_branch: str
-    pypi_package: str
 
 
 COMPONENT_SPECS = {
     # Resolve PyMuPDF first: the selected source declares the native MuPDF version.
-    "pymupdf": ComponentSpec("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", "pymupdf", "main", "pymupdf"),
-    "mupdf": ComponentSpec("mupdf", "MuPDF", "ArtifexSoftware/mupdf", "mupdf", "master", "pymupdf"),
+    "pymupdf": ComponentSpec("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", "pymupdf", "main"),
+    "mupdf": ComponentSpec("mupdf", "MuPDF", "ArtifexSoftware/mupdf", "mupdf", "master"),
     "pymupdf_layout": ComponentSpec(
         "pymupdf_layout",
         "PyMuPDF Layout",
         "ArtifexSoftware/pymupdf_layout",
         "pymupdf-layout",
         "main",
-        "pymupdf",
     ),
-    "pymupdf4llm": ComponentSpec("pymupdf4llm", "PyMuPDF4LLM", "pymupdf/pymupdf4llm", "pymupdf4llm", "main", "pymupdf"),
+    "pymupdf4llm": ComponentSpec("pymupdf4llm", "PyMuPDF4LLM", "pymupdf/pymupdf4llm", "pymupdf4llm", "main"),
 }
-SELECTABLE_COMPONENTS = {"pymupdf": COMPONENT_SPECS["pymupdf"]}
 
 DATASET_REPOSITORY = "llamaindex/ParseBench"
 DATASET_BRANCHES = {"full": "main", "test": "test-data"}
 RUN_SCOPES = {"quick": "test", "full": "full"}
 GROUPS = ("all", "chart", "table", "layout", "text_content", "text_formatting")
-MODERN_RAPIDOCR_PIPELINE = "pymupdf4llm_html_tables_rapidocr_v3"
-PIPELINES = (
-    "pymupdf4llm_markdown_150dpi",
-    "pymupdf4llm_markdown",
-    "pymupdf4llm_markdown_tesseract",
-    "pymupdf4llm_markdown_rapidocr",
-    "pymupdf4llm_markdown_no_ocr",
-    MODERN_RAPIDOCR_PIPELINE,
-)
-DEFAULT_PIPELINE = PIPELINES[0]
+DEFAULT_PIPELINE = "pymupdf4llm_html_tables_rapidocr_v3"
 
 
 @dataclass(frozen=True)
 class RunConfig:
     """A frontend-independent description of one Version Lab run."""
 
-    pymupdf_ref: str = LATEST_RELEASE
-    dataset_ref: str = "current"
+    pymupdf_branch: str = "main"
+    dataset_ref: str = field(default="current", init=False)
     scope: str = "quick"
     group: str = "all"
-    all_latest: bool = False
-    latest_any_branch: bool = False
     python: str = "3.12"
-    pipeline: str = DEFAULT_PIPELINE
+    pipeline: str = field(default=DEFAULT_PIPELINE, init=False)
     refs: dict[str, str] = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.pipeline not in PIPELINES:
-            raise ValueError(f"Unsupported pipeline {self.pipeline!r}; expected one of: {', '.join(PIPELINES)}")
         if self.scope not in RUN_SCOPES:
             raise ValueError(f"Unsupported scope {self.scope!r}; expected one of: {', '.join(RUN_SCOPES)}")
         if self.group not in GROUPS:
             raise ValueError(f"Unsupported group {self.group!r}; expected one of: {', '.join(GROUPS)}")
-        if self.all_latest and self.latest_any_branch:
-            raise ValueError("Select all-latest or latest-any-branch, not both")
-        requested = {name: getattr(self, f"{name}_ref") for name in SELECTABLE_COMPONENTS}
-        if self.latest_any_branch:
-            requested = dict.fromkeys(SELECTABLE_COMPONENTS, "latest-any-branch")
-        elif self.all_latest:
-            requested = {name: component.default_branch for name, component in SELECTABLE_COMPONENTS.items()}
-        requested.update({name: "auto" for name in COMPONENT_SPECS if name not in SELECTABLE_COMPONENTS})
+        branch = self.pymupdf_branch.strip()
+        if not branch:
+            raise ValueError("A PyMuPDF branch name is required")
+        object.__setattr__(self, "pymupdf_branch", branch)
+        requested = {name: branch if name == "pymupdf" else "auto" for name in COMPONENT_SPECS}
         object.__setattr__(self, "refs", requested)
 
     @property

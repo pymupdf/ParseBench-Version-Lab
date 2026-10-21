@@ -52,16 +52,13 @@ def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monk
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary"))
     github_output = tmp_path / "github-output"
     values = {
-        "ALL_LATEST": "false",
         "BENCHMARK_REF": "main",
-        "DATASET_REF": "current",
         "GCS_PREFIX": "/parsebench/pymupdf_source_stack/",
         "GITHUB_OUTPUT": str(github_output),
         "GITHUB_RUN_ATTEMPT": "2",
         "GITHUB_RUN_ID": "123",
         "GROUP_SELECTION": "Page layout",
-        "LATEST_ANY_BRANCH": "false",
-        "PYMUPDF_REF": "main",
+        "PYMUPDF_BRANCH": "feature/ocr",
         "RUNNER_TEMP": str(tmp_path),
         "RUN_SCOPE_SELECTION": "Quick test (15 cases)",
     }
@@ -73,93 +70,18 @@ def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monk
     outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
     assert outputs["run_scope"] == "test"
     assert outputs["data_dir"] == "data/test"
+    assert outputs["dataset_ref"] == "current"
     assert outputs["group"] == "layout"
     assert outputs["artifact_name"] == "pymupdf-source-stack-123-2"
-    assert "/pymupdf-main/main/run-123-attempt-2" in outputs["destination"]
+    assert "/pymupdf-feature-ocr/main/run-123-attempt-2" in outputs["destination"]
 
     request = json.loads((tmp_path / "parsebench-output" / "_source_request.json").read_text())
     assert request["mupdf"] == {"ref": "auto", "repository": "ArtifexSoftware/mupdf"}
-    assert request["pymupdf"] == {"ref": "main", "repository": "pymupdf/PyMuPDF"}
+    assert request["pymupdf"] == {"ref": "feature/ocr", "repository": "pymupdf/PyMuPDF"}
     assert request["pymupdf_layout"] == {
         "ref": "auto",
         "repository": "ArtifexSoftware/pymupdf_layout",
     }
-
-
-def test_configure_all_latest_overrides_source_inputs_but_preserves_dataset_version(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary"))
-    github_output = tmp_path / "github-output"
-    values = {
-        "ALL_LATEST": "true",
-        "BENCHMARK_REF": "main",
-        "DATASET_REF": "d" * 40,
-        "GCS_PREFIX": "parsebench/pymupdf_source_stack",
-        "GITHUB_OUTPUT": str(github_output),
-        "GITHUB_RUN_ATTEMPT": "1",
-        "GITHUB_RUN_ID": "456",
-        "GROUP_SELECTION": "All categories",
-        "LATEST_ANY_BRANCH": "false",
-        "PYMUPDF_REF": "a" * 40,
-        "RUNNER_TEMP": str(tmp_path),
-        "RUN_SCOPE_SELECTION": "Quick test (15 cases)",
-    }
-    for name, value in values.items():
-        monkeypatch.setenv(name, value)
-
-    assert configure.main() == 0
-
-    outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
-    assert outputs["dataset_ref"] == "d" * 40
-
-    request = json.loads((tmp_path / "parsebench-output" / "_source_request.json").read_text())
-    assert request["mupdf"] == {"ref": "auto", "repository": "ArtifexSoftware/mupdf"}
-    assert request["pymupdf"] == {"ref": "main", "repository": "pymupdf/PyMuPDF"}
-
-
-def test_configure_latest_any_branch_uses_resolver_placeholders(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary"))
-    github_output = tmp_path / "github-output"
-    values = {
-        "ALL_LATEST": "false",
-        "BENCHMARK_REF": "main",
-        "DATASET_REF": "current",
-        "GCS_PREFIX": "parsebench/pymupdf_source_stack",
-        "GITHUB_OUTPUT": str(github_output),
-        "GITHUB_RUN_ATTEMPT": "1",
-        "GITHUB_RUN_ID": "789",
-        "GROUP_SELECTION": "All categories",
-        "LATEST_ANY_BRANCH": "true",
-        "PYMUPDF_REF": "1.28.0",
-        "RUNNER_TEMP": str(tmp_path),
-        "RUN_SCOPE_SELECTION": "Quick test (15 cases)",
-    }
-    for name, value in values.items():
-        monkeypatch.setenv(name, value)
-
-    assert configure.main() == 0
-
-    outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
-    assert "pymupdf-latest-any-branch" in outputs["destination"]
-    request = json.loads((tmp_path / "parsebench-output" / "_source_request.json").read_text())
-    assert request["mupdf"]["ref"] == "auto"
-    assert all(request[name]["ref"] == "latest-any-branch" for name in configure.SELECTABLE_COMPONENTS)
-
-
-def test_configure_rejects_both_automatic_latest_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary"))
-    monkeypatch.setenv("GITHUB_RUN_ID", "123")
-    monkeypatch.setenv("ALL_LATEST", "true")
-    monkeypatch.setenv("LATEST_ANY_BRANCH", "true")
-    monkeypatch.setenv("BENCHMARK_REF", "main")
-    monkeypatch.setenv("GROUP_SELECTION", "All categories")
-    monkeypatch.setenv("RUN_SCOPE_SELECTION", "Quick test (15 cases)")
-
-    with pytest.raises(SystemExit, match="not both"):
-        configure.main()
 
 
 def test_resolve_refs_records_pinned_shas(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,19 +90,21 @@ def test_resolve_refs_records_pinned_shas(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
     request_path = tmp_path / "_source_request.json"
     request_path.write_text(
-        json.dumps({name: {"ref": "latest" if name == "pymupdf" else "auto"} for name in configure.COMPONENT_SPECS})
+        json.dumps(
+            {name: {"ref": "feature/ocr" if name == "pymupdf" else "auto"} for name in configure.COMPONENT_SPECS}
+        )
     )
 
-    def resolve_ref(self, component, selection):
-        assert selection == "latest"
+    def resolve_branch(self, component, selection):
+        assert selection == ("feature/ocr" if component.name == "pymupdf" else "main")
         return SimpleNamespace(
             repository=component.repository,
-            requested_ref="2.0",
-            selected_branch=None,
+            requested_ref=selection,
+            selected_branch=selection,
             resolved_sha="a" * 40,
         )
 
-    monkeypatch.setattr(resolve_refs.SourceManager, "resolve_ref", resolve_ref)
+    monkeypatch.setattr(resolve_refs.SourceManager, "resolve_branch", resolve_branch)
 
     def resolve_mupdf(self, pymupdf):
         assert pymupdf.resolved_sha == "a" * 40
@@ -189,24 +113,20 @@ def test_resolve_refs_records_pinned_shas(tmp_path: Path, monkeypatch: pytest.Mo
         )
 
     monkeypatch.setattr(resolve_refs.SourceManager, "resolve_mupdf", resolve_mupdf)
-    monkeypatch.setattr(
-        resolve_refs.SourceManager,
-        "remote_ref",
-        lambda self, repository, ref: "a" * 40 if ref == "refs/tags/2.0" else None,
-    )
-
     assert resolve_refs.main() == 0
 
     outputs = dict(line.split("=", 1) for line in github_output.read_text().splitlines())
     request = json.loads(request_path.read_text())
     for name, component in configure.COMPONENT_SPECS.items():
-        sha, ref = ("b" * 40, "1.28.5") if name == "mupdf" else ("a" * 40, "2.0")
+        sha, ref = (
+            ("b" * 40, "1.28.5") if name == "mupdf" else ("a" * 40, "feature/ocr" if name == "pymupdf" else "main")
+        )
         assert outputs[f"{name}_sha"] == sha
         assert outputs[f"{name}_ref"] == ref
         assert request[name] == {
-            "selection": "latest" if name == "pymupdf" else "auto",
+            "selection": "feature/ocr" if name == "pymupdf" else "auto",
             "ref": ref,
-            "branch": None,
+            "branch": None if name == "mupdf" else ref,
             "repository": component.repository,
             "resolved_sha": sha,
         }
@@ -220,11 +140,11 @@ def test_resolve_refs_preserves_diagnostics_on_failure(tmp_path: Path, monkeypat
     request_path.write_text(json.dumps({name: {"ref": "old-release"} for name in configure.COMPONENT_SPECS}))
 
     def unresolved(*args):
-        raise RuntimeError("Only the latest release or current branch heads are supported")
+        raise RuntimeError("Only existing branch names are supported")
 
-    monkeypatch.setattr(resolve_refs.SourceManager, "resolve_ref", unresolved)
+    monkeypatch.setattr(resolve_refs.SourceManager, "resolve_branch", unresolved)
 
-    with pytest.raises(SystemExit, match="Only the latest release"):
+    with pytest.raises(SystemExit, match="Only existing branch"):
         resolve_refs.main()
 
     failure = json.loads((tmp_path / "_failure.json").read_text())

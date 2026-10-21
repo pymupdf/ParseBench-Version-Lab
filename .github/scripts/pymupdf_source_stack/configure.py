@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from common import COMPONENT_SPECS, SELECTABLE_COMPONENTS, append_summary, env, write_github_outputs, write_json
+from common import COMPONENT_SPECS, append_summary, env, write_github_outputs, write_json
 
 RUN_SCOPES = {
     "Quick test (15 cases)": ("test", "data/test"),
@@ -20,8 +20,6 @@ GROUPS = {
     "Text content": "text_content",
     "Text formatting": "text_formatting",
 }
-LATEST_REFS = {name: component.default_branch for name, component in SELECTABLE_COMPONENTS.items()}
-LATEST_ANY_BRANCH_REFS = dict.fromkeys(LATEST_REFS, "latest-any-branch")
 
 
 def safe_ref(value: str) -> str:
@@ -47,23 +45,10 @@ def main() -> int:
     benchmark_ref = env("BENCHMARK_REF")
     run_scope, data_dir = selected(RUN_SCOPES, env("RUN_SCOPE_SELECTION"), "test size")
     group = selected(GROUPS, env("GROUP_SELECTION"), "document category")
-    all_latest = env("ALL_LATEST").strip().lower() == "true"
-    latest_any_branch = env("LATEST_ANY_BRANCH").strip().lower() == "true"
-    if all_latest and latest_any_branch:
-        raise SystemExit("Select either all latest default-branch commits or latest commits from any branch, not both")
-    requested_refs = {
-        "dataset": env("DATASET_REF"),
-        "mupdf": "auto",
-        "pymupdf": env("PYMUPDF_REF"),
-        "pymupdf_layout": "auto",
-        "pymupdf4llm": "auto",
-    }
-    if latest_any_branch:
-        refs = requested_refs | LATEST_ANY_BRANCH_REFS
-    elif all_latest:
-        refs = requested_refs | LATEST_REFS
-    else:
-        refs = requested_refs
+    branch = env("PYMUPDF_BRANCH").strip()
+    if not branch:
+        raise SystemExit("A PyMuPDF branch name is required")
+    refs = {name: branch if name == "pymupdf" else "auto" for name in COMPONENT_SPECS}
 
     output_dir = Path(env("RUNNER_TEMP")) / "parsebench-output"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -85,7 +70,7 @@ def main() -> int:
             "artifact_name": artifact_name,
             "benchmark_ref": benchmark_ref,
             "data_dir": data_dir,
-            "dataset_ref": refs["dataset"],
+            "dataset_ref": "current",
             "destination": destination,
             "group": group,
             "output_dir": str(output_dir),

@@ -25,14 +25,15 @@ Keep the dashboard in React. Introduce a new abstraction only when the repeated
 code occurs at least three times. Prefer existing meaningful tests and remove
 tests for deleted behavior; avoid adding a large new test suite for cleanup.
 
-Source builds support the latest PyPI release tags and current branches.
-Historical dependency combinations and arbitrary source commits are outside
-the supported scope.
+Source builds accept only existing PyMuPDF branches. Release tags, arbitrary
+source commits, and historical dependency combinations are outside the scope.
 
 Support only the current integrated PyMuPDF packaging. Build Layout and
 PyMuPDF4LLM into the PyMuPDF wheel from their selected source checkouts;
 do not add separate package installs or compatibility paths for PyMuPDF 1.x.
 Derive MuPDF from the selected PyMuPDF commit's declared native version;
 keep its provenance, but do not expose a separate MuPDF selector.
-Expose only one PyMuPDF release/branch selector. Resolve Layout and PyMuPDF4LLM
-from matching tags for releases or their default branches for PyMuPDF branches.
+Expose only one PyMuPDF branch selector, defaulting to main. Resolve Layout
+and PyMuPDF4LLM from their default branches. Fix the benchmark pipeline to
+pymupdf4llm_html_tables_rapidocr_v3 and resolve the current dataset automatically;
+do not expose pipeline or dataset-commit selectors.

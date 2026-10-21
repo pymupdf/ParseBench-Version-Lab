@@ -22,11 +22,11 @@ def main() -> int:
         selection = request[name]["ref"]
         try:
             if name == "pymupdf":
-                source = manager.resolve_ref(component, selection)
+                source = manager.resolve_branch(component, selection)
             elif name == "mupdf":
                 source = manager.resolve_mupdf(resolved["pymupdf"])
             else:
-                source = manager.resolve_companion(component, resolved["pymupdf"])
+                source = manager.resolve_branch(component, component.default_branch)
             resolved[name] = source
         except (OSError, RuntimeError, ValueError) as error:
             message = f"Cannot resolve {component.label} selection {selection!r}: {error}"

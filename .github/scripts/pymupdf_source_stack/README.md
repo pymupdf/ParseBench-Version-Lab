@@ -34,14 +34,13 @@ identity and score contribution semantics without changing benchmark rules,
 reports, scores, or upstream modules.
 
 Each adapter is a small command with one responsibility. `resolve_dataset.py`
-resolves the `current` Hugging Face branch or validates a user-supplied full
-commit SHA. `resolve_refs.py` uses the shared source resolver for all four
-components from the single PyMuPDF release/branch input. `latest` resolves the
-current PyMuPDF PyPI release to matching tags in PyMuPDF, Layout, and PyMuPDF4LLM.
-Selecting a PyMuPDF branch uses the default branches of Layout and PyMuPDF4LLM.
-The two automatic branch modes select PyMuPDF's default branch or newest branch
-head; companion sources follow the same rule. MuPDF always follows the selected PyMuPDF commit. Historical release
-tags and arbitrary source commits are rejected. Layout always comes from
+resolves the current Hugging Face dataset branch for the chosen test size.
+`resolve_refs.py` uses the shared source resolver for all four components from
+the single PyMuPDF branch input, which defaults to `main`. Layout and PyMuPDF4LLM
+use their default branches; MuPDF follows the selected PyMuPDF commit.
+Release tags and arbitrary source commits are rejected. Every run uses
+`pymupdf4llm_html_tables_rapidocr_v3`; no pipeline or dataset-commit input is
+exposed. Layout always comes from
 `ArtifexSoftware/pymupdf_layout`. `resolve_sources.py` verifies every source
 checkout against its resolved SHA and exports absolute source roots. PyMuPDF
 builds one wheel using `PYMUPDF_SETUP_PATH_LAYOUT` and

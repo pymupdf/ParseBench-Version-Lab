@@ -20,7 +20,7 @@ serialized so two publishers cannot race to update a version tag. The publisher
 checks the system environment and RapidOCR/ONNX imports using the dependencies
 in `tools/version_lab/uv.lock`, but does not promote its
 digest into the benchmark workflow automatically. Before changing the pinned
-benchmark digest, run the all-latest 15-case benchmark against the candidate,
+benchmark digest, run the 15-case RapidOCR benchmark on PyMuPDF main against the candidate,
 verify exact MuPDF provenance and Layout/OCR compatibility, compare aggregate
 scores, and record the successful run below.
 

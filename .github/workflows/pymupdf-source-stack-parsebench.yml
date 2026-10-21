@@ -3,53 +3,22 @@ name: ParseBench Version Lab
 run-name: >-
   ${{
     format(
-      '{0} · {1} · {2} · {3} · data:{4}',
-      inputs.pipeline,
-      inputs.latest_any_branch && 'Latest branch' ||
-        inputs.all_latest && 'Latest default' ||
-        inputs.pymupdf_ref,
+      'pymupdf4llm_html_tables_rapidocr_v3 · {0} · {1} · {2}',
+      inputs.pymupdf_branch,
       inputs.run_scope == 'Quick test (15 cases)' && 'Quick 15' || 'Full ~2k',
       inputs.group == 'All categories' && 'All' ||
         inputs.group == 'Page layout' && 'Layout' ||
-        inputs.group,
-      inputs.dataset_version
+        inputs.group
     )
   }}
 
 on:
   workflow_dispatch:
     inputs:
-      all_latest:
-        description: "Use the latest PyMuPDF default-branch commit. Overrides the PyMuPDF release/branch input."
+      pymupdf_branch:
+        description: "PyMuPDF branch to benchmark (for example main or your feature branch)."
         required: true
-        default: false
-        type: boolean
-      latest_any_branch:
-        description: "Use the newest PyMuPDF branch-head commit. Overrides the release/branch input. Cannot combine with default-branch mode."
-        required: true
-        default: false
-        type: boolean
-      pipeline:
-        description: "Which PyMuPDF extraction pipeline should be benchmarked?"
-        required: true
-        default: "pymupdf4llm_html_tables_rapidocr_v3"
-        type: choice
-        options:
-          - "pymupdf4llm_markdown_150dpi"
-          - "pymupdf4llm_markdown"
-          - "pymupdf4llm_markdown_tesseract"
-          - "pymupdf4llm_markdown_rapidocr"
-          - "pymupdf4llm_markdown_no_ocr"
-          - "pymupdf4llm_html_tables_rapidocr_v3"
-      dataset_version:
-        description: "Dataset version: current, or a full 40-character Hugging Face commit SHA."
-        required: true
-        default: current
-        type: string
-      pymupdf_ref:
-        description: "PyMuPDF release/branch: latest, the current release tag, or any existing branch. Bundled sources are resolved automatically."
-        required: true
-        default: "latest"
+        default: "main"
         type: string
       run_scope:
         description: "How much data should be tested?"
@@ -77,7 +46,7 @@ permissions:
   packages: read
 
 env:
-  PIPELINE: ${{ inputs.pipeline }}
+  PIPELINE: pymupdf4llm_html_tables_rapidocr_v3
   GCP_PROJECT_ID: pypi-download-analysis-457820
   GCS_PREFIX: parsebench/pymupdf_source_stack
   UV_NO_SYNC: "1"
@@ -107,16 +76,13 @@ jobs:
       - name: Initialize run configuration
         id: config
         env:
-          ALL_LATEST: ${{ inputs.all_latest }}
           BENCHMARK_REF: ${{ github.ref_name }}
-          DATASET_REF: ${{ inputs.dataset_version }}
           GROUP_SELECTION: ${{ inputs.group }}
-          LATEST_ANY_BRANCH: ${{ inputs.latest_any_branch }}
-          PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
+          PYMUPDF_BRANCH: ${{ inputs.pymupdf_branch }}
           RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
         run: python3 "$WORKFLOW_SCRIPTS/configure.py"
 
-      - name: Resolve latest releases or current branch heads
+      - name: Resolve PyMuPDF branch and bundled sources
         id: refs
         env:
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}

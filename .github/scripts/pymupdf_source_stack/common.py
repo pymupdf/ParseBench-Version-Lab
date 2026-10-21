@@ -16,7 +16,6 @@ from parsebench_version_lab.model import (  # noqa: E402, F401 - compatibility r
     COMPONENT_SPECS,
     DATASET_BRANCHES,
     DATASET_REPOSITORY,
-    SELECTABLE_COMPONENTS,
 )
 from parsebench_version_lab.provenance import mupdf_build_spec  # noqa: E402, F401 - compatibility re-export
 from parsebench_version_lab.util import required_env as env  # noqa: E402, F401

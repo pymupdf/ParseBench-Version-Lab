@@ -1,6 +1,6 @@
 # ParseBench Version Lab
 
-Benchmark the latest PyMuPDF release or any current PyMuPDF branch, built from
+Benchmark any current PyMuPDF branch with RapidOCR, built from
 source with automatically resolved MuPDF, Layout, and PyMuPDF4LLM sources.
 
 Version Lab is maintained separately from the upstream ParseBench code in this
@@ -101,8 +101,8 @@ All four source repositories are public. Layout always comes from
 `ArtifexSoftware/pymupdf_layout`.
 
 Version Lab supports the current integrated PyMuPDF package (2.0 onward).
-By default, the latest stable PyMuPDF version is read from PyPI and its
-matching Git tag is selected in the PyMuPDF, Layout, and PyMuPDF4LLM repositories.
+The default PyMuPDF branch is `main`; developers can enter any existing branch.
+Layout and PyMuPDF4LLM use their default branches automatically.
 MuPDF is automatic: it uses the native version declared in the selected
 PyMuPDF commit's `setup.py`, including when selecting a feature branch. There
 is only one source selector: PyMuPDF. Every exact source commit is still recorded.
@@ -114,15 +114,12 @@ runs and GitHub Actions pass `PYMUPDF_SETUP_PATH_LAYOUT` and
 `PYMUPDF_SETUP_PATH_4LLM` to the PyMuPDF build. Layout and PyMuPDF4LLM are not
 installed separately. Older packaging layouts and PyMuPDF 1.x are unsupported.
 
-`--pymupdf-ref` accepts `latest`, the current release tag, or any existing
-PyMuPDF branch name. Release builds require matching Layout and PyMuPDF4LLM
-tags; a missing tag fails the run. Branch builds use the default branches of
-Layout and PyMuPDF4LLM, without requiring matching branch names.
-`--all-latest` selects PyMuPDF's default branch; `--latest-any-branch` selects
-its newest branch head. The companion sources follow the same branch-build
-rule in both modes. Historical tags and arbitrary source SHAs are unsupported.
-All selections are resolved to exact commits before checkout and recorded
-with the results.
+`--pymupdf-branch` accepts an existing branch name, including feature branches.
+Release tags and arbitrary commit SHAs are rejected. All source branches are
+resolved to exact commits before checkout and recorded with the results.
+The dataset is selected automatically: quick runs use the current `test-data`
+branch and full runs use the current `main` branch, each pinned to its resolved
+Hugging Face commit for the entire run.
 
 ## Run
 
@@ -151,26 +148,20 @@ uv run --project tools/version_lab version-lab run --scope quick
 Run the full benchmark, which typically takes around one hour:
 
 ```shell
-uv run --project tools/version_lab version-lab run --all-latest --scope full
+uv run --project tools/version_lab version-lab run --scope full
 ```
 
 Resolve source and dataset commits without building:
 
 ```shell
-uv run --project tools/version_lab version-lab run --all-latest --resolve-only
+uv run --project tools/version_lab version-lab run --resolve-only
 ```
 
 Select any existing PyMuPDF branch (replace `main` with your branch name).
 MuPDF follows that branch automatically:
 
 ```shell
-uv run --project tools/version_lab version-lab run --pymupdf-ref main --scope quick
-```
-
-Select a PyMuPDF branch and extraction pipeline:
-
-```shell
-uv run --project tools/version_lab version-lab run --pymupdf-ref main --pipeline pymupdf4llm_markdown_150dpi --scope quick --group all
+uv run --project tools/version_lab version-lab run --pymupdf-branch main --scope quick
 ```
 
 View all arguments and accepted values:
@@ -181,23 +172,12 @@ uv run --project tools/version_lab version-lab plan --help
 uv run --project tools/version_lab version-lab run --help
 ```
 
-## PyMuPDF4LLM pipelines
+## Fixed RapidOCR pipeline
 
-The canonical `pymupdf4llm_markdown` pipeline and all output transformation,
-layout projection, evaluation, and scoring behavior come directly from
-upstream ParseBench. Version Lab registers only these additional configurations:
-
-| Pipeline | Version Lab variation |
-|---|---|
-| `pymupdf4llm_markdown_150dpi` | OCR at 150 DPI |
-| `pymupdf4llm_markdown_tesseract` | Tesseract OCR backend |
-| `pymupdf4llm_markdown_rapidocr` | Explicit RapidOCR backend |
-| `pymupdf4llm_markdown_no_ocr` | OCR disabled |
-| `pymupdf4llm_html_tables_rapidocr_v3` | Native HTML tables with modern RapidOCR |
-
-All pipelines use upstream's native HTML table output. The former
-`pymupdf4llm_html_tables` alias duplicated `pymupdf4llm_markdown_150dpi` and has
-been removed from new runs; existing results remain readable.
+Every run uses `pymupdf4llm_html_tables_rapidocr_v3`: modern RapidOCR at
+150 DPI with native HTML tables. There is no pipeline selector in GitHub
+Actions or the local CLI. Output transformation, layout projection,
+evaluation, and scoring remain upstream-owned.
 
 Selected branches must support the integrated PyMuPDF build and current
 upstream PyMuPDF4LLM provider API. The runtime gate checks the embedded source

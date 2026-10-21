@@ -21,7 +21,6 @@ from parsebench_version_lab.local import LocalRun, create_paths, ensure_ready  #
 from parsebench_version_lab.model import (  # noqa: E402
     COMPONENT_SPECS,
     DEFAULT_PIPELINE,
-    PIPELINES,
     RunConfig,
 )
 from parsebench_version_lab.process import (  # noqa: E402
@@ -30,11 +29,11 @@ from parsebench_version_lab.process import (  # noqa: E402
     subprocess_environment,
     venv_executable,
 )
-from parsebench_version_lab.sources import ResolvedSource, SourceManager, parse_branch_heads  # noqa: E402
+from parsebench_version_lab.sources import ResolvedSource, SourceManager  # noqa: E402
 
 
-def test_run_config_normalizes_latest_refs_and_scope() -> None:
-    config = RunConfig(all_latest=True, scope="quick", group="table")
+def test_run_config_normalizes_branch_and_scope() -> None:
+    config = RunConfig(pymupdf_branch=" main ", scope="quick", group="table")
 
     assert config.refs == {
         "mupdf": "auto",
@@ -46,35 +45,15 @@ def test_run_config_normalizes_latest_refs_and_scope() -> None:
     assert config.dataset_branch == "test-data"
 
 
-def test_run_config_rejects_conflicting_latest_modes() -> None:
-    with pytest.raises(ValueError, match="not both"):
-        RunConfig(all_latest=True, latest_any_branch=True)
-
-
-def test_run_config_defaults_to_150dpi_pipeline_and_accepts_registered_variants() -> None:
-    assert RunConfig().pipeline == DEFAULT_PIPELINE == "pymupdf4llm_markdown_150dpi"
-    assert RunConfig(pipeline="pymupdf4llm_markdown_no_ocr").pipeline == "pymupdf4llm_markdown_no_ocr"
-
-
-def test_run_config_rejects_unknown_pipeline() -> None:
-    with pytest.raises(ValueError, match="Unsupported pipeline"):
-        RunConfig(pipeline="unknown_pipeline")
-
-
-def test_github_workflow_pipeline_dropdown_matches_local_choices() -> None:
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    pipeline_input = workflow.split("      pipeline:\n", 1)[1].split("      dataset_version:\n", 1)[0]
-
-    assert "type: choice" in pipeline_input
-    assert (
-        tuple(
-            line.removeprefix('          - "').removesuffix('"')
-            for line in pipeline_input.splitlines()
-            if line.startswith('          - "')
-        )
-        == PIPELINES
-    )
-    assert "PIPELINE: ${{ inputs.pipeline }}" in workflow
+def test_run_config_requires_branch_and_fixes_pipeline_and_dataset() -> None:
+    with pytest.raises(ValueError, match="branch name is required"):
+        RunConfig(pymupdf_branch=" ")
+    assert RunConfig().pipeline == DEFAULT_PIPELINE == "pymupdf4llm_html_tables_rapidocr_v3"
+    assert RunConfig().dataset_ref == "current"
+    with pytest.raises(TypeError):
+        RunConfig(pipeline="pymupdf4llm_markdown_no_ocr")
+    with pytest.raises(TypeError):
+        RunConfig(dataset_ref="a" * 40)
 
 
 def test_github_indexing_is_independent_from_the_benchmark_outcome() -> None:
@@ -121,30 +100,7 @@ def test_github_workflow_uses_current_rapidocr_for_every_pipeline() -> None:
     assert "uv sync --project /workspace/tools/version_lab --locked" in publisher
 
 
-def test_run_config_marks_latest_any_branch_refs_as_dynamic() -> None:
-    config = RunConfig(latest_any_branch=True)
-
-    assert config.refs == {
-        "pymupdf": "latest-any-branch",
-        "mupdf": "auto",
-        "pymupdf_layout": "auto",
-        "pymupdf4llm": "auto",
-    }
-
-
-def test_parse_branch_heads_uses_deterministic_newest_commit() -> None:
-    output = "\n".join(
-        [
-            f"main\t{'a' * 40}\t100",
-            f"feature/new\t{'b' * 40}\t101",
-            f"feature/z-tie\t{'c' * 40}\t101",
-        ]
-    )
-
-    assert parse_branch_heads(output, "owner/repo").branch == "feature/z-tie"
-
-
-def test_source_manager_limits_sources_to_latest_release_and_current_branches(tmp_path: Path) -> None:
+def test_source_manager_accepts_branches_and_rejects_tags_and_commits(tmp_path: Path) -> None:
     remote = tmp_path / "remote"
     remote.mkdir()
     subprocess.run(["git", "init", "--quiet", remote], check=True)
@@ -160,19 +116,18 @@ def test_source_manager_limits_sources_to_latest_release_and_current_branches(tm
 
     manager = SourceManager(CommandRunner(verbose=False))
     manager.remote = lambda repository: str(remote)  # type: ignore[method-assign]
-    manager.latest_release = lambda package: "2.0"  # type: ignore[method-assign]
     component = COMPONENT_SPECS["pymupdf"]
 
-    for ref in ("latest", "2.0", "feature/current"):
-        source = manager.resolve_component(component, RunConfig(pymupdf_ref=ref), tmp_path / ref)
+    for ref in ("feature/current",):
+        source = manager.resolve_component(component, RunConfig(pymupdf_branch=ref), tmp_path / ref)
         assert source.resolved_sha == expected
-        assert source.requested_ref == ("2.0" if ref == "latest" else ref)
-        assert source.selected_branch == (ref if ref == "feature/current" else None)
+        assert source.requested_ref == ref
+        assert source.selected_branch == ref
         assert (source.path / "file.txt").read_text(encoding="utf-8") == "selected source\n"
 
-    for ref in ("1.27.0", expected, "missing-branch"):
-        with pytest.raises(ValueError, match="Historical tags and commit SHAs are not supported"):
-            manager.resolve_ref(component, ref)
+    for ref in ("latest", "2.0", "1.27.0", expected, "missing-branch"):
+        with pytest.raises(ValueError, match="Release tags and commit SHAs are not accepted"):
+            manager.resolve_branch(component, ref)
 
 
 def test_create_paths_keeps_environment_inside_unique_run(tmp_path: Path) -> None:
@@ -185,7 +140,6 @@ def test_create_paths_keeps_environment_inside_unique_run(tmp_path: Path) -> Non
 
 def test_mupdf_release_uses_native_version_from_pinned_pymupdf_source(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = SourceManager(CommandRunner(verbose=False))
-    manager.release_versions["pymupdf"] = "2.0"
     refs = {
         ("pymupdf/PyMuPDF", "refs/tags/2.0"): "a" * 40,
         ("ArtifexSoftware/mupdf", "refs/tags/1.28.5"): "b" * 40,
@@ -201,18 +155,15 @@ def test_mupdf_release_uses_native_version_from_pinned_pymupdf_source(monkeypatc
     source = manager.resolve_mupdf(pymupdf)
     assert source.requested_ref == "1.28.5"
     assert source.resolved_sha == "b" * 40
-    assert all(component.pypi_package == "pymupdf" for component in COMPONENT_SPECS.values())
 
 
 @pytest.mark.parametrize("name", ["pymupdf_layout", "pymupdf4llm"])
-@pytest.mark.parametrize("branch", [None, "feature/only-in-pymupdf"])
-def test_companion_sources_follow_pymupdf_selection(
-    name: str, branch: str | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_companion_sources_follow_pymupdf_selection(name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     manager = SourceManager(CommandRunner(verbose=False))
     component = COMPONENT_SPECS[name]
-    pymupdf = ResolvedSource("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", branch or "2.0", "a" * 40, tmp_path, branch)
-    expected_ref = f"refs/heads/{component.default_branch}" if branch else "refs/tags/2.0"
+    branch = "feature/only-in-pymupdf"
+    pymupdf = ResolvedSource("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", branch, "a" * 40, tmp_path, branch)
+    expected_ref = f"refs/heads/{component.default_branch}"
 
     def remote_ref(repository: str, ref: str) -> str:
         assert repository == component.repository
@@ -221,23 +172,10 @@ def test_companion_sources_follow_pymupdf_selection(
 
     monkeypatch.setattr(manager, "remote_ref", remote_ref)
     monkeypatch.setattr(manager, "checkout", lambda repository, sha, destination: sha)
-    source = manager.resolve_component(component, RunConfig(pymupdf_ref=branch or "latest"), tmp_path, pymupdf=pymupdf)
+    source = manager.resolve_component(component, RunConfig(pymupdf_branch=branch), tmp_path, pymupdf=pymupdf)
     assert source.resolved_sha == "b" * 40
-    assert source.requested_ref == (component.default_branch if branch else "2.0")
-    assert source.selected_branch == (component.default_branch if branch else None)
-
-
-@pytest.mark.parametrize("name", ["pymupdf_layout", "pymupdf4llm"])
-def test_missing_companion_release_does_not_fall_back_to_branch(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    manager = SourceManager(CommandRunner(verbose=False))
-
-    def remote_ref(repository: str, ref: str) -> None:
-        assert ref == "refs/tags/2.0"
-
-    monkeypatch.setattr(manager, "remote_ref", remote_ref)
-    pymupdf = ResolvedSource("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", "2.0", "a" * 40, Path("."))
-    with pytest.raises(RuntimeError, match="no source tag matching PyMuPDF 2.0"):
-        manager.resolve_companion(COMPONENT_SPECS[name], pymupdf)
+    assert source.requested_ref == component.default_branch
+    assert source.selected_branch == component.default_branch
 
 
 def test_github_workflow_builds_one_integrated_package() -> None:
@@ -245,7 +183,10 @@ def test_github_workflow_builds_one_integrated_package() -> None:
 
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     inputs = workflow[True]["workflow_dispatch"]["inputs"]  # PyYAML reads unquoted 'on' as True.
-    assert {name for name in inputs if name.endswith("_ref")} == {"pymupdf_ref"}
+    assert set(inputs) == {"pymupdf_branch", "run_scope", "group"}
+    assert inputs["pymupdf_branch"]["default"] == "main"
+    assert workflow["env"]["PIPELINE"] == RunConfig().pipeline
+    assert "inputs.pipeline" not in WORKFLOW.read_text(encoding="utf-8")
     assert "inputs.pymupdf_layout_ref" not in WORKFLOW.read_text(encoding="utf-8")
     assert "inputs.pymupdf4llm_ref" not in WORKFLOW.read_text(encoding="utf-8")
     steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
@@ -452,21 +393,24 @@ def test_resolve_only_requires_git_but_not_build_tools(monkeypatch: pytest.Monke
 
 
 def test_cli_plan_is_machine_readable(capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main(["plan", "--all-latest", "--scope", "quick", "--group", "layout"]) == 0
+    assert cli.main(["plan", "--pymupdf-branch", "feature/test", "--scope", "quick", "--group", "layout"]) == 0
 
     plan = json.loads(capsys.readouterr().out)
     assert plan["refs"]["mupdf"] == "auto"
     assert plan["run_scope"] == "test"
     assert plan["group"] == "layout"
+    assert plan["refs"]["pymupdf"] == "feature/test"
+    assert plan["pipeline"] == DEFAULT_PIPELINE
+    assert plan["dataset_ref"] == "current"
 
 
-def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main(["plan", "--latest-any-branch"]) == 0
-
-    plan = json.loads(capsys.readouterr().out)
-    assert plan["refs"]["mupdf"] == "auto"
-    assert plan["refs"]["pymupdf"] == "latest-any-branch"
-    assert {value for name, value in plan["refs"].items() if name != "pymupdf"} == {"auto"}
+@pytest.mark.parametrize(
+    "option", ["--pipeline", "--dataset-ref", "--pymupdf-ref", "--all-latest", "--latest-any-branch"]
+)
+def test_cli_rejects_removed_selectors(option: str) -> None:
+    with pytest.raises(SystemExit) as error:
+        cli.main(["plan", option, "anything"])
+    assert error.value.code == 2
 
 
 @pytest.mark.parametrize(
@@ -475,26 +419,18 @@ def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.Capture
         (
             "plan",
             (
-                "--pymupdf-ref",
-                "--dataset-ref",
-                "--pipeline",
+                "--pymupdf-branch",
                 "--scope",
                 "--group",
-                "--all-latest",
-                "--latest-any-branch",
                 "--python",
             ),
         ),
         (
             "run",
             (
-                "--pymupdf-ref",
-                "--dataset-ref",
-                "--pipeline",
+                "--pymupdf-branch",
                 "--scope",
                 "--group",
-                "--all-latest",
-                "--latest-any-branch",
                 "--python",
                 "--workspace",
                 "--resolve-only",
@@ -517,4 +453,4 @@ def test_cli_help_documents_every_option(
     assert "--pymupdf-layout-ref" not in help_text
     assert "--pymupdf4llm-ref" not in help_text
     assert "(default:" in help_text
-    assert "latest PyPI release tag" in help_text
+    assert "Any existing PyMuPDF branch" in help_text

@@ -119,5 +119,5 @@ jobs:
             echo "- Immutable reference: \`${IMAGE_REF}\`"
             echo "- Platform: \`linux/amd64\`"
             echo
-            echo "This publisher validates the environment only. Before changing the benchmark's pinned digest, run the all-latest 15-case benchmark against the candidate and review its compatibility report and scores."
+            echo "This publisher validates the environment only. Before changing the benchmark's pinned digest, run the 15-case RapidOCR benchmark on PyMuPDF main against the candidate and review its compatibility report and scores."
           } >> "$GITHUB_STEP_SUMMARY"

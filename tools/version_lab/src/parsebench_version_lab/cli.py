@@ -11,7 +11,7 @@ from pathlib import Path
 from .benchmark_index import backfill_repository
 from .diagnostic_backfill import backfill_diagnostics
 from .local import LocalRun, create_paths, doctor, ensure_ready
-from .model import GROUPS, LATEST_RELEASE, PIPELINES, RUN_SCOPES, SELECTABLE_COMPONENTS, RunConfig
+from .model import GROUPS, RUN_SCOPES, RunConfig
 from .util import repository_root
 
 
@@ -25,22 +25,10 @@ class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
 
 
 def add_run_options(parser: argparse.ArgumentParser) -> None:
-    for name, component in SELECTABLE_COMPONENTS.items():
-        parser.add_argument(
-            f"--{name.replace('_', '-')}-ref",
-            default=LATEST_RELEASE,
-            help=f"{component.label}: 'latest', the latest PyPI release tag of PyMuPDF, or any existing branch name",
-        )
     parser.add_argument(
-        "--dataset-ref",
-        default="current",
-        help="ParseBench dataset revision: 'current' or a full 40-character commit SHA",
-    )
-    parser.add_argument(
-        "--pipeline",
-        choices=PIPELINES,
-        default=PIPELINES[0],
-        help="Registered PyMuPDF4LLM pipeline to benchmark",
+        "--pymupdf-branch",
+        default="main",
+        help="Any existing PyMuPDF branch name; releases and commit SHAs are not accepted",
     )
     parser.add_argument(
         "--scope",
@@ -54,17 +42,6 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
         default="all",
         help="Document category to benchmark, or all categories",
     )
-    latest = parser.add_mutually_exclusive_group()
-    latest.add_argument(
-        "--all-latest",
-        action="store_true",
-        help="Use PyMuPDF's default branch; resolve bundled sources automatically",
-    )
-    latest.add_argument(
-        "--latest-any-branch",
-        action="store_true",
-        help="Use PyMuPDF's newest branch head; resolve bundled sources automatically",
-    )
     parser.add_argument(
         "--python",
         default="3.12",
@@ -74,13 +51,9 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
 
 def config_from_args(args: argparse.Namespace) -> RunConfig:
     return RunConfig(
-        **{f"{name}_ref": getattr(args, f"{name}_ref") for name in SELECTABLE_COMPONENTS},
-        dataset_ref=args.dataset_ref,
-        pipeline=args.pipeline,
+        pymupdf_branch=args.pymupdf_branch,
         scope=args.scope,
         group=args.group,
-        all_latest=args.all_latest,
-        latest_any_branch=args.latest_any_branch,
         python=args.python,
     )
 
