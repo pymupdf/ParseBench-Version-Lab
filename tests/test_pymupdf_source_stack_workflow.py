@@ -61,8 +61,6 @@ def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monk
         "GITHUB_RUN_ID": "123",
         "GROUP_SELECTION": "Page layout",
         "LATEST_ANY_BRANCH": "false",
-        "PYMUPDF4LLM_REF": "feature/llm",
-        "PYMUPDF_LAYOUT_REF": "latest",
         "PYMUPDF_REF": "main",
         "RUNNER_TEMP": str(tmp_path),
         "RUN_SCOPE_SELECTION": "Quick test (15 cases)",
@@ -77,13 +75,13 @@ def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monk
     assert outputs["data_dir"] == "data/test"
     assert outputs["group"] == "layout"
     assert outputs["artifact_name"] == "pymupdf-source-stack-123-2"
-    assert "4llm-feature-llm" in outputs["destination"]
+    assert "/pymupdf-main/main/run-123-attempt-2" in outputs["destination"]
 
     request = json.loads((tmp_path / "parsebench-output" / "_source_request.json").read_text())
     assert request["mupdf"] == {"ref": "auto", "repository": "ArtifexSoftware/mupdf"}
     assert request["pymupdf"] == {"ref": "main", "repository": "pymupdf/PyMuPDF"}
     assert request["pymupdf_layout"] == {
-        "ref": "latest",
+        "ref": "auto",
         "repository": "ArtifexSoftware/pymupdf_layout",
     }
 
@@ -103,8 +101,6 @@ def test_configure_all_latest_overrides_source_inputs_but_preserves_dataset_vers
         "GITHUB_RUN_ID": "456",
         "GROUP_SELECTION": "All categories",
         "LATEST_ANY_BRANCH": "false",
-        "PYMUPDF4LLM_REF": "1.28.0",
-        "PYMUPDF_LAYOUT_REF": "1.28.0",
         "PYMUPDF_REF": "a" * 40,
         "RUNNER_TEMP": str(tmp_path),
         "RUN_SCOPE_SELECTION": "Quick test (15 cases)",
@@ -137,8 +133,6 @@ def test_configure_latest_any_branch_uses_resolver_placeholders(
         "GITHUB_RUN_ID": "789",
         "GROUP_SELECTION": "All categories",
         "LATEST_ANY_BRANCH": "true",
-        "PYMUPDF4LLM_REF": "1.28.0",
-        "PYMUPDF_LAYOUT_REF": "1.28.0",
         "PYMUPDF_REF": "1.28.0",
         "RUNNER_TEMP": str(tmp_path),
         "RUN_SCOPE_SELECTION": "Quick test (15 cases)",
@@ -173,7 +167,9 @@ def test_resolve_refs_records_pinned_shas(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setenv("GITHUB_OUTPUT", str(github_output))
     monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
     request_path = tmp_path / "_source_request.json"
-    request_path.write_text(json.dumps({name: {"ref": "latest"} for name in configure.COMPONENT_SPECS}))
+    request_path.write_text(
+        json.dumps({name: {"ref": "latest" if name == "pymupdf" else "auto"} for name in configure.COMPONENT_SPECS})
+    )
 
     def resolve_ref(self, component, selection):
         assert selection == "latest"
@@ -193,6 +189,11 @@ def test_resolve_refs_records_pinned_shas(tmp_path: Path, monkeypatch: pytest.Mo
         )
 
     monkeypatch.setattr(resolve_refs.SourceManager, "resolve_mupdf", resolve_mupdf)
+    monkeypatch.setattr(
+        resolve_refs.SourceManager,
+        "remote_ref",
+        lambda self, repository, ref: "a" * 40 if ref == "refs/tags/2.0" else None,
+    )
 
     assert resolve_refs.main() == 0
 
@@ -203,7 +204,7 @@ def test_resolve_refs_records_pinned_shas(tmp_path: Path, monkeypatch: pytest.Mo
         assert outputs[f"{name}_sha"] == sha
         assert outputs[f"{name}_ref"] == ref
         assert request[name] == {
-            "selection": "latest",
+            "selection": "latest" if name == "pymupdf" else "auto",
             "ref": ref,
             "branch": None,
             "repository": component.repository,

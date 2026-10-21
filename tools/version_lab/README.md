@@ -1,7 +1,7 @@
 # ParseBench Version Lab
 
-Benchmark the latest PyPI releases or current branches of MuPDF, PyMuPDF,
-PyMuPDF Layout, and PyMuPDF4LLM, built from source.
+Benchmark the latest PyMuPDF release or any current PyMuPDF branch, built from
+source with automatically resolved MuPDF, Layout, and PyMuPDF4LLM sources.
 
 Version Lab is maintained separately from the upstream ParseBench code in this
 checkout. Keep changes within the fork-owned tooling and integration files;
@@ -105,7 +105,7 @@ By default, the latest stable PyMuPDF version is read from PyPI and its
 matching Git tag is selected in the PyMuPDF, Layout, and PyMuPDF4LLM repositories.
 MuPDF is automatic: it uses the native version declared in the selected
 PyMuPDF commit's `setup.py`, including when selecting a feature branch. There
-is no separate MuPDF selector. Its exact source commit is still recorded.
+is only one source selector: PyMuPDF. Every exact source commit is still recorded.
 PyPI wheels are not used for these source components.
 
 The four repositories are resolved and recorded separately, then PyMuPDF builds
@@ -114,12 +114,15 @@ runs and GitHub Actions pass `PYMUPDF_SETUP_PATH_LAYOUT` and
 `PYMUPDF_SETUP_PATH_4LLM` to the PyMuPDF build. Layout and PyMuPDF4LLM are not
 installed separately. Older packaging layouts and PyMuPDF 1.x are unsupported.
 
-Each `--*-ref` accepts `latest`, the current release tag, or a current branch
-name. Historical tags and arbitrary commit SHAs are no longer supported.
-`--all-latest` selects the default branches of PyMuPDF, Layout, and PyMuPDF4LLM;
-`--latest-any-branch` selects their newest branch heads. In both modes MuPDF
-follows the selected PyMuPDF source. All selections are resolved to exact
-commits before checkout and recorded with the results.
+`--pymupdf-ref` accepts `latest`, the current release tag, or any existing
+PyMuPDF branch name. Release builds require matching Layout and PyMuPDF4LLM
+tags; a missing tag fails the run. Branch builds use the default branches of
+Layout and PyMuPDF4LLM, without requiring matching branch names.
+`--all-latest` selects PyMuPDF's default branch; `--latest-any-branch` selects
+its newest branch head. The companion sources follow the same branch-build
+rule in both modes. Historical tags and arbitrary source SHAs are unsupported.
+All selections are resolved to exact commits before checkout and recorded
+with the results.
 
 ## Run
 
@@ -164,11 +167,10 @@ MuPDF follows that branch automatically:
 uv run --project tools/version_lab version-lab run --pymupdf-ref main --scope quick
 ```
 
-Select Layout or PyMuPDF4LLM branches and a pipeline (unspecified components
-use the current release):
+Select a PyMuPDF branch and extraction pipeline:
 
 ```shell
-uv run --project tools/version_lab version-lab run --pymupdf4llm-ref main --pipeline pymupdf4llm_markdown_150dpi --scope quick --group all
+uv run --project tools/version_lab version-lab run --pymupdf-ref main --pipeline pymupdf4llm_markdown_150dpi --scope quick --group all
 ```
 
 View all arguments and accepted values:

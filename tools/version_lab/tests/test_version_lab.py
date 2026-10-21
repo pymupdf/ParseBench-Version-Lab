@@ -39,8 +39,8 @@ def test_run_config_normalizes_latest_refs_and_scope() -> None:
     assert config.refs == {
         "mupdf": "auto",
         "pymupdf": "main",
-        "pymupdf_layout": "main",
-        "pymupdf4llm": "main",
+        "pymupdf_layout": "auto",
+        "pymupdf4llm": "auto",
     }
     assert config.run_scope == "test"
     assert config.dataset_branch == "test-data"
@@ -124,10 +124,12 @@ def test_github_workflow_uses_current_rapidocr_for_every_pipeline() -> None:
 def test_run_config_marks_latest_any_branch_refs_as_dynamic() -> None:
     config = RunConfig(latest_any_branch=True)
 
-    assert config.refs == dict.fromkeys(
-        ("pymupdf", "pymupdf_layout", "pymupdf4llm"),
-        "latest-any-branch",
-    ) | {"mupdf": "auto"}
+    assert config.refs == {
+        "pymupdf": "latest-any-branch",
+        "mupdf": "auto",
+        "pymupdf_layout": "auto",
+        "pymupdf4llm": "auto",
+    }
 
 
 def test_parse_branch_heads_uses_deterministic_newest_commit() -> None:
@@ -159,10 +161,10 @@ def test_source_manager_limits_sources_to_latest_release_and_current_branches(tm
     manager = SourceManager(CommandRunner(verbose=False))
     manager.remote = lambda repository: str(remote)  # type: ignore[method-assign]
     manager.latest_release = lambda package: "2.0"  # type: ignore[method-assign]
-    component = COMPONENT_SPECS["pymupdf4llm"]
+    component = COMPONENT_SPECS["pymupdf"]
 
     for ref in ("latest", "2.0", "feature/current"):
-        source = manager.resolve_component(component, RunConfig(pymupdf4llm_ref=ref), tmp_path / ref)
+        source = manager.resolve_component(component, RunConfig(pymupdf_ref=ref), tmp_path / ref)
         assert source.resolved_sha == expected
         assert source.requested_ref == ("2.0" if ref == "latest" else ref)
         assert source.selected_branch == (ref if ref == "feature/current" else None)
@@ -202,10 +204,50 @@ def test_mupdf_release_uses_native_version_from_pinned_pymupdf_source(monkeypatc
     assert all(component.pypi_package == "pymupdf" for component in COMPONENT_SPECS.values())
 
 
+@pytest.mark.parametrize("name", ["pymupdf_layout", "pymupdf4llm"])
+@pytest.mark.parametrize("branch", [None, "feature/only-in-pymupdf"])
+def test_companion_sources_follow_pymupdf_selection(
+    name: str, branch: str | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manager = SourceManager(CommandRunner(verbose=False))
+    component = COMPONENT_SPECS[name]
+    pymupdf = ResolvedSource("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", branch or "2.0", "a" * 40, tmp_path, branch)
+    expected_ref = f"refs/heads/{component.default_branch}" if branch else "refs/tags/2.0"
+
+    def remote_ref(repository: str, ref: str) -> str:
+        assert repository == component.repository
+        assert ref == expected_ref
+        return "b" * 40
+
+    monkeypatch.setattr(manager, "remote_ref", remote_ref)
+    monkeypatch.setattr(manager, "checkout", lambda repository, sha, destination: sha)
+    source = manager.resolve_component(component, RunConfig(pymupdf_ref=branch or "latest"), tmp_path, pymupdf=pymupdf)
+    assert source.resolved_sha == "b" * 40
+    assert source.requested_ref == (component.default_branch if branch else "2.0")
+    assert source.selected_branch == (component.default_branch if branch else None)
+
+
+@pytest.mark.parametrize("name", ["pymupdf_layout", "pymupdf4llm"])
+def test_missing_companion_release_does_not_fall_back_to_branch(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = SourceManager(CommandRunner(verbose=False))
+
+    def remote_ref(repository: str, ref: str) -> None:
+        assert ref == "refs/tags/2.0"
+
+    monkeypatch.setattr(manager, "remote_ref", remote_ref)
+    pymupdf = ResolvedSource("pymupdf", "PyMuPDF", "pymupdf/PyMuPDF", "2.0", "a" * 40, Path("."))
+    with pytest.raises(RuntimeError, match="no source tag matching PyMuPDF 2.0"):
+        manager.resolve_companion(COMPONENT_SPECS[name], pymupdf)
+
+
 def test_github_workflow_builds_one_integrated_package() -> None:
     import yaml
 
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    inputs = workflow[True]["workflow_dispatch"]["inputs"]  # PyYAML reads unquoted 'on' as True.
+    assert {name for name in inputs if name.endswith("_ref")} == {"pymupdf_ref"}
+    assert "inputs.pymupdf_layout_ref" not in WORKFLOW.read_text(encoding="utf-8")
+    assert "inputs.pymupdf4llm_ref" not in WORKFLOW.read_text(encoding="utf-8")
     steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
     builds = [step for step in steps if step.get("name", "").startswith("Build and install")]
     assert len(builds) == 1
@@ -423,7 +465,8 @@ def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.Capture
 
     plan = json.loads(capsys.readouterr().out)
     assert plan["refs"]["mupdf"] == "auto"
-    assert {value for name, value in plan["refs"].items() if name != "mupdf"} == {"latest-any-branch"}
+    assert plan["refs"]["pymupdf"] == "latest-any-branch"
+    assert {value for name, value in plan["refs"].items() if name != "pymupdf"} == {"auto"}
 
 
 @pytest.mark.parametrize(
@@ -433,8 +476,6 @@ def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.Capture
             "plan",
             (
                 "--pymupdf-ref",
-                "--pymupdf-layout-ref",
-                "--pymupdf4llm-ref",
                 "--dataset-ref",
                 "--pipeline",
                 "--scope",
@@ -448,8 +489,6 @@ def test_cli_plan_marks_latest_any_branch_refs_as_dynamic(capsys: pytest.Capture
             "run",
             (
                 "--pymupdf-ref",
-                "--pymupdf-layout-ref",
-                "--pymupdf4llm-ref",
                 "--dataset-ref",
                 "--pipeline",
                 "--scope",
@@ -475,5 +514,7 @@ def test_cli_help_documents_every_option(
     help_text = capsys.readouterr().out
     assert all(option in help_text for option in expected_options)
     assert "--mupdf-ref" not in help_text
+    assert "--pymupdf-layout-ref" not in help_text
+    assert "--pymupdf4llm-ref" not in help_text
     assert "(default:" in help_text
     assert "latest PyPI release tag" in help_text

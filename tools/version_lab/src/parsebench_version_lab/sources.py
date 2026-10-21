@@ -97,6 +97,18 @@ class SourceManager:
             component.name, component.label, component.repository, release, sha, Path(component.checkout_dir)
         )
 
+    def resolve_companion(self, component: ComponentSpec, pymupdf: ResolvedSource) -> ResolvedSource:
+        """Use matching release tags or default branches for the embedded sources."""
+        if pymupdf.selected_branch is not None:
+            return self.resolve_ref(component, component.default_branch)
+        release = pymupdf.requested_ref
+        sha = self.remote_ref(component.repository, f"refs/tags/{release}")
+        if sha is None:
+            raise RuntimeError(f"{component.label} has no source tag matching PyMuPDF {release}")
+        return ResolvedSource(
+            component.name, component.label, component.repository, release, sha, Path(component.checkout_dir)
+        )
+
     def remote_ref(self, repository: str, ref: str) -> str | None:
         result = self.runner.run(
             ["git", "ls-remote", self.remote(repository), ref, f"{ref}^{{}}"],
@@ -195,11 +207,13 @@ class SourceManager:
     def resolve_component(
         self, component: ComponentSpec, config: RunConfig, root: Path, *, pymupdf: ResolvedSource | None = None
     ) -> ResolvedSource:
-        if component.name == "mupdf":
-            assert pymupdf is not None
-            source = self.resolve_mupdf(pymupdf)
-        else:
+        if component.name == "pymupdf":
             source = self.resolve_ref(component, config.refs[component.name])
+        else:
+            assert pymupdf is not None
+            source = (
+                self.resolve_mupdf(pymupdf) if component.name == "mupdf" else self.resolve_companion(component, pymupdf)
+            )
         destination = root / component.checkout_dir
         sha = self.checkout(source.repository, source.resolved_sha, destination)
         if sha != source.resolved_sha:

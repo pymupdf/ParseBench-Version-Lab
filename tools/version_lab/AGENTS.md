@@ -34,3 +34,5 @@ PyMuPDF4LLM into the PyMuPDF wheel from their selected source checkouts;
 do not add separate package installs or compatibility paths for PyMuPDF 1.x.
 Derive MuPDF from the selected PyMuPDF commit's declared native version;
 keep its provenance, but do not expose a separate MuPDF selector.
+Expose only one PyMuPDF release/branch selector. Resolve Layout and PyMuPDF4LLM
+from matching tags for releases or their default branches for PyMuPDF branches.

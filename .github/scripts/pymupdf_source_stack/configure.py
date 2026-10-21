@@ -55,8 +55,8 @@ def main() -> int:
         "dataset": env("DATASET_REF"),
         "mupdf": "auto",
         "pymupdf": env("PYMUPDF_REF"),
-        "pymupdf_layout": env("PYMUPDF_LAYOUT_REF"),
-        "pymupdf4llm": env("PYMUPDF4LLM_REF"),
+        "pymupdf_layout": "auto",
+        "pymupdf4llm": "auto",
     }
     if latest_any_branch:
         refs = requested_refs | LATEST_ANY_BRANCH_REFS
@@ -68,13 +68,7 @@ def main() -> int:
     output_dir = Path(env("RUNNER_TEMP")) / "parsebench-output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    stack_label = "_".join(
-        (
-            f"pymupdf-{safe_ref(refs['pymupdf'])}",
-            f"layout-{safe_ref(refs['pymupdf_layout'])}",
-            f"4llm-{safe_ref(refs['pymupdf4llm'])}",
-        )
-    )
+    stack_label = f"pymupdf-{safe_ref(refs['pymupdf'])}"
     prefix = env("GCS_PREFIX").strip("/")
     destination = (
         f"{prefix}/{stack_label}/{safe_ref(benchmark_ref)}"

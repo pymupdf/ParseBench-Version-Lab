@@ -58,12 +58,12 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
     latest.add_argument(
         "--all-latest",
         action="store_true",
-        help="Use default branches for PyMuPDF, Layout, and 4LLM; derive MuPDF from PyMuPDF",
+        help="Use PyMuPDF's default branch; resolve bundled sources automatically",
     )
     latest.add_argument(
         "--latest-any-branch",
         action="store_true",
-        help="Use the newest branch head for PyMuPDF, Layout, and 4LLM; derive MuPDF from PyMuPDF",
+        help="Use PyMuPDF's newest branch head; resolve bundled sources automatically",
     )
     parser.add_argument(
         "--python",

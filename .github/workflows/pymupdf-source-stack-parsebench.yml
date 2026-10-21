@@ -7,15 +7,7 @@ run-name: >-
       inputs.pipeline,
       inputs.latest_any_branch && 'Latest branch' ||
         inputs.all_latest && 'Latest default' ||
-        inputs.pymupdf_ref == inputs.pymupdf_layout_ref &&
-        inputs.pymupdf_ref == inputs.pymupdf4llm_ref &&
-        inputs.pymupdf_ref ||
-        format(
-          'P:{0},L:{1},4:{2}',
-          inputs.pymupdf_ref,
-          inputs.pymupdf_layout_ref,
-          inputs.pymupdf4llm_ref
-        ),
+        inputs.pymupdf_ref,
       inputs.run_scope == 'Quick test (15 cases)' && 'Quick 15' || 'Full ~2k',
       inputs.group == 'All categories' && 'All' ||
         inputs.group == 'Page layout' && 'Layout' ||
@@ -28,17 +20,17 @@ on:
   workflow_dispatch:
     inputs:
       all_latest:
-        description: "Use default branches for PyMuPDF, Layout and PyMuPDF4LLM. MuPDF follows PyMuPDF. Ref inputs are ignored."
+        description: "Use the latest PyMuPDF default-branch commit. Overrides the PyMuPDF release/branch input."
         required: true
         default: false
         type: boolean
       latest_any_branch:
-        description: "Use newest branch heads for PyMuPDF, Layout and PyMuPDF4LLM. MuPDF follows PyMuPDF. Cannot combine with latest default branches."
+        description: "Use the newest PyMuPDF branch-head commit. Overrides the release/branch input. Cannot combine with default-branch mode."
         required: true
         default: false
         type: boolean
       pipeline:
-        description: "Which PyMuPDF4LLM pipeline should be benchmarked?"
+        description: "Which PyMuPDF extraction pipeline should be benchmarked?"
         required: true
         default: "pymupdf4llm_html_tables_rapidocr_v3"
         type: choice
@@ -55,17 +47,7 @@ on:
         default: current
         type: string
       pymupdf_ref:
-        description: "PyMuPDF: latest PyPI release or a current branch name. Ignored by either automatic branch mode."
-        required: true
-        default: "latest"
-        type: string
-      pymupdf_layout_ref:
-        description: "PyMuPDF Layout: current PyMuPDF release tag or a current branch name. Ignored by either automatic branch mode."
-        required: true
-        default: "latest"
-        type: string
-      pymupdf4llm_ref:
-        description: "PyMuPDF4LLM: current PyMuPDF release tag or a current branch name. Ignored by either automatic branch mode."
+        description: "PyMuPDF release/branch: latest, the current release tag, or any existing branch. Bundled sources are resolved automatically."
         required: true
         default: "latest"
         type: string
@@ -130,8 +112,6 @@ jobs:
           DATASET_REF: ${{ inputs.dataset_version }}
           GROUP_SELECTION: ${{ inputs.group }}
           LATEST_ANY_BRANCH: ${{ inputs.latest_any_branch }}
-          PYMUPDF4LLM_REF: ${{ inputs.pymupdf4llm_ref }}
-          PYMUPDF_LAYOUT_REF: ${{ inputs.pymupdf_layout_ref }}
           PYMUPDF_REF: ${{ inputs.pymupdf_ref }}
           RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
         run: python3 "$WORKFLOW_SCRIPTS/configure.py"

@@ -32,7 +32,7 @@ COMPONENT_SPECS = {
     ),
     "pymupdf4llm": ComponentSpec("pymupdf4llm", "PyMuPDF4LLM", "pymupdf/pymupdf4llm", "pymupdf4llm", "main", "pymupdf"),
 }
-SELECTABLE_COMPONENTS = {name: component for name, component in COMPONENT_SPECS.items() if name != "mupdf"}
+SELECTABLE_COMPONENTS = {"pymupdf": COMPONENT_SPECS["pymupdf"]}
 
 DATASET_REPOSITORY = "llamaindex/ParseBench"
 DATASET_BRANCHES = {"full": "main", "test": "test-data"}
@@ -55,8 +55,6 @@ class RunConfig:
     """A frontend-independent description of one Version Lab run."""
 
     pymupdf_ref: str = LATEST_RELEASE
-    pymupdf_layout_ref: str = LATEST_RELEASE
-    pymupdf4llm_ref: str = LATEST_RELEASE
     dataset_ref: str = "current"
     scope: str = "quick"
     group: str = "all"
@@ -80,7 +78,7 @@ class RunConfig:
             requested = dict.fromkeys(SELECTABLE_COMPONENTS, "latest-any-branch")
         elif self.all_latest:
             requested = {name: component.default_branch for name, component in SELECTABLE_COMPONENTS.items()}
-        requested["mupdf"] = "auto"
+        requested.update({name: "auto" for name in COMPONENT_SPECS if name not in SELECTABLE_COMPONENTS})
         object.__setattr__(self, "refs", requested)
 
     @property
