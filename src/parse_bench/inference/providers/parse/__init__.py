@@ -6,6 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 _PROVIDER_MODULES = [
+    "aeddix_alpine_ocr_kdl",
     "amazon_nova",
     "anthropic",
     "anyformat",
@@ -17,6 +18,7 @@ _PROVIDER_MODULES = [
     "datalab",
     "deepseek",
     "deepseekocr2",
+    "docai",
     "docling",
     "docling_serve",
     "dots_ocr",
@@ -34,6 +36,7 @@ _PROVIDER_MODULES = [
     "jinaocr",
     "kdl_frontier_nano",
     "landingai",
+    "lightonocr-3",
     "liteparse",
     "markitdown",
     "opendataloader",
@@ -47,6 +50,7 @@ _PROVIDER_MODULES = [
     "mineru_diffusion",
     "mistral_ocr",
     "nemotron_omni",
+    "nemotron_parse_3_5",
     "nutrient_dws",
     "openai",
     "ovisocr2",

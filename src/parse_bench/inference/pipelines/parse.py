@@ -317,6 +317,19 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
     )
 
     # =========================================================================
+    # DocAI (ProvidusAI) hosted parse API
+    # =========================================================================
+    register_fn(
+        PipelineSpec(
+            pipeline_name="docai_default",
+            provider_name="docai",
+            product_type=ProductType.PARSE,
+            config={"parse_options": {"redact": False}},
+            per_file_timeout=3600.0,  # includes the wait in the service's queue at --max_concurrent 30
+        )
+    )
+
+    # =========================================================================
     # Docling Pipelines
     # =========================================================================
 
@@ -1249,6 +1262,28 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
     )
 
     # =========================================================================
+    # LightOnOCR-3 (grounding prompt: one pass gives markdown and layout)
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="lightonocr_3_vllm_parse",
+            provider_name="lightonocr-3",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "loocr-grounding",
+                "server_url_env": "LIGHTONOCR_3_SERVER_URL",
+                "prompt": "grounding",
+                "dpi": 400,
+                "max_pixels": 5_000_000,
+                "temperature": 0.1,
+                # QwenProvider's 16384 default is the whole context: image + output tokens would overflow.
+                "max_tokens": 12288,
+            },
+        )
+    )
+
+    # =========================================================================
     # Unlimited-OCR (baidu/Unlimited-OCR, DeepSeek-OCR successor with grounding)
     # =========================================================================
 
@@ -2015,6 +2050,34 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # Gemini - Parse with Layout File - thinking-level sweep. Adds levels for models
+    # whose other layout-file pipelines are registered above; each config matches that
+    # model's sibling except for thinking_level.
+    for _gemini_name, _gemini_model, _gemini_max_tokens, _gemini_levels in (
+        ("gemini_3_flash", "gemini-3-flash-preview", 65536, ("medium",)),
+        ("gemini_3_1_flash_lite", "gemini-3.1-flash-lite-preview", 32768, ("medium",)),
+        ("gemini_3_5_flash", "gemini-3.5-flash", 32768, ("high",)),
+        ("gemini_3_5_flash_lite", "gemini-3.5-flash-lite", 32768, ("medium", "high")),
+        ("gemini_3_6_flash", "gemini-3.6-flash", 32768, ("high",)),
+        ("gemini_3_7_flash", "gemini-3.7-flash", 32768, ("low", "medium")),
+        ("gemini_3_8_flash", "gemini-3.8-flash", 32768, ("medium",)),
+        ("gemini_3_1_pro", "gemini-3.1-pro-preview", 32768, ("low",)),
+    ):
+        for _gemini_level in _gemini_levels:
+            register_fn(
+                PipelineSpec(
+                    pipeline_name=f"google_{_gemini_name}_thinking_{_gemini_level}_parse_with_layout_file",
+                    provider_name="google",
+                    product_type=ProductType.PARSE,
+                    config={
+                        "model": _gemini_model,
+                        "max_tokens": _gemini_max_tokens,
+                        "mode": "parse_with_layout_file",
+                        "thinking_level": _gemini_level,
+                    },
+                )
+            )
+
     # =========================================================================
     # Gemini - Agentic Vision
     # =========================================================================
@@ -2218,31 +2281,55 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
-    # OpenAI GPT-5.6 (sol / terra / luna) - Parse with Layout File - Reasoning None
+    # OpenAI GPT-5.6 (sol / terra / luna) - Parse with Layout File - reasoning sweep
+    # none through max. "max" goes through the Responses API, the others through
+    # Chat Completions. The `med` token in the name is medium reasoning effort.
     for _gpt56_suffix, _gpt56_model in (
         ("sol", "gpt-5.6-sol"),
         ("terra", "gpt-5.6-terra"),
         ("luna", "gpt-5.6-luna"),
     ):
-        register_fn(
-            PipelineSpec(
-                pipeline_name=(f"openai_gpt_5_6_{_gpt56_suffix}_reasoning_none_parse_with_layout_file"),
-                provider_name="openai",
-                product_type=ProductType.PARSE,
-                config={
-                    "model": _gpt56_model,
-                    "max_tokens": 32768,
-                    "mode": "parse_with_layout_file",
-                    "reasoning_effort": "none",
-                },
+        for _gpt56_name_effort, _gpt56_effort in (
+            ("none", "none"),
+            ("low", "low"),
+            ("med", "medium"),
+            ("high", "high"),
+            ("xhigh", "xhigh"),
+            ("max", "max"),
+        ):
+            register_fn(
+                PipelineSpec(
+                    pipeline_name=(
+                        f"openai_gpt_5_6_{_gpt56_suffix}_reasoning_{_gpt56_name_effort}_parse_with_layout_file"
+                    ),
+                    provider_name="openai",
+                    product_type=ProductType.PARSE,
+                    config={
+                        "model": _gpt56_model,
+                        "max_tokens": 32768,
+                        "mode": "parse_with_layout_file",
+                        "reasoning_effort": _gpt56_effort,
+                        # Chat Completions rejects "max"; only the Responses API takes it.
+                        **({"api": "responses"} if _gpt56_effort == "max" else {}),
+                    },
+                )
             )
-        )
 
-    # OpenAI GPT-6 Sol / Luna - Parse with Layout File - Reasoning None / Med
-    # A no-reasoning baseline and the model default, medium, pinned explicitly.
-    # The `med` token in the name is medium reasoning effort.
-    for _gpt6_suffix, _gpt6_model in (("sol", "gpt-6-sol"), ("luna", "gpt-6-luna")):
-        for _gpt6_name_effort, _gpt6_effort in (("none", "none"), ("med", "medium")):
+    # OpenAI GPT-6 Astra / Sol / Luna - Parse with Layout File - reasoning sweep
+    # none through max; "max" goes through the Responses API. Astra rejects
+    # "none" (HTTP 400), so its sweep starts at "low". Medium is the model
+    # default, pinned explicitly. The `med` token in the name is medium effort.
+    for _gpt6_suffix, _gpt6_model in (("astra", "gpt-6-astra"), ("sol", "gpt-6-sol"), ("luna", "gpt-6-luna")):
+        for _gpt6_name_effort, _gpt6_effort in (
+            ("none", "none"),
+            ("low", "low"),
+            ("med", "medium"),
+            ("high", "high"),
+            ("xhigh", "xhigh"),
+            ("max", "max"),
+        ):
+            if _gpt6_suffix == "astra" and _gpt6_effort == "none":
+                continue
             register_fn(
                 PipelineSpec(
                     pipeline_name=(f"openai_gpt_6_{_gpt6_suffix}_reasoning_{_gpt6_name_effort}_parse_with_layout_file"),
@@ -2253,9 +2340,26 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
                         "max_tokens": 32768,
                         "mode": "parse_with_layout_file",
                         "reasoning_effort": _gpt6_effort,
+                        # Chat Completions rejects "max"; only the Responses API takes it.
+                        **({"api": "responses"} if _gpt6_effort == "max" else {}),
                     },
                 )
             )
+
+    # OpenAI GPT-6.1 Sol - Parse with Layout File - Low Reasoning
+    register_fn(
+        PipelineSpec(
+            pipeline_name="openai_gpt_6_1_sol_reasoning_low_parse_with_layout_file",
+            provider_name="openai",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "gpt-6.1-sol",
+                "max_tokens": 32768,
+                "mode": "parse_with_layout_file",
+                "reasoning_effort": "low",
+            },
+        )
+    )
 
     # OpenAI GPT-5.4 Nano - Parse with Layout
     register_fn(
@@ -2319,6 +2423,21 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # Anthropic Haiku 5.5 - Parse with Layout File - Adaptive Thinking
+    register_fn(
+        PipelineSpec(
+            pipeline_name="anthropic_haiku_5_5_parse_with_layout_file",
+            provider_name="anthropic",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "claude-haiku-5-5",
+                "max_tokens": 32768,
+                "mode": "parse_with_layout_file",
+                "thinking": {"type": "adaptive"},
+            },
+        )
+    )
+
     # Anthropic Opus 4.6 - Parse with Layout File
     register_fn(
         PipelineSpec(
@@ -2377,6 +2496,24 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # Anthropic Opus 5.5 - Parse with Layout File - Effort Low / High
+    # Thinking cannot be disabled on Opus 5.5, so effort is the only reasoning
+    # knob. Otherwise identical to the default (medium) pipeline above.
+    for _opus55_effort in ("low", "high"):
+        register_fn(
+            PipelineSpec(
+                pipeline_name=f"anthropic_opus_5_5_effort_{_opus55_effort}_parse_with_layout_file",
+                provider_name="anthropic",
+                product_type=ProductType.PARSE,
+                config={
+                    "model": "claude-opus-5-5",
+                    "max_tokens": 32768,
+                    "mode": "parse_with_layout_file",
+                    "effort": _opus55_effort,
+                },
+            )
+        )
+
     # Anthropic Sonnet 5 - Parse with Layout (image mode) - Adaptive Thinking
     register_fn(
         PipelineSpec(
@@ -2401,6 +2538,21 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             product_type=ProductType.PARSE,
             config={
                 "model": "claude-sonnet-5",
+                "max_tokens": 32768,
+                "mode": "parse_with_layout_file",
+                "thinking": {"type": "adaptive"},
+            },
+        )
+    )
+
+    # Anthropic Sonnet 5.5 - Parse with Layout File - Adaptive Thinking
+    register_fn(
+        PipelineSpec(
+            pipeline_name="anthropic_sonnet_5_5_parse_with_layout_file",
+            provider_name="anthropic",
+            product_type=ProductType.PARSE,
+            config={
+                "model": "claude-sonnet-5-5",
                 "max_tokens": 32768,
                 "mode": "parse_with_layout_file",
                 "thinking": {"type": "adaptive"},
@@ -2568,6 +2720,26 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # =========================================================================
+    # aeddix-alpine-ocr (aeddix-labs/aeddix-alpine-ocr, fine-tune of
+    # opendatalab/MinerU2.5-Pro-2605-1.2B) through the kdl_frontier_nano
+    # pipeline; same serving requirements as KDL-Frontier-Parser-nano
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="aeddix_alpine_ocr_kdl",
+            provider_name="aeddix_alpine_ocr_kdl",
+            product_type=ProductType.PARSE,
+            config={
+                "endpoint_url": "",  # via AEDDIX_ALPINE_OCR_KDL_ENDPOINT_URL
+                "model": "",  # via AEDDIX_ALPINE_OCR_KDL_MODEL (default aeddix-alpine-ocr)
+                "dpi": 144,
+                "timeout": 900,
+            },
+        )
+    )
+
     register_fn(
         PipelineSpec(
             pipeline_name="mineru25_vllm",
@@ -2643,6 +2815,25 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
     )
 
     # =========================================================================
+    # Nemotron 3.5 Parse (nvidia/Nemotron-3.5-Parse, 0.63B RADIO + mBART)
+    # Model repository's nemotron_parse triple pass (full page + detection +
+    # Table/Chart crops, region union) on a vLLM backend. Markdown with HTML
+    # tables + classed per-block layout boxes.
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="nemotron_parse_3_5_sdk",
+            provider_name="nemotron_parse_3_5",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",  # Set via NEMOTRON_PARSE_3_5_SERVER_URL or override
+                "mode": "triple",
+            },
+        )
+    )
+
+    # =========================================================================
     # Databricks ai_parse_document
     # =========================================================================
 
@@ -2683,26 +2874,6 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             product_type=ProductType.PARSE,
             config={
                 "version": "2.0",
-            },
-        )
-    )
-
-    # Batched variant: Databricks' recommended operating mode — submit the
-    # whole dataset as ONE SQL statement so warehouse spin-up/idle is paid
-    # once instead of per micro-batch. Model DBUs are unchanged (per-page
-    # billing). Run with max_concurrent >= dataset size so every request is
-    # queued before the debounce window flushes.
-    register_fn(
-        PipelineSpec(
-            pipeline_name="databricks_ai_parse_batch",
-            provider_name="databricks_ai_parse",
-            product_type=ProductType.PARSE,
-            config={
-                "version": "2.0",
-                "batch_size": 1000,
-                "batch_wait_seconds": 120,
-                "timeout": 7200,
-                "per_request_timeout": 9000,
             },
         )
     )

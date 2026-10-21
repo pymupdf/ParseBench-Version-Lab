@@ -69,6 +69,15 @@ class HunyuanOcrLabelMapper(CanonicalPassthroughMapper):
 
 
 @register_layout_label_mapper(
+    "nemotron_parse_3_5",
+    "model:nemotron_parse_layout",
+    priority=95,
+)
+class NemotronParseLabelMapper(CanonicalPassthroughMapper):
+    """Pass through the Canonical17 labels emitted by Nemotron 3.5 Parse normalization."""
+
+
+@register_layout_label_mapper(
     "llamaparse",
     "model:llamaparse",
     priority=100,

@@ -71,7 +71,7 @@ def _raw_output_page_field_is_list(raw_output: Any, field: str) -> bool:
     representation, so once create_layout_adapter_for_result's shape-matcher
     fallback is running (registry.py), the type alone cannot tell them apart.
     The raw payload still can: kdl_frontier_nano (and its florin_parser_nano /
-    rakedoc_nano forks) emit `{"pages": [{"elements": [...]}]}`, distinct from
+    rakedoc_nano / aeddix_alpine_ocr_kdl forks) emit `{"pages": [{"elements": [...]}]}`, distinct from
     LlamaParse's `{"pages": [{"items": [...]}]}`.
     """
     if not isinstance(raw_output, dict):
@@ -1446,6 +1446,28 @@ class DeepSeekLayoutAdapter(LayoutAdapter):
         )
 
 
+@register_layout_adapter("nemotron_parse_3_5", priority=90)
+class NemotronParse35LayoutAdapter(HunyuanOcrLayoutAdapter):
+    """Project Nemotron 3.5 Parse ``layout_pages`` like HunyuanOCR: Canonical17 labels kept as strings.
+
+    Resolved by provider key only. Without it, attribution falls back to the
+    LlamaParse adapter, which rejects the model's labels.
+    """
+
+    @classmethod
+    def matches(cls, inference_result: InferenceResult) -> bool:
+        return False
+
+    def to_layout_output(
+        self,
+        inference_result: InferenceResult,
+        *,
+        page_filter: int | None = None,
+    ) -> LayoutOutput:
+        layout_output = super().to_layout_output(inference_result, page_filter=page_filter)
+        return layout_output.model_copy(update={"model": LayoutDetectionModel.NEMOTRON_PARSE_LAYOUT})
+
+
 @register_layout_adapter("openai", priority=90)
 class OpenAILayoutAdapter(LayoutAdapter):
     """Adapter that extracts LayoutOutput from OpenAI ParseOutput.layout_pages.
@@ -1854,7 +1876,9 @@ class DatabricksAiParseLayoutAdapter(LayoutAdapter):
                     x2 = (seg.x + seg.w) * page_w
                     y2 = (seg.y + seg.h) * page_h
 
-                    content = _build_vendor_content(label, item.value)
+                    content = (
+                        LayoutTableContent(html=item.html) if item.html else _build_vendor_content(label, item.value)
+                    )
 
                     predictions.append(
                         LayoutPrediction(
@@ -2151,6 +2175,23 @@ class LandingAILayoutAdapter(LayoutAdapter):
             predictions=predictions,
             layout_pages=[page.model_copy(update={"items": []}) for page in layout_pages],
         )
+
+
+@register_layout_adapter("docai", priority=90)
+class DocAILayoutAdapter(LandingAILayoutAdapter):
+    """Adapter for DocAI ParseOutput.layout_pages: normalized [0,1] xywh boxes with canonical
+    label strings, the same shape the LandingAI adapter reads."""
+
+    @classmethod
+    def matches(cls, inference_result: InferenceResult) -> bool:
+        if not isinstance(inference_result.output, ParseOutput) or not inference_result.output.layout_pages:
+            return False
+        raw_output = inference_result.raw_output
+        return isinstance(raw_output, dict) and raw_output.get("provider") == "docai"
+
+    def to_layout_output(self, inference_result: InferenceResult, *, page_filter: int | None = None) -> LayoutOutput:
+        out = super().to_layout_output(inference_result, page_filter=page_filter)
+        return out.model_copy(update={"model": LayoutDetectionModel.DOCAI_LAYOUT})
 
 
 @register_layout_adapter("extend_parse", priority=89)
@@ -3020,7 +3061,7 @@ class DatalabLayoutAdapter(LayoutAdapter):
         )
 
 
-@register_layout_adapter("qwen3_5", "qwen3_8", priority=90)
+@register_layout_adapter("qwen3_5", "qwen3_8", "lightonocr-3", priority=90)
 class QwenLayoutAdapter(LayoutAdapter):
     """Adapter that extracts LayoutOutput from Qwen ParseOutput.layout_pages.
 
@@ -3216,7 +3257,9 @@ _NANO_LAYOUT_LABEL_TO_CANONICAL = {
 }
 
 
-@register_layout_adapter("kdl_frontier_nano", "florin_parser_nano", "rakedoc_nano", priority=90)
+@register_layout_adapter(
+    "kdl_frontier_nano", "florin_parser_nano", "rakedoc_nano", "aeddix_alpine_ocr_kdl", priority=90
+)
 class KdlFrontierNanoLayoutAdapter(LayoutAdapter):
     """Extract LayoutOutput from the kdl_frontier_nano provider's
     ParseOutput.layout_pages.

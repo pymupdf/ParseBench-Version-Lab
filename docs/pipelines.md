@@ -40,6 +40,7 @@ These pipelines use hosted APIs. You only need an API key in your `.env` file.
 
 | Pipeline | Description | Env Var |
 |---|---|---|
+| `openai_gpt_6_1_sol_reasoning_low_parse_with_layout_file` | GPT-6.1 Sol, low reasoning + layout, PDF file mode | `OPENAI_API_KEY` |
 | `openai_gpt5_mini_reasoning_medium_parse` | GPT-5 Mini, medium reasoning, image mode | `OPENAI_API_KEY` |
 | `openai_gpt5_mini_reasoning_medium_parse_file` | GPT-5 Mini, medium reasoning, PDF file mode | `OPENAI_API_KEY` |
 | `openai_gpt5_mini_reasoning_minimal_parse` | GPT-5 Mini, minimal reasoning | `OPENAI_API_KEY` |
@@ -58,6 +59,7 @@ These pipelines use hosted APIs. You only need an API key in your `.env` file.
 
 | Pipeline | Description | Env Var |
 |---|---|---|
+| `anthropic_haiku_5_5_parse_with_layout_file` | Claude Haiku 5.5, adaptive thinking + layout, PDF file mode | `ANTHROPIC_API_KEY` |
 | `anthropic_haiku_parse` | Claude Haiku 4.5, image mode | `ANTHROPIC_API_KEY` |
 | `anthropic_haiku_parse_file` | Claude Haiku 4.5, PDF file mode | `ANTHROPIC_API_KEY` |
 | `anthropic_haiku_parse_with_layout` | Claude Haiku 4.5, parse + layout | `ANTHROPIC_API_KEY` |
@@ -208,6 +210,19 @@ Hosted document-parsing API. Sign up at [oi-parser.ai](https://oi-parser.ai/) to
 |---|---|---|
 | **`oi_parser`** | oi-parser hosted `/v1/extract` API | `OI_PARSER_API_KEY`, `OI_PARSER_BASE_URL` (optional) |
 
+### DocAI (ProvidusAI)
+
+Hosted parse API. Documents are uploaded into a knowledge base named `ParseBench` (created on first
+use) with auto-parse on; the job is polled and `result.md` plus `grounding.json` are fetched. Tables
+come back as HTML with row and column spans; grounding boxes feed the layout vertical through the
+`docai` layout adapter. Cost is one credit per parsed page at the pay-as-you-go rate of USD 0.01
+(1¢ per page); override with `credit_rate_usd` or `DOCAI_CREDIT_RATE_USD`. Sign up at
+https://platform.providus.ai. Recommended `--max_concurrent 30`.
+
+| Pipeline | Description | Env Vars |
+|---|---|---|
+| **`docai_default`** | DocAI parsing pipeline by ProvidusAI (In paper: *DocAI*) | `DOCAI_API_KEY`, `DOCAI_BASE_URL` (optional) |
+
 ### anyformat
 
 Hosted parse API. Each pipeline creates a one-node parse workflow for its tier (cache off) on first
@@ -261,6 +276,12 @@ These pipelines require you to deploy the model on your own infrastructure (e.g.
 | `qwen3_8_27b_thinking_parse_with_layout` | Qwen3.8-27B-FP8, parse + layout with thinking | `QWEN3_8_27B_SERVER_URL` |
 | `qwen3_8_flash_next_parse_with_layout` | Qwen3.8-Flash-Next-FP8, parse + layout | `QWEN3_8_FLASH_NEXT_SERVER_URL` |
 | `qwen3_8_flash_next_thinking_parse_with_layout` | Qwen3.8-Flash-Next-FP8, parse + layout with thinking | `QWEN3_8_FLASH_NEXT_SERVER_URL` |
+
+### LightOnOCR-3
+
+| Pipeline | Description | Env Var |
+|---|---|---|
+| `lightonocr_3_vllm_parse` | LightOnOCR-3 grounding prompt, parse + layout from one pass (400 DPI, 5M pixel cap) | `LIGHTONOCR_3_SERVER_URL` |
 
 ### Chandra OCR 2
 
@@ -327,6 +348,12 @@ These pipelines require you to deploy the model on your own infrastructure (e.g.
 | `nemotron_omni_30b_vllm` | Nemotron-3-Nano-Omni 30B-A3B Reasoning, thinking disabled | `NEMOTRON_OMNI_SERVER_URL` |
 | `nemotron_omni_30b_vllm_thinking` | Nemotron-3-Nano-Omni 30B-A3B Reasoning, thinking enabled | `NEMOTRON_OMNI_SERVER_URL` |
 
+### Nemotron 3.5 Parse
+
+| Pipeline | Description | Env Var |
+|---|---|---|
+| `nemotron_parse_3_5_sdk` | Nemotron 3.5 Parse SDK server (triple pass: full page + detection + Table/Chart crops; layout) | `NEMOTRON_PARSE_3_5_SERVER_URL` |
+
 ### Surya OCR 2
 
 | Pipeline | Description | Env Var |
@@ -348,6 +375,14 @@ Fine-tune of florin-parser-nano ([cloudraker/rakedoc-nano](https://huggingface.c
 | Pipeline | Description | Env Var |
 |---|---|---|
 | `rakedoc_nano` | vLLM OpenAI-compatible endpoint (layout + per-region recognition) | `RAKEDOC_NANO_ENDPOINT_URL` |
+
+### aeddix-alpine-ocr (KDL pipeline)
+
+Fine-tune of MinerU2.5-Pro-2605-1.2B ([aeddix-labs/aeddix-alpine-ocr](https://huggingface.co/aeddix-labs/aeddix-alpine-ocr), tag `v0.1`); served identically to KDL-Frontier-Parser-nano and driven by the unchanged `kdl_frontier_nano` two-stage pipeline and markdown emission (see the provider module docstring for the exact `vllm serve` command).
+
+| Pipeline | Description | Env Var |
+|---|---|---|
+| `aeddix_alpine_ocr_kdl` | vLLM OpenAI-compatible endpoint (layout + per-region recognition) | `AEDDIX_ALPINE_OCR_KDL_ENDPOINT_URL` |
 
 ---
 
