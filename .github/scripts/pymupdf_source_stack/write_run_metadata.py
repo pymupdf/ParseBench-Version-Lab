@@ -20,6 +20,8 @@ def main() -> int:
         "pipeline": env("PIPELINE"),
         "benchmark_ref_input": env("BENCHMARK_REF"),
         "checked_out_sha": git_sha(),
+        "pymupdf_release_tag": os.environ.get("PYMUPDF_RELEASE_TAG"),
+        "launcher_run_id": os.environ.get("LAUNCHER_RUN_ID"),
         "github_ref": env("GITHUB_REF"),
         "github_sha": env("GITHUB_SHA"),
         "github_repository": env("GITHUB_REPOSITORY"),

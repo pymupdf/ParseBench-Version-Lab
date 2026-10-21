@@ -103,6 +103,38 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+@pytest.mark.parametrize("title", ["PyMuPDF · main · Full ~2k · All", "PyMuPDF 2.0 · feature/ocr · Quick 15 · Tables"])
+def test_indexer_identifies_pipeline_from_friendly_title_before_artifacts_exist(title: str) -> None:
+    database = FakeDatabase()
+    BenchmarkIndexer(database, FakeGithub()).index_run(
+        {"id": 123, "run_attempt": 1, "status": "completed", "conclusion": "failure", "display_title": title}
+    )
+    assert database.rows["benchmark_runs"][0]["pipeline_name"] == "pymupdf4llm_html_tables_rapidocr_v3"
+
+
+def test_indexer_uses_checked_out_revision_for_repository_dispatch(tmp_path: Path) -> None:
+    write_json(
+        tmp_path / "_github_run.json",
+        {"benchmark_ref_input": "feature/workflow", "checked_out_sha": "a" * 40},
+    )
+    database = FakeDatabase()
+    BenchmarkIndexer(database, FakeGithub()).index_run(
+        {
+            "id": 123,
+            "run_attempt": 1,
+            "status": "completed",
+            "conclusion": "success",
+            "event": "repository_dispatch",
+            "head_branch": "main",
+            "head_sha": "b" * 40,
+        },
+        LocalArtifactReader(tmp_path),
+    )
+    row = database.rows["benchmark_runs"][0]
+    assert row["head_branch"] == "feature/workflow"
+    assert row["head_sha"] == "a" * 40
+
+
 def test_gcs_discovery_accepts_string_ids_and_saves_inventory(tmp_path: Path) -> None:
     inventory_path = tmp_path / "gcs-run-inventory.json"
 

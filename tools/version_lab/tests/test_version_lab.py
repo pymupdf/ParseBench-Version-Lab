@@ -182,14 +182,25 @@ def test_github_workflow_builds_one_integrated_package() -> None:
     import yaml
 
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    inputs = workflow[True]["workflow_dispatch"]["inputs"]  # PyYAML reads unquoted 'on' as True.
+    launcher = yaml.safe_load(WORKFLOW.with_name("pymupdf-source-stack-launch.yml").read_text(encoding="utf-8"))
+    inputs = launcher[True]["workflow_dispatch"]["inputs"]  # PyYAML reads unquoted 'on' as True.
     assert set(inputs) == {"pymupdf_branch", "run_scope", "group"}
     assert inputs["pymupdf_branch"]["default"] == "main"
+    assert workflow[True] == {"repository_dispatch": {"types": ["parsebench-version-lab"]}}
+    assert "github.event.client_payload.pymupdf_version" in workflow["run-name"]
+    assert "PyMuPDF {0}" in workflow["run-name"]
+    assert launcher["name"] != workflow["name"]
     assert workflow["env"]["PIPELINE"] == RunConfig().pipeline
     assert "inputs.pipeline" not in WORKFLOW.read_text(encoding="utf-8")
     assert "inputs.pymupdf_layout_ref" not in WORKFLOW.read_text(encoding="utf-8")
     assert "inputs.pymupdf4llm_ref" not in WORKFLOW.read_text(encoding="utf-8")
     steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+    checkouts = [
+        step
+        for step in steps
+        if step.get("uses", "").startswith("actions/checkout@") and "repository" not in step.get("with", {})
+    ]
+    assert all(step["with"]["ref"] == "${{ github.event.client_payload.benchmark_sha }}" for step in checkouts)
     builds = [step for step in steps if step.get("name", "").startswith("Build and install")]
     assert len(builds) == 1
     environment = builds[0]["env"]

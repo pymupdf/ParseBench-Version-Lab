@@ -10,6 +10,14 @@ the adapters in this directory translate GitHub environment variables and
 output files to that shared core. GitHub-only publishing and failure-summary
 behavior remains here.
 
+`launch_benchmark.py` reads the latest published PyMuPDF release tag and sends
+a `parsebench-version-lab` repository dispatch. This supplies the version
+before GitHub evaluates the benchmark's `run-name`, without adding a version
+input to the manual form. The launcher uses its built-in token with
+`contents: write` for dispatch; no extra secret is needed. The benchmark retains
+its workflow identity for indexing, checks out the launcher's exact repository
+commit, and records the launch run ID and release label alongside source provenance.
+
 MuPDF follows the version declared in the selected PyMuPDF commit's `setup.py`;
 developers do not select it separately. The workflow resolves that native
 release tag to a full SHA before checkout, then gives PyMuPDF's build system a reproducible

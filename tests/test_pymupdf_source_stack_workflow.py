@@ -27,6 +27,7 @@ def _load_module(name: str):
 
 
 configure = _load_module("configure")
+launcher = _load_module("launch_benchmark")
 benchmark = importlib.import_module("parsebench_version_lab.runtime_benchmark")
 provenance = importlib.import_module("parsebench_version_lab.provenance")
 resolve_dataset = _load_module("resolve_dataset")
@@ -46,6 +47,57 @@ run_summary = _load_module("write_run_summary")
 )
 def test_safe_ref_produces_bounded_path_component(value: str, expected: str) -> None:
     assert configure.safe_ref(value) == expected
+
+
+@pytest.mark.parametrize("tag", ["2.0", "v2.1", None])
+def test_launcher_resolves_release_before_dispatch_and_preserves_selected_branch(
+    tag: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name, value in {
+        "PYMUPDF_BRANCH": "feature/ocr",
+        "RUN_SCOPE_SELECTION": "Full benchmark (~2,000 pages)",
+        "GROUP_SELECTION": "All categories",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_REF_NAME": "feature/workflow",
+        "GITHUB_SHA": "a" * 40,
+        "GITHUB_RUN_ID": "123",
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            assert command == ["gh", "api", "repos/pymupdf/PyMuPDF/releases/latest"]
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"tag_name": tag}))
+        assert command == ["gh", "api", "--method", "POST", "repos/owner/repo/dispatches", "--input", "-"]
+        assert json.loads(kwargs["input"]) == {
+            "event_type": "parsebench-version-lab",
+            "client_payload": {
+                "pymupdf_version": tag.removeprefix("v"),
+                "pymupdf_tag": tag,
+                "pymupdf_branch": "feature/ocr",
+                "run_scope": "Full benchmark (~2,000 pages)",
+                "group": "All categories",
+                "benchmark_ref": "feature/workflow",
+                "benchmark_sha": "a" * 40,
+                "launcher_run_id": "123",
+            },
+        }
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    if tag is None:
+        with pytest.raises(SystemExit, match="unsupported tag"):
+            launcher.main()
+        assert len(calls) == 1
+    else:
+        assert launcher.main() == 0
+        assert len(calls) == 2
+        assert "pymupdf-source-stack-parsebench.yml" in (tmp_path / "summary").read_text()
 
 
 def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

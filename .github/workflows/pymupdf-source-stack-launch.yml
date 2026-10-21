@@ -1,0 +1,61 @@
+name: Run ParseBench Version Lab
+
+run-name: >-
+  ${{ format('Launch PyMuPDF · {0} · {1} · {2}', inputs.pymupdf_branch,
+      inputs.run_scope == 'Quick test (15 cases)' && 'Quick 15' || 'Full ~2k',
+      inputs.group == 'All categories' && 'All' || inputs.group) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pymupdf_branch:
+        description: "PyMuPDF branch to benchmark (for example main or your feature branch)."
+        required: true
+        default: "main"
+        type: string
+      run_scope:
+        description: "How much data should be tested?"
+        required: true
+        default: "Quick test (15 cases)"
+        type: choice
+        options:
+          - "Quick test (15 cases)"
+          - "Full benchmark (~2,000 pages)"
+      group:
+        description: "Which document category should be tested?"
+        required: true
+        default: "All categories"
+        type: choice
+        options:
+          - "All categories"
+          - Charts
+          - Tables
+          - "Page layout"
+          - "Text content"
+          - "Text formatting"
+
+permissions:
+  contents: write # Required to send the repository_dispatch event.
+
+jobs:
+  launch:
+    name: Resolve latest PyMuPDF release and start benchmark
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout launcher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts/pymupdf_source_stack
+            tools/version_lab/src
+
+      - name: Launch named benchmark
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYMUPDF_BRANCH: ${{ inputs.pymupdf_branch }}
+          RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
+          GROUP_SELECTION: ${{ inputs.group }}
+        run: python3 .github/scripts/pymupdf_source_stack/launch_benchmark.py

@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from .coverage import execution_coverage
+from .model import DEFAULT_PIPELINE
 from .results import finite_number, headline_metric, report_dimension
 
 KNOWN_DIMENSIONS = ("chart", "table", "layout", "text_content", "text_formatting")
@@ -395,6 +396,8 @@ def _pipeline_from_run_name(run: Mapping[str, Any]) -> str | None:
     if not isinstance(title, str):
         return None
     first = title.split(" · ", 1)[0].strip()
+    if first == "PyMuPDF" or first.startswith("PyMuPDF "):
+        return DEFAULT_PIPELINE
     return first if first.startswith("pymupdf") else None
 
 
@@ -622,8 +625,8 @@ class BenchmarkIndexer:
             "dataset_version_id": dataset_id,
             "gcs_bucket": gcs_bucket,
             "gcs_prefix": gcs_prefix,
-            "head_branch": github_run.get("head_branch"),
-            "head_sha": github_run.get("head_sha"),
+            "head_branch": run_metadata.get("benchmark_ref_input") or github_run.get("head_branch"),
+            "head_sha": run_metadata.get("checked_out_sha") or github_run.get("head_sha"),
             "source_created_at": github_run.get("created_at"),
             "source_updated_at": github_run.get("updated_at"),
             "started_at": github_run.get("run_started_at"),

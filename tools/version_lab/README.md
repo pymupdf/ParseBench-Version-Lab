@@ -123,6 +123,18 @@ Hugging Face commit for the entire run.
 
 ## Run
 
+In GitHub Actions, select **Run ParseBench Version Lab** and click **Run workflow**.
+The launcher keeps the three inputs: PyMuPDF branch, test size, and category.
+It reads PyMuPDF's latest published GitHub release tag, then starts a separate
+**ParseBench Version Lab** benchmark named, for example,
+`PyMuPDF 2.0 · main · Full ~2k · All`. The launcher summary links to benchmark runs.
+The version in the title is the latest release label; the selected branch is
+still built and its exact installed version and commit are recorded in the results.
+The benchmark workflow definition runs from the default branch; its code and
+helpers are checked out at the immutable repository commit chosen in the launcher.
+Only the benchmark run is ingested into Supabase. The launcher finishing means
+the benchmark was requested; check the benchmark run for its final outcome.
+
 Run all commands from the repository root.
 
 Check the required tools:
