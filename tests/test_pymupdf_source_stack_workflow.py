@@ -13,28 +13,29 @@ HELPERS = Path(__file__).parents[1] / ".github" / "scripts" / "pymupdf_source_st
 
 
 def _load_module(name: str):
-    sys.path.insert(0, str(HELPERS))
-    try:
-        path = HELPERS / f"{name}.py"
-        spec = importlib.util.spec_from_file_location(name, path)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-        return module
-    finally:
-        sys.path.remove(str(HELPERS))
+    path = HELPERS / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-configure = _load_module("configure")
-launcher = _load_module("launch_benchmark")
-benchmark = importlib.import_module("parsebench_version_lab.runtime_benchmark")
-provenance = importlib.import_module("parsebench_version_lab.provenance")
-resolve_dataset = _load_module("resolve_dataset")
-resolve_refs = _load_module("resolve_refs")
-resolve_sources = _load_module("resolve_sources")
-results_summary = importlib.import_module("parsebench_version_lab.results")
-run_summary = _load_module("write_run_summary")
+# These standalone workflow scripts import siblings by their unqualified names.
+# Scope those aliases so the leaderboard tests can use their own common.py.
+with pytest.MonkeyPatch.context() as imports:
+    imports.syspath_prepend(str(HELPERS))
+    imports.setitem(sys.modules, "common", _load_module("common"))
+    configure = _load_module("configure")
+    imports.setitem(sys.modules, "configure", configure)
+    launcher = _load_module("launch_benchmark")
+    resolve_dataset = _load_module("resolve_dataset")
+    resolve_refs = _load_module("resolve_refs")
+    resolve_sources = _load_module("resolve_sources")
+    run_summary = _load_module("write_run_summary")
+    benchmark = importlib.import_module("parsebench_version_lab.runtime_benchmark")
+    provenance = importlib.import_module("parsebench_version_lab.provenance")
+    results_summary = importlib.import_module("parsebench_version_lab.results")
 
 
 @pytest.mark.parametrize(
