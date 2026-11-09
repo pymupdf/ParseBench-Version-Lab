@@ -195,10 +195,10 @@ Selected branches must support the integrated PyMuPDF build and current
 upstream PyMuPDF4LLM provider API. The runtime gate checks the embedded source
 commits for PyMuPDF, Layout, and PyMuPDF4LLM, verifies MuPDF build provenance,
 and exercises `Document.to_markdown()` with Layout and OCR before benchmarking.
-Component versions come from the bundled modules, not the empty compatibility
-distributions. Upstream ParseBench continues to call the bundled
-`pymupdf4llm.to_markdown()` API. Version Lab does not adapt older provider APIs
-or incompatible dependencies.
+Version Lab inference opens each PDF with the source-built PyMuPDF and calls
+`Document.to_markdown()` with the selected OCR backend. It passes the Markdown
+and page boxes to the upstream ParseBench normalizer. Component versions come
+from the bundled modules.
 
 ## Diagnostic boundary
 

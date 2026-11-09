@@ -41,6 +41,35 @@ class VersionLabPyMuPDF4LLMProvider(PyMuPDF4LLMProvider):
             )
         super().__init__(provider_name, config)
 
+    def _extract(self, pdf_path: str) -> dict[str, Any]:
+        import pymupdf
+
+        options = self._markdown_options()
+        ocr_function = self._resolve_ocr_function()
+        if ocr_function is not None:
+            options["ocr_function"] = ocr_function
+
+        with pymupdf.open(pdf_path) as document:
+            # Layout can remove page rotation in place. Keep the input PDF's dimensions for grounding.
+            dimensions = [(page.rect.width, page.rect.height) for page in document]
+            chunks = document.to_markdown(**options)
+
+        pages = []
+        for index, chunk in enumerate(chunks):
+            page_number = int(chunk["metadata"]["page_number"])
+            width, height = dimensions[page_number - 1]
+            pages.append(
+                {
+                    "page_index": index,
+                    "page_number": page_number,
+                    "text": chunk["text"],
+                    "width": width,
+                    "height": height,
+                    "page_boxes": chunk["page_boxes"],
+                }
+            )
+        return {"pages": pages, "num_pages": len(pages)}
+
     def _resolve_ocr_function(self) -> Callable[..., Any] | None:
         backend = self._version_lab_ocr_backend
         if backend in {None, "auto"}:

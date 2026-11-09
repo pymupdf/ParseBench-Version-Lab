@@ -242,7 +242,7 @@ jobs:
           RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
         run: .venv/bin/python "$WORKFLOW_SCRIPTS/write_run_metadata.py"
 
-      - name: Run selected PyMuPDF4LLM pipeline inference
+      - name: Run inference with PyMuPDF Document.to_markdown
         env:
           DATA_DIR: ${{ steps.config.outputs.data_dir }}
           GROUP: ${{ steps.config.outputs.group }}
