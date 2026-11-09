@@ -19,6 +19,24 @@ from parse_bench.schemas.product import ProductType
 def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-def]
     """Register all parse-related pipelines."""
 
+    register_fn(
+        PipelineSpec(
+            pipeline_name="upstage_dpe_v2",
+            provider_name="upstage",
+            product_type=ProductType.PARSE,
+            config={
+                # Upload original PDFs; API internal default rendering applies.
+                "model": "document-parse-260930",
+                "min_image_short_side": 2000,
+                "mode": "enhanced",
+                "ocr": "force",
+                "chart_recognition": True,
+                "cost_per_page_usd": 0.03,
+                "timeout": 600,
+            },
+        )
+    )
+
     # =========================================================================
     # LlamaParse Production Pipelines (V2 SDK)
     # =========================================================================
@@ -1181,6 +1199,21 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # r-1-mini: Reducto's lower-cost r-1 variant. Same config as reducto_r1.
+    register_fn(
+        PipelineSpec(
+            pipeline_name="reducto_r1_mini",
+            provider_name="reducto",
+            product_type=ProductType.PARSE,
+            config={
+                "ocr_system": "standard",
+                "agentic": False,
+                "table_output_format": "html",
+                "model": "r-1-mini",
+            },
+        )
+    )
+
     # =========================================================================
     # DeepSeek-OCR-2
     # =========================================================================
@@ -1261,6 +1294,20 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # OvisOCR3 (ATH-MaaS/OvisOCR3): official structured parse (JSON regions with
+    # bbox/category/content) -> markdown + layout; each chart region is re-read
+    # with the official chart_parsing prompt (OVISOCR3_SERVER_URL).
+    register_fn(
+        PipelineSpec(
+            pipeline_name="ovisocr3_vllm",
+            provider_name="ovisocr3",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",  # Set via OVISOCR3_SERVER_URL or override
+            },
+        )
+    )
+
     # =========================================================================
     # LightOnOCR-3 (grounding prompt: one pass gives markdown and layout)
     # =========================================================================
@@ -1291,6 +1338,17 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         PipelineSpec(
             pipeline_name="unlimitedocr",
             provider_name="unlimitedocr",
+            product_type=ProductType.PARSE,
+            config={},
+        )
+    )
+
+    # Unlimited-OCR 2 (baidu/Unlimited-OCR-2): whole document per request on the
+    # official SGLang deployment (UNLIMITEDOCR2_SERVER_URL).
+    register_fn(
+        PipelineSpec(
+            pipeline_name="unlimitedocr2",
+            provider_name="unlimitedocr2",
             product_type=ProductType.PARSE,
             config={},
         )
@@ -2361,6 +2419,22 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # OpenAI GPT-6.1 Terra - Parse with Layout File
+    for _terra_name_effort, _terra_effort in (("low", "low"), ("med", "medium")):
+        register_fn(
+            PipelineSpec(
+                pipeline_name=f"openai_gpt_6_1_terra_reasoning_{_terra_name_effort}_parse_with_layout_file",
+                provider_name="openai",
+                product_type=ProductType.PARSE,
+                config={
+                    "model": "gpt-6.1-terra",
+                    "max_tokens": 32768,
+                    "mode": "parse_with_layout_file",
+                    "reasoning_effort": _terra_effort,
+                },
+            )
+        )
+
     # OpenAI GPT-5.4 Nano - Parse with Layout
     register_fn(
         PipelineSpec(
@@ -2682,6 +2756,22 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
         )
     )
 
+    # KDLAI/KDL-Frontier-Parser-nano-v2: new weights, same pipeline and prompts.
+    # Serve them under this name (vLLM flags as for v1).
+    register_fn(
+        PipelineSpec(
+            pipeline_name="kdl_frontier_nano_v2",
+            provider_name="kdl_frontier_nano",
+            product_type=ProductType.PARSE,
+            config={
+                "endpoint_url": "",  # via KDL_NANO_ENDPOINT_URL
+                "model": "kdl-frontier-parser-nano-v2",
+                "dpi": 144,
+                "timeout": 900,
+            },
+        )
+    )
+
     # =========================================================================
     # florin-parser-nano (florin-inc/florin-parser-nano, fine-tune of
     # KDLAI/KDL-Frontier-Parser-nano; same serving requirements)
@@ -2829,6 +2919,24 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
             config={
                 "server_url": "",  # Set via NEMOTRON_PARSE_3_5_SERVER_URL or override
                 "mode": "triple",
+            },
+        )
+    )
+
+    # =========================================================================
+    # MiniCPM-OCR 1.0 (openbmb/MiniCPM-OCR-1.0, 1.3B SigLIP + Qwen3.5)
+    # Official minicpmvocr SDK: PP-DocLayoutV3 regions recognized per label
+    # (HTML tables, LaTeX formulas, charts to tables) on a vLLM backend with
+    # DSpark speculative decoding. SDK Markdown plus classed region boxes.
+    # =========================================================================
+
+    register_fn(
+        PipelineSpec(
+            pipeline_name="minicpm_ocr_sdk",
+            provider_name="minicpm_ocr",
+            product_type=ProductType.PARSE,
+            config={
+                "server_url": "",  # Set via MINICPM_OCR_SERVER_URL or override
             },
         )
     )
