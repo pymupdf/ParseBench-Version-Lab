@@ -16,7 +16,7 @@ see [the contribution boundary](AGENTS.md).
 - Network access to GitHub, PyPI, Hugging Face, and `astral.sh`
 - At least 5 GB of free space for a quick run; allow more for the full dataset
 
-SWIG and RapidOCR 3.9.2 are installed in the benchmark environment.
+SWIG and RapidOCR 3.10.0 are installed in the benchmark environment.
 The legacy `rapidocr-onnxruntime` package is not used.
 
 ### Linux
