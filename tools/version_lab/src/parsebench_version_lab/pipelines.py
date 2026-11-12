@@ -49,10 +49,15 @@ class VersionLabPyMuPDF4LLMProvider(PyMuPDF4LLMProvider):
         if ocr_function is not None:
             options["ocr_function"] = ocr_function
 
-        with pymupdf.open(pdf_path) as document:
+        document = pymupdf.open(pdf_path)
+        try:
             # Layout can remove page rotation in place. Keep the input PDF's dimensions for grounding.
             dimensions = [(page.rect.width, page.rect.height) for page in document]
             chunks = document.to_markdown(**options)
+        finally:
+            # PyMuPDF can close an image document when it converts it for layout.
+            if not document.is_closed:
+                document.close()
 
         pages = []
         for index, chunk in enumerate(chunks):
