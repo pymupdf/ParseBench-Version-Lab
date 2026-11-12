@@ -195,6 +195,14 @@ def test_mapped_mark_against_text_keeps_the_mapped_reading() -> None:
     assert value_sim("[x]", "X") == 0.5
 
 
+def test_protocol_bracketed_mark_words_read_as_the_mark_they_name() -> None:
+    # the protocol transcribes a value mark as "[yes]" / "[icon: bullet]"; it scored 0.6 against "●" before
+    assert value_sim("●", "[yes]") == value_sim("●", "[icon: bullet]") == value_sim("✓", "[Checked]") == 0.95
+    assert value_sim("☐", "[unchecked]") == value_sim("✗", "[no]") == 0.95
+    assert value_sim("●", "[no]") < 0.95 and value_sim("✓", "[unchecked]") < 0.95  # opposite states stay apart
+    assert value_sim("[yes]", "[yes]") == 1.0 and value_sim("Yes", "[yes]") < 0.95  # plain words are not marks
+
+
 def test_sparse_table_leaves_bare_currency_cells_out() -> None:
     # two amounts make the reference sparse, so its dash cells are scored; a "$" column is not a dash
     ref = "| Item | | 2024 |\n|---|---|---|\n| Revenue | $ | 1,234 |\n| Net | $ | 500 |"
@@ -203,3 +211,22 @@ def test_sparse_table_leaves_bare_currency_cells_out() -> None:
     assert res.score >= 0.99
     dash = "| Item | 2024 |\n|---|---|\n| Revenue | $ - |\n| Net | 500 |"
     assert score_table_next(dash, dash.replace("| $ - |", "| |")).score < 0.9  # "$ -" is still a dash mark
+
+
+def test_numbered_prose_difference_does_not_claim_unit_loss() -> None:
+    ref = _html([["Item", "Details"], ["A", "1. Review stakeholder positions"]])
+    out = _html([["Item", "Details"], ["A", "1. Review stake-holder positions"]])
+    result = score_table_next(ref, out)
+    details = [event[0] for event in result.events.items if event[-1] == "detail"]
+    assert "unit lost" not in details
+    assert "value partly differs" in details
+    assert result.score < 1
+
+
+def test_actual_unit_loss_retains_partial_credit_and_major_penalty() -> None:
+    ref = _html([["Item", "Dose"], ["A", "12 mg"]])
+    out = _html([["Item", "Dose"], ["A", "12"]])
+    result = score_table_next(ref, out)
+    assert value_sim("12 mg", "12") == 0.5
+    assert result.score < 1
+    assert any(event[-1] == "major" for event in result.events.items)
