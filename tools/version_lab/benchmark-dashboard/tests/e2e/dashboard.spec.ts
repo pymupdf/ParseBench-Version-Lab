@@ -131,3 +131,47 @@ test("reuses the workflow catalog and selected run across navigation", async ({ 
   await expect(page.locator(".workflow-row")).toHaveCount(12);
   expect(runRequests).toHaveLength(initialRunRequestCount);
 });
+
+test("opens an unsupported v2 dimension with its pinned thumbnail and raw output", async ({ page }) => {
+  const revision = "a".repeat(40);
+  const dataset = { repository: "llamaindex/ParseBench-2", resolved_sha: revision };
+  const dimension = { id: 2, run_id: 1, dimension: "forms", total_examples: 1 };
+  const run = {
+    id: 1, github_run_id: 123, artifact_state: "complete", dataset_versions: dataset,
+    gcs_bucket: "test-results", gcs_prefix: "run", summary: {},
+  };
+  const result = {
+    id: 3, success: true, primary_metric_name: "forms_v2", primary_score: 0.5,
+    run_dimensions: dimension, result_relative_path: "case.result.json",
+    benchmark_cases: {
+      id: 4, test_id: "forms/case #1", source_media_type: "image/jpeg",
+      source_relative_path: "forms/case #1.jpg", dataset_versions: dataset,
+    },
+  };
+  const tables: Record<string, unknown[]> = {
+    benchmark_runs: [run], run_dimensions: [dimension], case_results: [result],
+  };
+  await page.route("**/rest/v1/**", (route) => {
+    const table = new URL(route.request().url()).pathname.split("/").at(-1)!;
+    return route.fulfill({ json: tables[table] ?? [] });
+  });
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX2kAAAAASUVORK5CYII=", "base64");
+  await page.route("https://storage.googleapis.com/parsebench-v2-thumbnails-457820/**", (route) =>
+    route.fulfill({ contentType: "image/png", body: pixel }));
+  await page.route("https://huggingface.co/**", (route) =>
+    route.fulfill({ contentType: "image/png", body: pixel }));
+  const markdown = "  # Original indentation\n\n<table><tr><td>A</td></tr></table>\n";
+  await page.route("https://storage.googleapis.com/test-results/run/case.result.json", (route) =>
+    route.fulfill({ json: { output: { markdown } } }));
+
+  await page.goto("/workflows/123/triage?dimension=forms");
+  const card = page.locator(".triage-card").first();
+  await expect(card.locator("img")).toHaveAttribute("src",
+    `https://storage.googleapis.com/parsebench-v2-thumbnails-457820/${revision}/forms/case%20%231.webp`);
+  await card.click();
+  await expect(page.getByRole("tab")).toHaveText(["Raw Markdown"]);
+  await expect(page.locator(".inspection-score")).toContainText("50%");
+  await expect(page.locator(".image-preview img")).toHaveAttribute("src",
+    `https://huggingface.co/datasets/llamaindex/ParseBench-2/resolve/${revision}/forms/case%20%231.jpg`);
+  await expect.poll(() => page.locator(".markdown-source code").textContent()).toBe(markdown);
+});

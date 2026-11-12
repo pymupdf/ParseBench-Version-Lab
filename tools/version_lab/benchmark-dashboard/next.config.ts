@@ -10,13 +10,16 @@ const nextConfig: NextConfig = {
         pathname: "/datasets/**/resolve/**",
         search: "",
       },
-      {
-        protocol: "https",
+      ...[
+        process.env.NEXT_PUBLIC_THUMBNAIL_BUCKET ?? "parsebench-thumbnails-457820",
+        process.env.NEXT_PUBLIC_V2_THUMBNAIL_BUCKET ?? "parsebench-v2-thumbnails-457820",
+      ].map((bucket) => ({
+        protocol: "https" as const,
         hostname: "storage.googleapis.com",
         port: "",
-        pathname: "/parsebench-thumbnails-457820/**",
+        pathname: `/${bucket}/**`,
         search: "",
-      },
+      })),
     ],
   },
 };

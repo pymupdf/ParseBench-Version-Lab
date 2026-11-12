@@ -21,6 +21,7 @@ import {
   DocumentSort,
   DimensionMetric,
   HistoricalBestResult,
+  hasDetailedDiagnostics,
   humanize,
   loadArtifact,
   loadDiagnostic,
@@ -1738,8 +1739,11 @@ function DocumentExplorer({
   next: TriageCaseResult | null;
   onNavigate: (result: TriageCaseResult) => void;
 }) {
-  const [markdownMode, setMarkdownMode] = useState<MarkdownMode>("preview");
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("explain");
+  const basicInspection = selected != null && !hasDetailedDiagnostics(selected);
+  const [preferredMarkdownMode, setMarkdownMode] = useState<MarkdownMode>("preview");
+  const [selectedTab, setInspectorTab] = useState<InspectorTab>("explain");
+  const markdownMode = basicInspection ? "source" : preferredMarkdownMode;
+  const inspectorTab = basicInspection && selectedTab !== "original" ? "output" : selectedTab;
   const [mobileViewer, setMobileViewer] = useState<"source" | "output">("source");
   const [siblingOriginalMarkdown, setSiblingOriginalMarkdown] = useState<OriginalMarkdownState>({
     loading: true,
@@ -1758,7 +1762,7 @@ function DocumentExplorer({
     : selectedSource;
   const selectedSourceLabel = selectedSourceKind === "pdf" ? "PDF preview" :
     selectedSourceKind === "image" ? "Image preview" : "Source asset";
-  const isLayoutDimension = selected?.run_dimensions.dimension === "layout";
+  const isLayoutDimension = !basicInspection && selected?.run_dimensions.dimension === "layout";
   const allLayoutBoxes = useMemo(
     () => layoutOverlayBoxes(
       isLayoutDimension,
@@ -1809,14 +1813,20 @@ function DocumentExplorer({
   const hasHistoricalBest = historicalBest.data != null;
   const bestEvidenceLoading = historicalBest.evidenceStatus === "loading";
   const currentOriginalMarkdown = useMemo(
-    () => originalMarkdownFromDiagnostic(diagnostic.data),
-    [diagnostic.data],
+    () => {
+      if (basicInspection) {
+        const reference = diagnostic.data?.expectations.find((item) => item.expected_markdown?.trim());
+        if (reference?.expected_markdown) return reference.expected_markdown;
+      }
+      return originalMarkdownFromDiagnostic(diagnostic.data);
+    },
+    [basicInspection, diagnostic.data],
   );
   const originalMarkdown = currentOriginalMarkdown || siblingOriginalMarkdown.markdown;
   const originalMarkdownLoading = !currentOriginalMarkdown && siblingOriginalMarkdown.loading;
 
   useEffect(() => {
-    if (!selected || diagnostic.loading || currentOriginalMarkdown) return;
+    if (!selected || basicInspection || diagnostic.loading || currentOriginalMarkdown) return;
     const controller = new AbortController();
     loadSiblingOriginalMarkdown(run, selected, controller.signal)
       .then((markdown) => {
@@ -1828,7 +1838,7 @@ function DocumentExplorer({
         setSiblingOriginalMarkdown({ loading: false, markdown: "", error: error.message });
       });
     return () => controller.abort();
-  }, [currentOriginalMarkdown, diagnostic.loading, run, selected]);
+  }, [basicInspection, currentOriginalMarkdown, diagnostic.loading, run, selected]);
   const primary = selected ? alignedPrimaryMetric(selected, diagnostic.data) : null;
   const detailedMetrics = useMemo(
     () => [...(diagnostic.data?.metrics ?? [])]
@@ -2038,7 +2048,10 @@ function DocumentExplorer({
               <article className="viewer-card output-card">
                 <div className="viewer-toolbar output-toolbar">
                   <div className="content-tabs inspector-tabs" role="tablist" aria-label="Case inspection views">
-                    {([
+                    {(basicInspection ? [
+                      ["output", "Raw Markdown"],
+                      ...(currentOriginalMarkdown ? [["original", "Ground truth Markdown"]] as const : []),
+                    ] as const : [
                       ["explain", "Explain"],
                       ["output", "Output"],
                       ["original", "Ground truth Markdown"],
@@ -2060,7 +2073,7 @@ function DocumentExplorer({
                       </button>
                     ))}
                   </div>
-                  {(inspectorTab === "output" || (inspectorTab === "original" && originalMarkdown)) && (
+                  {!basicInspection && (inspectorTab === "output" || (inspectorTab === "original" && originalMarkdown)) && (
                     <div className="mode-toggle" aria-label="Markdown display mode">
                       <button aria-pressed={markdownMode === "preview"} className={markdownMode === "preview" ? "mode-active" : ""} onClick={() => setMarkdownMode("preview")} type="button">Preview</button>
                       <button aria-pressed={markdownMode === "source"} className={markdownMode === "source" ? "mode-active" : ""} onClick={() => setMarkdownMode("source")} type="button">Source</button>
@@ -2100,13 +2113,13 @@ function DocumentExplorer({
                   ) : inspectorTab === "original" ? (
                     originalMarkdown ? (
                       <div className="original-markdown-view">
-                        <aside className="original-markdown-note">
+                        {!basicInspection && <aside className="original-markdown-note">
                           <strong>Reference Markdown used for grading</strong>
                           <p>
                             This is the human-readable ground-truth Markdown retained by the benchmark. It is
                             the reference used to derive grading checks, not the parser output.
                           </p>
-                        </aside>
+                        </aside>}
                         {markdownMode === "preview"
                           ? <MarkdownPanel markdown={originalMarkdown} />
                           : <pre className="markdown-source"><code>{originalMarkdown}</code></pre>}
@@ -2872,7 +2885,7 @@ export default function DashboardClient({
   }, [selectedRun, selectedDocument]);
 
   useEffect(() => {
-    if (!selectedDocument) return;
+    if (!selectedDocument || !hasDetailedDiagnostics(selectedDocument)) return;
     const document = selectedDocument;
     const controller = new AbortController();
     // This state is keyed to the selected result so a previous page's best

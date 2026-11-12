@@ -12,7 +12,14 @@ markdown.
 - Google Cloud Storage provides independently fetchable per-document result and
   diagnostic JSON. Detailed metrics, outcomes, and the ground-truth rows used by
   each evaluation are read from those diagnostic objects.
-- The pinned Hugging Face dataset revision provides source PDFs and images.
+- The pinned Hugging Face dataset revision provides the original PDFs and
+  images for side-by-side inspection. For dimensions without a dedicated
+  diagnostic view, the inspector shows raw parser Markdown, the primary
+  metric and score, and ground-truth Markdown when retained.
+- Triage cards read WebP thumbnails from `parsebench-v2-thumbnails-457820`
+  for ParseBench 2 and `parsebench-thumbnails-457820` for v1. Publish previews
+  once per dataset revision at `<resolved SHA>/<source path with .webp extension>`.
+  Runs using the same dataset revision share those previews.
 
 When ParseBench deterministically separates an ambiguous, side-by-side output
 table before scoring, the dashboard reconstructs those table segments in the

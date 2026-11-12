@@ -29,8 +29,17 @@ function primaryMetricName(dimension: RunDimension) {
   return metrics[dimension.dimension];
 }
 
-export function isParseBench2(run: BenchmarkRun) {
-  return run.dataset_versions?.repository === "llamaindex/ParseBench-2";
+export function isParseBench2(record: { dataset_versions: Pick<DatasetVersion, "repository"> | null }) {
+  return record.dataset_versions?.repository === "llamaindex/ParseBench-2";
+}
+
+export function hasDetailedDiagnostics(result: CaseResult) {
+  const dimension = result.run_dimensions.dimension;
+  if (dimension === "layout" && isParseBench2(result.benchmark_cases)) {
+    // The element inspector understands the older element score. Grounding uses different evidence.
+    return result.primary_metric_name === "layout_element_rule_pass_rate";
+  }
+  return Object.hasOwn(PRIMARY_METRIC_BY_DIMENSION, dimension);
 }
 
 export function parseBench2Scores(run: BenchmarkRun): RunScoreSummary {
@@ -577,7 +586,7 @@ export function originalMarkdownFromDiagnostic(diagnostic: DiagnosticArtifact | 
         const markdown = nested.trim();
         if (!unique.has(markdown)) {
           unique.add(markdown);
-          originals.push(markdown);
+          originals.push(nested);
         }
       } else {
         visit(nested);
@@ -682,13 +691,16 @@ export function sourceAssetKind(result: CaseResult | TriageCaseResult) {
 
 const THUMBNAIL_BUCKET =
   process.env.NEXT_PUBLIC_THUMBNAIL_BUCKET ?? "parsebench-thumbnails-457820";
+const V2_THUMBNAIL_BUCKET =
+  process.env.NEXT_PUBLIC_V2_THUMBNAIL_BUCKET ?? "parsebench-v2-thumbnails-457820";
 
 export function thumbnailUrl(result: CaseResult | TriageCaseResult) {
   const revision = result.benchmark_cases.dataset_versions.resolved_sha;
   const { source_relative_path: path, test_id: testId } = result.benchmark_cases;
   if (!revision || !testId) return null;
   const thumbnail = path ? path.replace(/\.[^/.]+$/, ".webp") : `docs/${testId}.webp`;
-  return `https://storage.googleapis.com/${encodeURIComponent(THUMBNAIL_BUCKET)}/${encodePath(`${revision}/${thumbnail}`)}`;
+  const bucket = isParseBench2(result.benchmark_cases) ? V2_THUMBNAIL_BUCKET : THUMBNAIL_BUCKET;
+  return `https://storage.googleapis.com/${encodeURIComponent(bucket)}/${encodePath(`${revision}/${thumbnail}`)}`;
 }
 
 export async function loadArtifact(
