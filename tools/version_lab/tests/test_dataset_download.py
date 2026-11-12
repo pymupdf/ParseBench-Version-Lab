@@ -140,3 +140,31 @@ def test_incomplete_snapshot_is_not_marked_complete(download_setup) -> None:
         runtime_benchmark.download()
 
     assert not (data_dir / runtime_benchmark.DATASET_MARKER).exists()
+
+
+def test_v2_cache_checks_sidecar_pairs_and_manifest(download_setup, tmp_path, monkeypatch):
+    from parsebench_version_lab.model import V2_REPOSITORY, V2_SUBSETS
+
+    data, snapshot, _ = download_setup
+    out = tmp_path / "output"
+    out.mkdir()
+    (out / "_dataset.json").write_text(json.dumps({"repository": V2_REPOSITORY}))
+    monkeypatch.setenv("OUTPUT_DIR", str(out))
+    monkeypatch.setenv("DATASET_REPOSITORY", V2_REPOSITORY)
+
+    def fetch(**kwargs):
+        assert kwargs["repo_id"] == V2_REPOSITORY
+        for subset in V2_SUBSETS:
+            folder = data / subset
+            folder.mkdir(parents=True)
+            (folder / "page.pdf").touch()
+            (folder / "page.test.json").write_text("{}")
+
+    snapshot.side_effect = fetch
+    runtime_benchmark.download()
+    runtime_benchmark.download()
+    assert snapshot.call_count == 1
+    (data / "text/page.pdf").unlink()
+    runtime_benchmark.download()
+    assert snapshot.call_count == 2
+    assert json.loads((out / "_dataset.json").read_bytes())["manifest"]["document_count"] == len(V2_SUBSETS)

@@ -4,17 +4,57 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+from .model import V2_SUBSETS
 
 DIMENSIONS = ("chart", "layout", "table", "text_content", "text_formatting")
 
 
-def inspect_dataset(data_dir: Path) -> dict[str, Any]:
+def v2_cases(data_dir: Path, subset: str) -> Iterator[tuple[str, Path, Path]]:
+    """Pair the canonical input chosen by the upstream loader with its adjacent ground truth."""
+    from parse_bench.test_cases.loader import SUPPORTED_EXTENSIONS, _dedupe_stem_twins
+
+    folder = data_dir / subset
+    assets = [path for path in folder.rglob("*") if path.suffix.lower() in SUPPORTED_EXTENSIONS and path.is_file()]
+    paired = set()
+    for asset in sorted(_dedupe_stem_twins(assets)):
+        sidecar = asset.with_suffix(".test.json")
+        if not sidecar.is_file():
+            raise ValueError(f"Missing ParseBench 2 ground truth for {asset}")
+        paired.add(sidecar)
+        yield f"{asset.parent.name}/{asset.stem}", asset, sidecar
+    unpaired = set(folder.rglob("*.test.json")) - paired
+    if unpaired:
+        raise ValueError(f"Missing ParseBench 2 input for {min(unpaired)}")
+
+
+def inspect_dataset(data_dir: Path, *, v2: bool = False) -> dict[str, Any]:
     """Describe the exact corpus represented by a downloaded dataset snapshot."""
     dimension_documents: dict[str, set[str]] = {}
     digest = hashlib.sha256()
+    if v2:
+        counts = {}
+        for subset in V2_SUBSETS:
+            count = 0
+            for _, asset, sidecar in v2_cases(data_dir, subset):
+                digest.update(asset.relative_to(data_dir).as_posix().encode() + b"\0")
+                digest.update(sidecar.read_bytes() + b"\0")
+                markdown = asset.with_suffix(".md")
+                if markdown.is_file():
+                    digest.update(markdown.read_bytes() + b"\0")
+                count += 1
+            if not count:
+                raise ValueError(f"Empty ParseBench 2 subset: {subset}")
+            counts[subset] = count
+        return {
+            "schema_version": 2,
+            "document_count": sum(counts.values()),
+            "dimension_counts": counts,
+            "manifest_sha256": digest.hexdigest(),
+        }
     for dimension in DIMENSIONS:
         path = data_dir / f"{dimension}.jsonl"
         documents: set[str] = set()

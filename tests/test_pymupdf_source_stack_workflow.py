@@ -56,7 +56,7 @@ def test_launcher_resolves_release_before_dispatch_and_preserves_selected_branch
 ) -> None:
     for name, value in {
         "PYMUPDF_BRANCH": "feature/ocr",
-        "RUN_SCOPE_SELECTION": "Full benchmark (~2,000 pages)",
+        "DATASET_SELECTION": "ParseBench 2 (full)",
         "GROUP_SELECTION": "All categories",
         "GITHUB_REPOSITORY": "owner/repo",
         "GITHUB_REF_NAME": "feature/workflow",
@@ -81,7 +81,7 @@ def test_launcher_resolves_release_before_dispatch_and_preserves_selected_branch
                 "pymupdf_version": tag.removeprefix("v"),
                 "pymupdf_tag": tag,
                 "pymupdf_branch": "feature/ocr",
-                "run_scope": "Full benchmark (~2,000 pages)",
+                "dataset": "ParseBench 2 (full)",
                 "group": "All categories",
                 "benchmark_ref": "feature/workflow",
                 "benchmark_sha": "a" * 40,
@@ -99,6 +99,23 @@ def test_launcher_resolves_release_before_dispatch_and_preserves_selected_branch
         assert launcher.main() == 0
         assert len(calls) == 2
         assert "pymupdf-source-stack-parsebench.yml" in (tmp_path / "summary").read_text()
+
+
+@pytest.mark.parametrize(
+    ("selection", "label", "version", "group", "branch"),
+    [
+        ("ParseBench 2 (full)", "Charts", "v2", "charts", "main"),
+        ("ParseBench 2 (full)", "Dense tables", "v2", "dense_tables", "main"),
+        ("ParseBench 1 (full)", "Charts", "v1", "chart", "main"),
+        ("ParseBench 1 (quick, 15 cases)", "Text formatting", "v1", "text_formatting", "test-data"),
+    ],
+)
+def test_workflow_dataset_choices(selection, label, version, group, branch, monkeypatch):
+    monkeypatch.setenv("DATASET_SELECTION", selection)
+    monkeypatch.setenv("GROUP_SELECTION", label)
+    config, _ = configure.run_selection()
+    assert (config.dataset, config.group, config.dataset_branch) == (version, group, branch)
+    assert config.dataset_repository == ("llamaindex/ParseBench-2" if version == "v2" else "llamaindex/ParseBench")
 
 
 def test_configure_maps_friendly_inputs_and_records_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

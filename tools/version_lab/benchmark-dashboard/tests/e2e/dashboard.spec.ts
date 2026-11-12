@@ -6,6 +6,7 @@ test("finds workflows by commit and opens a selected run", async ({ page }) => {
   await page.goto(`/?run=${RUN_ID}&view=runs`);
 
   await expect(page.getByRole("heading", { name: "Find the benchmark run you need" })).toBeVisible();
+  await page.getByLabel("Dataset", { exact: true }).selectOption("v1");
   await expect(page.locator(".score-leader-card")).toHaveCount(6);
   await expect(
     page.getByText("Quick runs are excluded. Full-dataset runs compete only in the dimensions they completely evaluated."),

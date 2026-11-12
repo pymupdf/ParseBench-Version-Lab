@@ -31,6 +31,9 @@ import {
   loadRun,
   loadRunBundle,
   loadRunScores,
+  isParseBench2,
+  parseBench2Scores,
+  REPORT_GROUPS,
   loadRuns,
   primaryMetricForDimension,
   originalMarkdownFromDiagnostic,
@@ -134,6 +137,7 @@ const EMPTY_HISTORICAL_BEST: HistoricalBestState = {
 const BEST_SCORE_MINIMUM_IMPROVEMENT = 0.1;
 
 const DIMENSION_LABELS: Record<string, string> = {
+  text: "Text", formatting: "Formatting", tables: "Tables", charts: "Charts", forms: "Forms",
   chart: "Charts",
   layout: "Layout",
   table: "Tables",
@@ -149,7 +153,9 @@ const DIMENSION_ORDER = [
   "chart",
 ] as const;
 
-const DIMENSION_SHORT_LABELS: Record<(typeof DIMENSION_ORDER)[number], string> = {
+const V2_DIMENSIONS = ["text", "formatting", "tables", "charts", "layout", "forms"] as const;
+const DIMENSION_SHORT_LABELS: Record<string, string> = {
+  text: "Text", formatting: "Format", tables: "Tables", charts: "Charts", forms: "Forms",
   chart: "Chart",
   layout: "Layout",
   table: "Table",
@@ -946,6 +952,7 @@ function WorkflowBrowser({
   onSelect: (run: BenchmarkRun) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [leaderDataset, setLeaderDataset] = useState<"v1" | "v2" | null>(null);
   const [pipeline, setPipeline] = useState("all");
   const [branch, setBranch] = useState("all");
   const [conclusion, setConclusion] = useState("all");
@@ -971,11 +978,12 @@ function WorkflowBrowser({
   const scopes = useMemo(() => uniqueValues(runs, "effective_scope").sort(), [runs]);
   const groups = useMemo(() => uniqueValues(runs, "effective_group").sort(), [runs]);
 
+  const showV2Leaders = leaderDataset ? leaderDataset === "v2" : completeRuns.some(isParseBench2);
   const scoreLeaders = useMemo(() => {
     const comparableRuns = completeRuns.filter((run) => run.leaderboard_eligible);
-    const metrics: Array<{ key: "aggregate" | (typeof DIMENSION_ORDER)[number]; label: string }> = [
+    const metrics: Array<{ key: string; label: string }> = [
       { key: "aggregate", label: "Aggregate" },
-      ...DIMENSION_ORDER.map((dimension) => ({
+      ...(showV2Leaders ? V2_DIMENSIONS : DIMENSION_ORDER).map((dimension) => ({
         key: dimension,
         label: DIMENSION_LABELS[dimension],
       })),
@@ -984,10 +992,11 @@ function WorkflowBrowser({
       let leader: BenchmarkRun | null = null;
       let bestScore: number | null = null;
       for (const run of comparableRuns) {
+        if (isParseBench2(run) !== showV2Leaders) continue;
         const groupMatches = metric.key === "aggregate"
           ? run.effective_group === "all"
           : run.effective_group === "all" || run.effective_group === metric.key;
-        if (!groupMatches) continue;
+        if (!groupMatches && !(showV2Leaders && metric.key !== "aggregate")) continue;
         const runScores = scores[run.id];
         const candidate = metric.key === "aggregate"
           ? runScores?.aggregate
@@ -999,7 +1008,7 @@ function WorkflowBrowser({
       }
       return { ...metric, run: leader, score: bestScore };
     });
-  }, [completeRuns, scores]);
+  }, [completeRuns, scores, showV2Leaders]);
 
   const filteredRuns = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -1123,6 +1132,17 @@ function WorkflowBrowser({
             <span className="eyebrow">Full benchmark leaders</span>
             <h2>Highest scores by benchmark dimension</h2>
           </div>
+          <div>
+            <label htmlFor="leader-dataset">Dataset</label>{" "}
+            <select
+              id="leader-dataset"
+              value={showV2Leaders ? "v2" : "v1"}
+              onChange={(event) => setLeaderDataset(event.target.value === "v2" ? "v2" : "v1")}
+            >
+              <option value="v2">ParseBench 2</option>
+              <option value="v1">ParseBench 1</option>
+            </select>
+          </div>
           <p>Quick runs are excluded. Full-dataset runs compete only in the dimensions they completely evaluated.</p>
         </div>
         <div className="score-leader-grid">
@@ -1232,7 +1252,7 @@ function WorkflowBrowser({
                     </small>
                   </span>
                   <span className="workflow-dimension-scores" aria-label="Dimension scores">
-                    {DIMENSION_ORDER.map((dimension) => (
+                    {(isParseBench2(run) ? V2_DIMENSIONS : DIMENSION_ORDER).map((dimension) => (
                       <span key={dimension} title={`${DIMENSION_LABELS[dimension]}: ${scorePercent(runScores?.dimensions[dimension])}`}>
                         <small>{DIMENSION_SHORT_LABELS[dimension]}</small>
                         <strong className={`score-${scoreTone(runScores?.dimensions[dimension])}`}>
@@ -1307,7 +1327,7 @@ function Overview({
   inspectDimension: (dimension: string) => void;
   inspectDocument: (result: TriageCaseResult, navigationFilters?: TriageFilters) => void;
 }) {
-  const overall = overallScore(bundle);
+  const overall = isParseBench2(run) ? parseBench2Scores(run).aggregate : overallScore(bundle);
   const failedFromDimensions = bundle.dimensions.reduce(
     (total, dimension) => total + (dimension.failed ?? 0),
     0,
@@ -2500,7 +2520,7 @@ export default function DashboardClient({
         : "overview";
   const sortValue = searchParams.get("sort");
   const filters = useMemo<TriageFilters>(() => normalizeTriageFilters({
-      dimension: DIMENSION_ORDER.includes(searchParams.get("dimension") as (typeof DIMENSION_ORDER)[number])
+      dimension: REPORT_GROUPS.has(searchParams.get("dimension") ?? "")
         ? searchParams.get("dimension")!
         : DIMENSION_ORDER[0],
       search: searchParams.get("q") || "",
@@ -2579,8 +2599,8 @@ export default function DashboardClient({
   const defaultDetailDimension = useEffectEvent((document: CaseResult) => {
     const requestedDimension = searchParams.get("dimension");
     if (
-      !DIMENSION_ORDER.includes(requestedDimension as (typeof DIMENSION_ORDER)[number]) &&
-      DIMENSION_ORDER.includes(document.run_dimensions.dimension as (typeof DIMENSION_ORDER)[number])
+      !REPORT_GROUPS.has(requestedDimension ?? "") &&
+      REPORT_GROUPS.has(document.run_dimensions.dimension ?? "")
     ) {
       updateFilters({ dimension: document.run_dimensions.dimension, page: 0 });
     }
@@ -2674,7 +2694,7 @@ export default function DashboardClient({
     // This loading state follows the catalog score request lifecycle.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRunScoresLoading(true);
-    loadRunScores(catalogRuns.map((run) => run.id), controller.signal)
+    loadRunScores(catalogRuns, controller.signal)
       .then(setRunScores)
       .catch((error: Error) => {
         if (error.name !== "AbortError") setLoadError(error.message);

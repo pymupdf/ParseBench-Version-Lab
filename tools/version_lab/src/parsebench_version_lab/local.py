@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .dataset import DatasetRevision, resolve_dataset
-from .model import COMPONENT_SPECS, DATASET_REPOSITORY, RunConfig
+from .model import COMPONENT_SPECS, RunConfig
 from .process import (
     CommandRunner,
     executable,
@@ -21,7 +21,7 @@ from .process import (
     venv_executable,
 )
 from .provenance import mupdf_build_spec
-from .results import build_summary, load_scores
+from .results import run_summary
 from .sources import ResolvedSource, SourceManager
 from .util import write_json
 
@@ -210,7 +210,7 @@ class LocalRun:
             self.paths.tool_source,
             {
                 "DATA_DIR": str(dataset_dir),
-                "DATASET_REPOSITORY": DATASET_REPOSITORY,
+                "DATASET_REPOSITORY": self.dataset.repository,
                 "DATASET_SHA": self.dataset.resolved_sha,
                 "GROUP": self.config.group,
                 "LLAMACLOUD_BENCH_LLM_NORMALIZATION": "off",
@@ -247,14 +247,17 @@ class LocalRun:
 
     def benchmark(self, python: Path) -> None:
         environment = self.runtime_env()
+        assert self.dataset is not None
+        write_json(self.paths.output / "_dataset.json", {**self.dataset.to_dict(), "profile": self.config.run_scope})
         for phase in ("download", "inference", "evaluate", "report"):
             self.runner.run(
                 [python, "-m", "parsebench_version_lab.runtime_benchmark", phase],
                 cwd=self.paths.repository,
                 env=environment,
             )
-        scores = load_scores(self.paths.output / self.config.pipeline, self.config.group)
-        markdown, data = build_summary(scores)
+        markdown, data = run_summary(
+            self.paths.output, self.config.pipeline, self.config.group, environment["DATASET_REPOSITORY"]
+        )
         write_json(self.paths.output / "_benchmark_scores.json", data)
         (self.paths.output / "_benchmark_scores.md").write_text(markdown, encoding="utf-8")
         print(markdown)

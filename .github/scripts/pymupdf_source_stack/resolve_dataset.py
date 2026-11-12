@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import time
@@ -12,6 +13,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 from common import DATASET_BRANCHES, DATASET_REPOSITORY, env, write_github_outputs, write_json
+from parsebench_version_lab.model import V2_REPOSITORY
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 CURRENT = "current"
@@ -151,6 +153,8 @@ def classify_commit(repository: str, sha: str) -> tuple[str, str | None, dict[st
     """Classify an explicit revision from canonical branch heads, never UI scope."""
     heads: dict[str, str] = {}
     for profile, branch in DATASET_BRANCHES.items():
+        if repository == V2_REPOSITORY and profile == "test":
+            continue
         try:
             heads[profile] = resolve_branch(repository, branch)
         except DatasetBranchResolutionError as error:
@@ -163,7 +167,7 @@ def classify_commit(repository: str, sha: str) -> tuple[str, str | None, dict[st
 
 
 def main() -> int:
-    repository = DATASET_REPOSITORY
+    repository = os.environ.get("DATASET_REPOSITORY", DATASET_REPOSITORY)
     requested_scope = env("RUN_SCOPE")
     requested_branch = branch_for_scope(requested_scope)
     requested_ref = env("DATASET_REF").strip().lower()

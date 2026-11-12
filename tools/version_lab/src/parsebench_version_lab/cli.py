@@ -11,7 +11,7 @@ from pathlib import Path
 from .benchmark_index import backfill_repository
 from .diagnostic_backfill import backfill_diagnostics
 from .local import LocalRun, create_paths, doctor, ensure_ready
-from .model import GROUPS, RUN_SCOPES, RunConfig
+from .model import GROUPS, RUN_SCOPES, V2_SUBSETS, RunConfig
 from .util import repository_root
 
 
@@ -30,15 +30,16 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
         default="main",
         help="Any existing PyMuPDF branch name; releases and commit SHAs are not accepted",
     )
+    parser.add_argument("--dataset", choices=("v2", "v1"), help="Dataset release (default: v2, or v1 for quick)")
     parser.add_argument(
         "--scope",
         choices=RUN_SCOPES,
-        default="quick",
+        default="full",
         help="Dataset size: the 15-document quick test or the complete benchmark",
     )
     parser.add_argument(
         "--group",
-        choices=GROUPS,
+        choices=tuple(dict.fromkeys((*GROUPS, *V2_SUBSETS))),
         default="all",
         help="Document category to benchmark, or all categories",
     )
@@ -52,6 +53,7 @@ def add_run_options(parser: argparse.ArgumentParser) -> None:
 def config_from_args(args: argparse.Namespace) -> RunConfig:
     return RunConfig(
         pymupdf_branch=args.pymupdf_branch,
+        dataset=args.dataset,
         scope=args.scope,
         group=args.group,
         python=args.python,
@@ -205,7 +207,11 @@ def main(arguments: list[str] | None = None) -> int:
         if not args.dry_run:
             print(f"Diagnostic backfill result: {workspace / 'backfill-result.json'}")
         return 0 if result["runs_failed"] == 0 else 1
-    config = config_from_args(args)
+    try:
+        config = config_from_args(args)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 2
     if args.command == "plan":
         print(json.dumps(config.to_dict(), indent=2, sort_keys=True))
         return 0

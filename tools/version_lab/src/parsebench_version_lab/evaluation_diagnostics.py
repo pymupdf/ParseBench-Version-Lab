@@ -18,6 +18,7 @@ from typing import Any
 
 from parse_bench.schemas.evaluation import EvaluationResult, EvaluationSummary, MetricValue
 
+from .coverage import v2_cases
 from .results import finite_number, headline_metric
 
 DIAGNOSTIC_SCHEMA_VERSION = 2
@@ -133,9 +134,9 @@ def _dimension_for_result(
     return None
 
 
-def _primary_metric(result: EvaluationResult, dimension: str | None) -> MetricValue | None:
+def _primary_metric(result: EvaluationResult, dimension: str | None, *, v2: bool = False) -> MetricValue | None:
     by_name = {metric.metric_name: metric for metric in result.metrics}
-    name = headline_metric(dimension, by_name)
+    name = headline_metric(dimension, by_name, v2=v2)
     return by_name.get(name) if name is not None else None
 
 
@@ -418,6 +419,7 @@ def write_diagnostic_artifacts(
     test_cases_dir: Path | None = None,
     dimension: str | None = None,
     verified_only: bool = False,
+    v2: bool = False,
 ) -> Path:
     """Write one diagnostic JSON per result and return the index path.
 
@@ -425,7 +427,8 @@ def write_diagnostic_artifacts(
     uploaded report tree remains self-contained.
     """
 
-    dimension = diagnostic_dimension(dimension)
+    if not v2:
+        dimension = diagnostic_dimension(dimension)
     if dimension is not None:
         dimensions_to_load = [dimension]
     else:
@@ -436,10 +439,12 @@ def write_diagnostic_artifacts(
             if candidate in result.tags
         }
         dimensions_to_load = sorted(tagged_dimensions) or list(_DATASET_DIMENSIONS)
-    all_expectations = _load_expectations(
-        test_cases_dir,
-        dimensions_to_load,
-    )
+    v2_assets = {}
+    if v2:
+        if test_cases_dir is None or dimension is None:
+            raise ValueError("ParseBench 2 diagnostics require a dataset directory and subset")
+        v2_assets = {test_id: (asset, sidecar) for test_id, asset, sidecar in v2_cases(test_cases_dir, dimension)}
+    all_expectations = {} if v2 else _load_expectations(test_cases_dir, dimensions_to_load)
     diagnostics_dir = report_dir / DIAGNOSTIC_VERSION_DIRECTORY
     diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
@@ -454,6 +459,22 @@ def write_diagnostic_artifacts(
         base_test_id = result.test_id.split("#q", 1)[0]
         all_dimension_expectations = all_expectations.get(resolved_dimension or "", {})
         all_expectation_rows = all_dimension_expectations.get(base_test_id, [])
+        dataset_file = f"{resolved_dimension}.jsonl" if resolved_dimension in _DATASET_DIMENSIONS else None
+        source_rows = []
+        if v2 and test_cases_dir is not None:
+            asset, sidecar = v2_assets[result.test_id if result.test_id in v2_assets else base_test_id]
+            dataset_file = sidecar.relative_to(test_cases_dir).as_posix()
+            source_rows = [{"pdf": asset.relative_to(test_cases_dir).as_posix()}]
+            case = json.loads(sidecar.read_bytes())
+            all_expectation_rows = [
+                {"rule": rule, **{key: rule[key] for key in ("id", "type", "page", "verified") if key in rule}}
+                for rule in case.get("test_rules", [])
+            ]
+            markdown = case.get("expected_markdown")
+            if markdown is None and asset.with_suffix(".md").is_file():
+                markdown = asset.with_suffix(".md").read_text(encoding="utf-8")
+            if markdown:
+                all_expectation_rows.append({"expected_markdown": markdown})
         expectation_rows = [
             row for row in all_expectation_rows if not verified_only or row.get("verified") is not False
         ]
@@ -461,16 +482,17 @@ def write_diagnostic_artifacts(
             included_rule_ids = {row["id"] for row in expectation_rows if isinstance(row.get("id"), str)}
             all_rule_ids = {row["id"] for row in all_expectation_rows if isinstance(row.get("id"), str)}
             _validate_excluded_rule_outcomes(result, all_rule_ids - included_rule_ids)
-        primary = _primary_metric(result, resolved_dimension)
+        primary = _primary_metric(result, resolved_dimension, v2=v2)
         compact_metrics, outcomes = _compact_metrics(result)
         filename = _diagnostic_filename(result.test_id)
         relative_path = f"{DIAGNOSTIC_VERSION_DIRECTORY}/{filename}"
+        source_details = _source_details([*source_rows, *expectation_rows])
         payload = {
             "schema_version": DIAGNOSTIC_SCHEMA_VERSION,
             "test_id": result.test_id,
             "dimension": resolved_dimension,
-            "source": _source_details(expectation_rows),
-            "dataset_file": (f"{resolved_dimension}.jsonl" if resolved_dimension in _DATASET_DIMENSIONS else None),
+            "source": source_details,
+            "dataset_file": dataset_file,
             "primary_metric": (
                 {
                     "name": primary.metric_name,
@@ -510,6 +532,7 @@ def write_diagnostics_from_report(
     test_cases_dir: Path,
     dimension: str,
     verified_only: bool = False,
+    v2: bool = False,
 ) -> Path:
     """Generate Version Lab sidecars without modifying the ParseBench report."""
 
@@ -521,4 +544,5 @@ def write_diagnostics_from_report(
         test_cases_dir=test_cases_dir,
         dimension=dimension,
         verified_only=verified_only,
+        v2=v2,
     )

@@ -61,3 +61,14 @@ Apply migrations with:
 supabase link --project-ref PROJECT_REF
 supabase db push --linked
 ```
+
+## ParseBench 2 artifacts
+
+The indexer identifies the release by its pinned Hugging Face repository and
+revision. For v2 it reads `parsebench-2/<subset>/<pipeline>/` for inference
+metadata, reports and diagnostics. Each benchmark case links its source asset
+and adjacent `.test.json` ground truth. Subset metrics are indexed in
+`run_dimensions` and `run_dimension_metrics`. The six weighted dimensions
+and nullable upstream overall score are stored in
+`benchmark_runs.summary.parsebench_2` from the combined `_next_score.json`.
+Existing v1 artifacts use their original report layout and scoring method.

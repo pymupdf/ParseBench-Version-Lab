@@ -12,7 +12,38 @@ const PRIMARY_METRIC_BY_DIMENSION: Record<string, string> = {
   text_formatting: "avg_semantic_formatting",
 };
 
-const PRIMARY_METRICS = [...new Set(Object.values(PRIMARY_METRIC_BY_DIMENSION))];
+const V2_METRICS: Record<string, string> = {
+  text: "avg_text_next",
+  headings: "avg_formatting_v2", strikeout: "avg_formatting_v2", underline: "avg_formatting_v2",
+  tables: "avg_table_next", complex_table_headers: "avg_table_next", financial_tables: "avg_table_next",
+  insurance_filing_tables: "avg_table_next", dense_tables: "avg_table_next",
+  charts: "avg_chart_next", layout: "avg_layout_grounding_pass_rate",
+  forms: "avg_forms_v2", fillable_forms: "avg_forms_v2",
+};
+
+export const REPORT_GROUPS = new Set([...Object.keys(PRIMARY_METRIC_BY_DIMENSION), ...Object.keys(V2_METRICS)]);
+const PRIMARY_METRICS = [...new Set([...Object.values(PRIMARY_METRIC_BY_DIMENSION), ...Object.values(V2_METRICS)])];
+
+function primaryMetricName(dimension: RunDimension) {
+  const metrics = dimension.report_relative_path?.startsWith("parsebench-2/") ? V2_METRICS : PRIMARY_METRIC_BY_DIMENSION;
+  return metrics[dimension.dimension];
+}
+
+export function isParseBench2(run: BenchmarkRun) {
+  return run.dataset_versions?.repository === "llamaindex/ParseBench-2";
+}
+
+export function parseBench2Scores(run: BenchmarkRun): RunScoreSummary {
+  const score = run.summary?.parsebench_2 as {
+    next_score?: number | null;
+    dimensions?: Record<string, { score: number | null }>;
+  } | undefined;
+  const dimensions: Record<string, number> = {};
+  for (const [name, entry] of Object.entries(score?.dimensions ?? {})) {
+    if (typeof entry.score === "number") dimensions[name] = entry.score;
+  }
+  return { aggregate: score?.next_score ?? null, dimensions };
+}
 
 const RUN_SELECT =
   "id,github_run_id,github_run_attempt,github_run_url,run_name,event,status,conclusion,artifact_state,pipeline_name,pipeline_config,run_scope,selected_group,requested_scope,requested_group,effective_scope,effective_group,observed_document_count,observed_dimension_counts,coverage_status,leaderboard_eligible,eligibility_reasons,gcs_bucket,gcs_prefix,head_branch,head_sha,source_created_at,completed_at,summary,dataset_versions(repository,resolved_sha,profile,document_count,dimension_counts)";
@@ -261,10 +292,10 @@ export async function loadRun(githubRunId: number, signal?: AbortSignal) {
 }
 
 export async function loadRunScores(
-  runIds: number[],
+  runs: BenchmarkRun[],
   signal?: AbortSignal,
 ): Promise<RunScoreIndex> {
-  if (!runIds.length) return {};
+  const runIds = runs.filter((run) => !isParseBench2(run)).map((run) => run.id);
 
   type ScoredDimension = {
     run_id: number;
@@ -313,6 +344,9 @@ export async function loadRunScores(
     summary.aggregate = values.length
       ? values.reduce((total, value) => total + value, 0) / values.length
       : null;
+  }
+  for (const run of runs) {
+    if (isParseBench2(run)) scoreIndex[run.id] = parseBench2Scores(run);
   }
   return scoreIndex;
 }
@@ -367,7 +401,7 @@ export async function loadRunBundle(
   ]);
   const headlineMetrics = metrics.filter((metric) => {
     const dimension = dimensions.find((candidate) => candidate.id === metric.run_dimension_id);
-    return dimension != null && metric.metric_name === PRIMARY_METRIC_BY_DIMENSION[dimension.dimension];
+    return dimension != null && metric.metric_name === primaryMetricName(dimension);
   });
   return {
     dimensions,
@@ -539,7 +573,7 @@ export function originalMarkdownFromDiagnostic(diagnostic: DiagnosticArtifact | 
       return;
     }
     for (const [key, nested] of Object.entries(value)) {
-      if (key === "original_md" && typeof nested === "string" && nested.trim()) {
+      if ((key === "original_md" || key === "expected_markdown") && typeof nested === "string" && nested.trim()) {
         const markdown = nested.trim();
         if (!unique.has(markdown)) {
           unique.add(markdown);
@@ -651,9 +685,10 @@ const THUMBNAIL_BUCKET =
 
 export function thumbnailUrl(result: CaseResult | TriageCaseResult) {
   const revision = result.benchmark_cases.dataset_versions.resolved_sha;
-  const testId = result.benchmark_cases.test_id;
+  const { source_relative_path: path, test_id: testId } = result.benchmark_cases;
   if (!revision || !testId) return null;
-  return `https://storage.googleapis.com/${encodeURIComponent(THUMBNAIL_BUCKET)}/${encodePath(`${revision}/docs/${testId}.webp`)}`;
+  const thumbnail = path ? path.replace(/\.[^/.]+$/, ".webp") : `docs/${testId}.webp`;
+  return `https://storage.googleapis.com/${encodeURIComponent(THUMBNAIL_BUCKET)}/${encodePath(`${revision}/${thumbnail}`)}`;
 }
 
 export async function loadArtifact(
@@ -774,7 +809,7 @@ export function primaryMetricForDimension(
   return metrics.find(
     (metric) =>
       metric.run_dimension_id === dimension.id &&
-      metric.metric_name === PRIMARY_METRIC_BY_DIMENSION[dimension.dimension],
+      metric.metric_name === primaryMetricName(dimension),
   );
 }
 

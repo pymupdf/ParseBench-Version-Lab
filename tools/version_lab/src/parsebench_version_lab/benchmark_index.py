@@ -17,8 +17,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from .coverage import execution_coverage
-from .model import DEFAULT_PIPELINE
-from .results import finite_number, headline_metric, report_dimension
+from .model import DEFAULT_PIPELINE, V2_REPOSITORY, V2_SUBSETS
+from .results import finite_number, headline_metric, report_dimension, v2_pipeline_metadata
 
 KNOWN_DIMENSIONS = ("chart", "table", "layout", "text_content", "text_formatting")
 INGESTION_SCHEMA_VERSION = 4
@@ -441,14 +441,16 @@ def _dataset_row(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
     return row
 
 
-def _primary_metric(dimension: str, metrics: list[dict[str, Any]]) -> tuple[str | None, float | None]:
+def _primary_metric(
+    dimension: str, metrics: list[dict[str, Any]], *, v2: bool = False
+) -> tuple[str | None, float | None]:
     values = {
         name: value
         for metric in metrics
         if isinstance((name := metric.get("metric_name")), str)
         and (value := finite_number(metric.get("value"))) is not None
     }
-    name = headline_metric(dimension, values)
+    name = headline_metric(dimension, values, v2=v2)
     return name, values.get(name) if name is not None else None
 
 
@@ -529,7 +531,6 @@ class BenchmarkIndexer:
         github_repository = str(github_run.get("repository", {}).get("full_name") or self.github.repository)
         run_metadata = _artifact_json(reader, "_github_run.json")
         pipeline_name = run_metadata.get("pipeline") or _pipeline_from_run_name(github_run)
-        pipeline_metadata = _artifact_json(reader, f"{pipeline_name}/_metadata.json") if pipeline_name else {}
         dataset = _dataset_row(run_metadata)
         dataset_id: int | None = None
         dataset_record: dict[str, Any] = {}
@@ -556,6 +557,11 @@ class BenchmarkIndexer:
                     )
                     dataset_record = dataset_rows[0] if dataset_rows else {}
 
+        v2 = dataset_record.get("repository") == V2_REPOSITORY
+        if v2 and reader is not None and pipeline_name:
+            pipeline_metadata = v2_pipeline_metadata(pipeline_name, reader.read_json)
+        else:
+            pipeline_metadata = _artifact_json(reader, f"{pipeline_name}/_metadata.json") if pipeline_name else {}
         summary = _object(pipeline_metadata.get("summary"))
         inference_errors = _array(summary.get("errors"))
         github_failures = self.github.failed_steps(run_id_value) if github_run.get("conclusion") != "success" else []
@@ -566,7 +572,7 @@ class BenchmarkIndexer:
         requested_scope = requested.get("scope") or run_metadata.get("requested_scope") or run_metadata.get("run_scope")
         requested_group = requested.get("group") or run_metadata.get("requested_group") or run_metadata.get("group")
         reports = (
-            self._artifact_reports(pipeline_name, reader, requested_group)
+            self._artifact_reports(pipeline_name, reader, requested_group, v2=v2)
             if reader is not None and isinstance(pipeline_name, str)
             else []
         )
@@ -667,13 +673,18 @@ class BenchmarkIndexer:
         pipeline_name: str,
         reader: JsonArtifactReader,
         requested_group: Any,
+        *,
+        v2: bool = False,
     ) -> list[tuple[str, str, dict[str, Any]]]:
         reports: list[tuple[str, str, dict[str, Any]]] = []
-        for dimension in KNOWN_DIMENSIONS:
-            relative_path = f"{pipeline_name}/{dimension}/_evaluation_report.json"
+        for dimension in V2_SUBSETS if v2 else KNOWN_DIMENSIONS:
+            directory = f"parsebench-2/{dimension}/{pipeline_name}" if v2 else f"{pipeline_name}/{dimension}"
+            relative_path = f"{directory}/_evaluation_report.json"
             report = _object(reader.read_json(relative_path))
             if report:
                 reports.append((dimension, relative_path, report))
+        if v2:
+            return reports
         root_path = f"{pipeline_name}/_evaluation_report.json"
         root_report = _object(reader.read_json(root_path))
         if root_report:
@@ -747,6 +758,8 @@ class BenchmarkIndexer:
         report: Mapping[str, Any],
         reader: JsonArtifactReader,
     ) -> None:
+        v2 = dataset.get("repository") == V2_REPOSITORY
+        result_directory = PurePosixPath(report_path).parent.as_posix() if v2 else pipeline_name
         failed_count = _integer(report.get("failed")) or 0
         dimension_row = {
             "run_id": run_id,
@@ -807,6 +820,8 @@ class BenchmarkIndexer:
             source_path = _normalized_source_path(example.get("source_relative_path"))
             if source_path is None and diagnostic is not None:
                 source_path = diagnostic[2]
+            if source_path is None and v2:
+                raise ValueError(f"Missing ParseBench 2 source locator for {test_id} in {report_path}")
             if source_path is None:
                 repository = dataset.get("repository")
                 resolved_sha = dataset.get("resolved_sha")
@@ -828,7 +843,15 @@ class BenchmarkIndexer:
                     "source_relative_path": source_path,
                     "source_media_type": source_media_type,
                     "tags": [str(tag) for tag in _array(example.get("tags"))],
-                    "ground_truth_locator": {"dimension": dimension, "test_id": test_id},
+                    "ground_truth_locator": {
+                        "dimension": dimension,
+                        "test_id": test_id,
+                        **(
+                            {"relative_path": str(PurePosixPath(source_path).with_suffix(".test.json"))}
+                            if v2 and source_path
+                            else {}
+                        ),
+                    },
                     "metadata": {},
                     "updated_at": _now_expression_payload(),
                 }
@@ -844,11 +867,12 @@ class BenchmarkIndexer:
             if not isinstance(test_id, str) or test_id not in case_ids:
                 continue
             metrics = [_object(metric) for metric in _array(example.get("metrics"))]
-            primary_name, primary_score = _primary_metric(dimension, metrics)
+            primary_name, primary_score = _primary_metric(dimension, metrics, v2=v2)
             case_id = case_ids[test_id]
             diagnostic = diagnostic_locators.get(test_id)
             if diagnostic is not None:
                 diagnostic_by_case_id[case_id] = diagnostic
+            document_id = test_id.split("#q", 1)[0] if v2 else test_id
             result_row = {
                 "run_dimension_id": run_dimension_id,
                 "benchmark_case_id": case_id,
@@ -856,8 +880,8 @@ class BenchmarkIndexer:
                 "error": example.get("error"),
                 "primary_metric_name": primary_name,
                 "primary_score": primary_score,
-                "raw_relative_path": f"{pipeline_name}/{test_id}.raw.json",
-                "result_relative_path": f"{pipeline_name}/{test_id}.result.json",
+                "raw_relative_path": f"{result_directory}/{document_id}.raw.json",
+                "result_relative_path": f"{result_directory}/{document_id}.result.json",
                 "evaluated_at": example.get("evaluated_at"),
                 "job_id": example.get("job_id"),
                 "parse_job_id": example.get("parse_job_id"),

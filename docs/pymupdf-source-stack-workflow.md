@@ -43,8 +43,9 @@ resolved release or branch and commit in `_source_request.json` and the run
 summary. Current branches must expose the API required by the selected
 pipeline; Version Lab does not emulate older provider APIs.
 
-Dataset selection is separate: `current` resolves the selected dataset's
-branch, and an explicit full Hugging Face commit SHA remains supported.
+The **Dataset release and size** menu defaults to **ParseBench 2 (full)**.
+Choose **ParseBench 1 (full)** or **ParseBench 1 (quick, 15 cases)** to run v1.
+Each selection resolves the current Hugging Face branch to an immutable commit.
 Downloads use an immutable SHA cache and validate completeness before reuse.
 
 ## Build and runtime checks
@@ -75,8 +76,10 @@ metadata, output directory, and score report.
 
 ## Results and publishing
 
-Successful runs report category headline scores and their unweighted average
-in the GitHub summary and `_benchmark_scores.json`. Version Lab produces
+V2 runs publish the upstream six-dimension score from `_next_score.json` in
+the GitHub summary and `_benchmark_scores.json`. A missing dimension leaves
+the overall score unavailable. V1 runs report category headline scores and
+their unweighted average. Version Lab produces
 diagnostic sidecars after upstream evaluation has written its canonical
 reports. The React dashboard consumes separately versioned diagnostic data.
 

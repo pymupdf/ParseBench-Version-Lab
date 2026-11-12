@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
-from .model import DATASET_REPOSITORY, RunConfig
+from .model import RunConfig
 from .process import CommandRunner
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
@@ -41,7 +41,7 @@ def _validate_commit(repository: str, sha: str) -> str:
 
 
 def resolve_dataset(config: RunConfig, runner: CommandRunner) -> DatasetRevision:
-    repository = DATASET_REPOSITORY
+    repository = config.dataset_repository
     branch = config.dataset_branch
     requested = config.dataset_ref.strip().lower()
     if requested == "current":

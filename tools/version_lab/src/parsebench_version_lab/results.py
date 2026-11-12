@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import fmean
 from typing import Any
+
+from .model import V2_METRICS, V2_REPOSITORY, V2_SUBSETS
 
 DEFAULT_METRICS = {
     "table": "grits_trm_composite",
@@ -54,8 +56,11 @@ def finite_number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def headline_metric(dimension: str | None, metric_names: Collection[str]) -> str | None:
+def headline_metric(dimension: str | None, metric_names: Collection[str], *, v2: bool = False) -> str | None:
     """Choose the same headline metric for summaries, diagnostics, and indexing."""
+    if v2:
+        preferred = V2_METRICS.get(dimension or "")
+        return preferred if preferred in metric_names else None
     preferred = DEFAULT_METRICS.get(dimension or "", "rule_pass_rate")
     if preferred in metric_names:
         return preferred
@@ -144,3 +149,63 @@ def build_summary(scores: list[CategoryScore]) -> tuple[str, dict[str, Any]]:
         "categories": [asdict(category) for category in scores],
     }
     return "\n".join(lines), data
+
+
+def v2_pipeline_metadata(pipeline: str, read_json: Callable[[str], Any]) -> dict[str, Any]:
+    """Combine upstream inference counters and carry the scorer's weighted dimensions verbatim."""
+    summaries = []
+    config = {}
+    for subset in V2_SUBSETS:
+        metadata = read_json(f"parsebench-2/{subset}/{pipeline}/_metadata.json")
+        if metadata:
+            summaries.append(metadata["summary"])
+            config = metadata["pipeline"]
+    summary = {}
+    if summaries:
+        for key in ("total", "successful", "skipped", "failed", "total_latency_ms"):
+            summary[key] = sum(part.get(key, 0) for part in summaries)
+        summary["errors"] = [error for part in summaries for error in part.get("errors", [])]
+        summary["avg_latency_ms"] = round(summary["total_latency_ms"] / max(summary["successful"], 1), 2)
+        summary["success_rate"] = round(100 * summary["successful"] / max(summary["total"], 1), 2)
+    score = read_json(f"parsebench-2/_score/{pipeline}/_next_score.json")
+    if score:
+        summary["parsebench_2"] = {key: score[key] for key in ("next_score", "dimensions", "missing_dimensions")}
+    return {"summary": summary, "pipeline": config}
+
+
+def run_summary(output_dir: Path, pipeline: str, group: str, repository: str) -> tuple[str, dict[str, Any]]:
+    if repository != V2_REPOSITORY:
+        return build_summary(load_scores(output_dir / pipeline, group))
+
+    score_dir = output_dir / "parsebench-2"
+    combined = json.loads((score_dir / "_score" / pipeline / "_next_score.json").read_bytes())
+    scores = []
+    for subset in V2_SUBSETS if group == "all" else (group,):
+        report = json.loads((score_dir / subset / pipeline / "_evaluation_report.json").read_bytes())
+        metric = V2_METRICS[subset]
+        scores.append(
+            CategoryScore(
+                subset,
+                metric,
+                finite_number(report["aggregate_metrics"].get(f"avg_{metric}")),
+                report["total_examples"],
+            )
+        )
+    overall = combined["next_score"]
+    display = "N/A" if overall is None else f"{overall:.1%}"
+    lines = [f"## ParseBench 2 score: {display}", "", "| Dimension | Score |", "| --- | ---: |"]
+    for name, dimension in combined["dimensions"].items():
+        value = dimension["score"]
+        rendered = "N/A" if value is None else f"{value:.1%}"
+        lines.append(f"| {display_name(name)} | {rendered} |")
+    if group != "all":
+        category = scores[0]
+        subset_score = "N/A" if category.score is None else f"{category.score:.1%}"
+        lines.extend(("", f"{display_name(group)} subset ({category.evaluated_cases} cases): {subset_score}"))
+    return "\n".join(lines) + "\n", {
+        "overall_score": overall,
+        "overall_method": "parsebench_2_next_score",
+        "dimensions": combined["dimensions"],
+        "missing_dimensions": combined["missing_dimensions"],
+        "categories": [asdict(score) for score in scores],
+    }

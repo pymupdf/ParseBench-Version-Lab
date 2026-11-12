@@ -47,7 +47,7 @@ test(
       "case_results",
       new URLSearchParams({
         select:
-          "id,primary_metric_name,primary_score,result_relative_path,diagnostic_relative_path,diagnostic_schema_version,run_dimensions!inner(run_id,dimension),benchmark_cases!inner(test_id,pdf_relative_path,dataset_versions!inner(repository,resolved_sha))",
+          "id,primary_metric_name,primary_score,result_relative_path,diagnostic_relative_path,diagnostic_schema_version,run_dimensions!inner(run_id,dimension),benchmark_cases!inner(test_id,source_relative_path,source_media_type,ground_truth_locator,dataset_versions!inner(repository,resolved_sha))",
         "run_dimensions.run_id": `eq.${run.id}`,
         result_relative_path: "not.is.null",
         order: "primary_score.asc.nullslast,id.asc",
@@ -57,7 +57,11 @@ test(
     assert.ok(result?.result_relative_path);
     assert.ok(result?.diagnostic_relative_path);
     assert.equal(result?.diagnostic_schema_version, 3);
-    assert.ok(result?.benchmark_cases?.pdf_relative_path);
+    assert.ok(result?.benchmark_cases?.source_relative_path);
+    if (run.dataset_versions?.repository === "llamaindex/ParseBench-2") {
+      assert.ok(result.result_relative_path.startsWith(`parsebench-2/${result.run_dimensions.dimension}/`));
+      assert.match(result.benchmark_cases.ground_truth_locator.relative_path, /\.test\.json$/);
+    }
 
     const objectPath = `${run.gcs_prefix}/${result.result_relative_path}`
       .split("/")
@@ -92,11 +96,11 @@ test(
     assert.ok(Math.abs(diagnostic.primary_metric?.value - result.primary_score) < 1e-12);
 
     const dataset = result.benchmark_cases.dataset_versions;
-    const datasetPath = result.benchmark_cases.pdf_relative_path
+    const datasetPath = result.benchmark_cases.source_relative_path
       .split("/")
       .map(encodeURIComponent)
       .join("/");
-    const pdfResponse = await fetch(
+    const sourceResponse = await fetch(
       `https://huggingface.co/datasets/${dataset.repository}/resolve/${dataset.resolved_sha}/${datasetPath}`,
       {
         headers: {
@@ -105,14 +109,14 @@ test(
         },
       },
     );
-    assert.equal(pdfResponse.status, 206);
-    assert.match(pdfResponse.headers.get("content-type") ?? "", /application\/pdf/);
-    assert.match(pdfResponse.headers.get("content-range") ?? "", /^bytes 0-65535\//);
+    assert.equal(sourceResponse.status, 206);
+    assert.equal(sourceResponse.headers.get("content-type")?.split(";")[0], result.benchmark_cases.source_media_type);
+    assert.match(sourceResponse.headers.get("content-range") ?? "", /^bytes 0-\d+\/\d+$/);
     assert.ok(
       ["*", dashboardOrigin].includes(
-        pdfResponse.headers.get("access-control-allow-origin"),
+        sourceResponse.headers.get("access-control-allow-origin"),
       ),
     );
-    await pdfResponse.body?.cancel();
+    await sourceResponse.body?.cancel();
   },
 );

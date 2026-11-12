@@ -820,3 +820,70 @@ def test_indexer_discovers_single_group_report_at_pipeline_root(tmp_path: Path) 
     assert database.rows["benchmark_runs"][0]["coverage_status"] == "complete"
     assert database.rows["benchmark_runs"][0]["leaderboard_eligible"] is True
     assert database.rows["benchmark_runs"][0]["eligibility_reasons"] == []
+
+
+def test_v2_scores_and_case_locators_survive_ingestion(tmp_path: Path) -> None:
+    from parsebench_version_lab.coverage import inspect_dataset
+    from parsebench_version_lab.dashboard_diagnostics import upgrade_local_dashboard_diagnostic_trees
+    from parsebench_version_lab.evaluation_diagnostics import write_diagnostics_from_report
+    from parsebench_version_lab.model import V2_REPOSITORY, V2_SUBSETS
+    from parsebench_version_lab.results import run_summary
+
+    data = tmp_path / "data"
+    for subset in V2_SUBSETS:
+        write_json(data / subset / "page.test.json", {"test_rules": [{"type": "table", "pdf": "old/path.pdf"}]})
+        (data / subset / "page.jpg").touch()
+    (data / "dense_tables/page.md").write_text("Ground truth")
+    dataset = {
+        "repository": V2_REPOSITORY,
+        "resolved_sha": "a" * 40,
+        "profile": "full",
+        "manifest": inspect_dataset(data, v2=True),
+    }
+    out = tmp_path / "output"
+    report_dir = out / "parsebench-2/dense_tables/parser"
+    write_json(out / "_github_run.json", {"dataset": dataset, "pipeline": "parser", "group": "dense_tables"})
+    write_json(report_dir / "_metadata.json", {"pipeline": {"config": {}}, "summary": {"total": 1, "successful": 1}})
+    test_id = "dense_tables/page"
+    example = {
+        "test_id": test_id,
+        "example_id": test_id,
+        "pipeline_name": "parser",
+        "product_type": "parse",
+        "success": True,
+        "metrics": [{"metric_name": "table_next", "value": 0.5}],
+    }
+    write_json(
+        report_dir / "_evaluation_report.json",
+        {
+            "total_examples": 1,
+            "successful": 1,
+            "failed": 0,
+            "skipped": 0,
+            "aggregate_metrics": {"avg_table_next": 0.5},
+            "per_example_results": [example],
+        },
+    )
+    combined = {"next_score": None, "dimensions": {"tables": {"score": None}}, "missing_dimensions": ["tables"]}
+    write_json(out / "parsebench-2/_score/parser/_next_score.json", combined)
+    write_diagnostics_from_report(report_dir, test_cases_dir=data, dimension="dense_tables", v2=True)
+    upgrade_local_dashboard_diagnostic_trees(out)
+    _, summary = run_summary(out, "parser", "dense_tables", V2_REPOSITORY)
+    assert summary["overall_score"] is None
+    assert summary["categories"][0]["score"] == 0.5
+
+    db = FakeDatabase()
+    BenchmarkIndexer(db, FakeGithub()).index_run({"id": 123, "conclusion": "success"}, LocalArtifactReader(out))
+    run = db.rows["benchmark_runs"][0]
+    assert run["coverage_status"] == "complete"
+    assert run["effective_group"] == "dense_tables"
+    assert run["summary"]["parsebench_2"] == combined
+    case = db.rows["benchmark_cases"][0]
+    assert case["source_relative_path"] == "dense_tables/page.jpg"
+    assert case["source_media_type"] == "image/jpeg"
+    assert case["ground_truth_locator"]["relative_path"] == "dense_tables/page.test.json"
+    result = db.rows["case_results"][0]
+    assert result["primary_metric_name"] == "table_next"
+    assert result["result_relative_path"] == "parsebench-2/dense_tables/parser/dense_tables/page.result.json"
+    diagnostic = json.loads((out / result["diagnostic_relative_path"]).read_bytes())
+    assert diagnostic["expectations"][-1] == {"expected_markdown": "Ground truth"}

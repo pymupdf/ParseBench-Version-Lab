@@ -6,7 +6,7 @@ run-name: >-
       'PyMuPDF {0} · {1} · {2} · {3}',
       github.event.client_payload.pymupdf_version,
       github.event.client_payload.pymupdf_branch,
-      github.event.client_payload.run_scope == 'Quick test (15 cases)' && 'Quick 15' || 'Full ~2k',
+      github.event.client_payload.dataset || github.event.client_payload.run_scope,
       github.event.client_payload.group == 'All categories' && 'All' ||
         github.event.client_payload.group == 'Page layout' && 'Layout' ||
         github.event.client_payload.group
@@ -22,6 +22,7 @@ permissions:
   packages: read
 
 env:
+  DATASET_SELECTION: ${{ github.event.client_payload.dataset }}
   PIPELINE: pymupdf4llm_html_tables_rapidocr_v3
   PYMUPDF_RELEASE_TAG: ${{ github.event.client_payload.pymupdf_tag }}
   LAUNCHER_RUN_ID: ${{ github.event.client_payload.launcher_run_id }}
@@ -94,6 +95,7 @@ jobs:
       - name: Resolve exact ParseBench dataset commit
         id: dataset
         env:
+          DATASET_REPOSITORY: ${{ steps.config.outputs.dataset_repository }}
           DATASET_REF: ${{ steps.config.outputs.dataset_ref }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
           RUN_SCOPE: ${{ steps.config.outputs.run_scope }}
@@ -104,7 +106,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.config.outputs.data_dir }}
-          key: parsebench-dataset-${{ steps.dataset.outputs.sha }}
+          key: parsebench-dataset-${{ steps.config.outputs.dataset_version }}-${{ steps.dataset.outputs.sha }}
 
       - name: Checkout PyMuPDF
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -164,7 +166,7 @@ jobs:
           DATASET_SHA: ${{ steps.dataset.outputs.sha }}
           GROUP_SELECTION: ${{ github.event.client_payload.group }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
-          RUN_SCOPE_SELECTION: ${{ github.event.client_payload.run_scope }}
+          RUN_SCOPE_SELECTION: ${{ github.event.client_payload.dataset || github.event.client_payload.run_scope }}
         run: python3 "$WORKFLOW_SCRIPTS/write_run_summary.py"
 
       - name: Install ParseBench dependencies without selected PyMuPDF packages
@@ -244,6 +246,7 @@ jobs:
 
       - name: Run inference with PyMuPDF Document.to_markdown
         env:
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
           DATA_DIR: ${{ steps.config.outputs.data_dir }}
           GROUP: ${{ steps.config.outputs.group }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
@@ -251,6 +254,7 @@ jobs:
 
       - name: Run ParseBench evaluation
         env:
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
           DATA_DIR: ${{ steps.config.outputs.data_dir }}
           GROUP: ${{ steps.config.outputs.group }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}
@@ -258,6 +262,7 @@ jobs:
 
       - name: Generate ParseBench reports
         env:
+          DATASET_REPOSITORY: ${{ steps.dataset.outputs.repository }}
           DATA_DIR: ${{ steps.config.outputs.data_dir }}
           GROUP: ${{ steps.config.outputs.group }}
           OUTPUT_DIR: ${{ steps.config.outputs.output_dir }}

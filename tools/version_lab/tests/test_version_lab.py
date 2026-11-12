@@ -184,7 +184,13 @@ def test_github_workflow_builds_one_integrated_package() -> None:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     launcher = yaml.safe_load(WORKFLOW.with_name("pymupdf-source-stack-launch.yml").read_text(encoding="utf-8"))
     inputs = launcher[True]["workflow_dispatch"]["inputs"]  # PyYAML reads unquoted 'on' as True.
-    assert set(inputs) == {"pymupdf_branch", "run_scope", "group"}
+    assert set(inputs) == {"pymupdf_branch", "dataset", "group"}
+    assert inputs["dataset"]["default"] == "ParseBench 2 (full)"
+    assert inputs["dataset"]["options"] == [
+        "ParseBench 2 (full)",
+        "ParseBench 1 (full)",
+        "ParseBench 1 (quick, 15 cases)",
+    ]
     assert inputs["pymupdf_branch"]["default"] == "main"
     assert workflow[True] == {"repository_dispatch": {"types": ["parsebench-version-lab"]}}
     assert "github.event.client_payload.pymupdf_version" in workflow["run-name"]
@@ -401,6 +407,25 @@ def test_resolve_only_requires_git_but_not_build_tools(monkeypatch: pytest.Monke
     ensure_ready(resolve_only=True)
     with pytest.raises(RuntimeError, match="uv"):
         ensure_ready()
+
+
+def test_dataset_defaults_and_upstream_subset_contract():
+    from parse_bench.data.download import PARSEBENCH2_SUBSETS
+    from parse_bench.evaluation.next_score import NEXT_DIMENSIONS
+
+    from parsebench_version_lab.model import V2_METRICS, V2_SUBSETS
+
+    assert RunConfig().dataset_repository == "llamaindex/ParseBench-2"
+    assert RunConfig().run_scope == "full"
+    assert RunConfig(dataset="v1").dataset_repository == "llamaindex/ParseBench"
+    assert RunConfig(scope="quick").dataset == "v1"
+    with pytest.raises(ValueError, match="no quick split"):
+        RunConfig(dataset="v2", scope="quick")
+    assert set(V2_SUBSETS) == set(PARSEBENCH2_SUBSETS.values())
+    assert all(
+        any(slot.metric == metric and slot.subset == subset for slots in NEXT_DIMENSIONS.values() for slot in slots)
+        for subset, metric in V2_METRICS.items()
+    )
 
 
 def test_cli_plan_is_machine_readable(capsys: pytest.CaptureFixture[str]) -> None:

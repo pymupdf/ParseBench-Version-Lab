@@ -117,17 +117,19 @@ installed separately. Older packaging layouts and PyMuPDF 1.x are unsupported.
 `--pymupdf-branch` accepts an existing branch name, including feature branches.
 Release tags and arbitrary commit SHAs are rejected. All source branches are
 resolved to exact commits before checkout and recorded with the results.
-The dataset is selected automatically: quick runs use the current `test-data`
-branch and full runs use the current `main` branch, each pinned to its resolved
-Hugging Face commit for the entire run.
+Version Lab defaults to the full `llamaindex/ParseBench-2` dataset. Use
+`--group charts` (or another v2 subset) for a smaller v2 run. Select
+`--dataset v1` for the original benchmark or `--scope quick` for its
+15-document `test-data` split. Each run pins its selected dataset to an exact
+Hugging Face commit. Download failures are reported against that selection.
 
 ## Run
 
 In GitHub Actions, select **Run ParseBench Version Lab** and click **Run workflow**.
-The launcher keeps the three inputs: PyMuPDF branch, test size, and category.
+Choose the PyMuPDF branch, dataset release and size, and category in the launcher.
 It reads PyMuPDF's latest published GitHub release tag, then starts a separate
 **ParseBench Version Lab** benchmark named, for example,
-`PyMuPDF 2.0 · main · Full ~2k · All`. The launcher summary links to benchmark runs.
+`PyMuPDF 2.0 · main · ParseBench 2 (full) · All`. The launcher summary links to benchmark runs.
 The version in the title is the latest release label; the selected branch is
 still built and its exact installed version and commit are recorded in the results.
 The benchmark workflow definition runs from the default branch; its code and
@@ -157,7 +159,7 @@ Run the 15-document quick benchmark:
 uv run --project tools/version_lab version-lab run --scope quick
 ```
 
-Run the full benchmark, which typically takes around one hour:
+Run the full ParseBench 2 benchmark:
 
 ```shell
 uv run --project tools/version_lab version-lab run --scope full
@@ -216,8 +218,9 @@ Each run is stored under `tools/version_lab/.version-lab/run-*`. The main output
 - `run.json`: selected configuration, exact source commits, and status
 - `output/_benchmark_scores.md`: aggregate score summary
 - `output/_benchmark_scores.json`: machine-readable aggregate scores
-- `output/<pipeline>/_evaluation_report_dashboard.html`: HTML dashboard
-- `output/<pipeline>/**/_diagnostics/`: Version Lab diagnostic sidecars
+- `output/parsebench-2/_score/<pipeline>/_next_score.json` holds the upstream v2 score and six dimensions
+- `output/parsebench-2/<subset>/<pipeline>/` holds the v2 inference results, reports and diagnostics
+- `output/<pipeline>/` holds the v1 reports and diagnostics
 
 The dataset cache is stored under `tools/version_lab/.version-lab/cache/datasets/`. Use
 `--workspace PATH` to select another location.

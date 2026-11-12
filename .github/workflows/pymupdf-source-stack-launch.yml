@@ -2,7 +2,7 @@ name: Run ParseBench Version Lab
 
 run-name: >-
   ${{ format('Launch PyMuPDF · {0} · {1} · {2}', inputs.pymupdf_branch,
-      inputs.run_scope == 'Quick test (15 cases)' && 'Quick 15' || 'Full ~2k',
+      inputs.dataset,
       inputs.group == 'All categories' && 'All' || inputs.group) }}
 
 on:
@@ -13,16 +13,17 @@ on:
         required: true
         default: "main"
         type: string
-      run_scope:
-        description: "How much data should be tested?"
+      dataset:
+        description: "Dataset release and size"
         required: true
-        default: "Quick test (15 cases)"
+        default: "ParseBench 2 (full)"
         type: choice
         options:
-          - "Quick test (15 cases)"
-          - "Full benchmark (~2,000 pages)"
+          - "ParseBench 2 (full)"
+          - "ParseBench 1 (full)"
+          - "ParseBench 1 (quick, 15 cases)"
       group:
-        description: "Which document category should be tested?"
+        description: "Category (Text formatting is v1 only, options below it are v2 only)"
         required: true
         default: "All categories"
         type: choice
@@ -33,6 +34,15 @@ on:
           - "Page layout"
           - "Text content"
           - "Text formatting"
+          - "Headings"
+          - "Strikeout"
+          - "Underline"
+          - "Complex table headers"
+          - "Financial tables"
+          - "Insurance filing tables"
+          - "Dense tables"
+          - "Forms"
+          - "Fillable forms"
 
 permissions:
   contents: write # Required to send the repository_dispatch event.
@@ -56,6 +66,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PYMUPDF_BRANCH: ${{ inputs.pymupdf_branch }}
-          RUN_SCOPE_SELECTION: ${{ inputs.run_scope }}
+          DATASET_SELECTION: ${{ inputs.dataset }}
           GROUP_SELECTION: ${{ inputs.group }}
         run: python3 .github/scripts/pymupdf_source_stack/launch_benchmark.py

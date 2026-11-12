@@ -649,7 +649,8 @@ code {
 .score-leader-grid {
   display: grid;
   gap: 9px;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
 }
 
 .score-leader-card {
@@ -949,7 +950,8 @@ code {
 .workflow-dimension-scores {
   display: grid;
   gap: 4px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   min-width: 0;
 }
 
@@ -4649,6 +4651,7 @@ code {
   }
 
   .score-leader-grid {
+    grid-auto-flow: row;
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 

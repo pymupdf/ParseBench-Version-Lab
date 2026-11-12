@@ -4,21 +4,21 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 
 from common import append_summary, env, markdown_cell
-from configure import GROUPS, RUN_SCOPES, selected
+from configure import DEFAULT_SELECTION, run_selection
 
 
 def main() -> int:
     branch = env("PYMUPDF_BRANCH").strip()
     if not branch:
         raise SystemExit("A PyMuPDF branch name is required")
-    scope = env("RUN_SCOPE_SELECTION")
+    run_selection()
+    selection = os.environ.get("DATASET_SELECTION") or DEFAULT_SELECTION
     group = env("GROUP_SELECTION")
-    selected(RUN_SCOPES, scope, "test size")
-    selected(GROUPS, group, "document category")
     release_result = subprocess.run(
         ["gh", "api", "repos/pymupdf/PyMuPDF/releases/latest"],
         check=True,
@@ -36,7 +36,7 @@ def main() -> int:
             "pymupdf_version": tag.removeprefix("v"),
             "pymupdf_tag": tag,
             "pymupdf_branch": branch,
-            "run_scope": scope,
+            "dataset": selection,
             "group": group,
             "benchmark_ref": env("GITHUB_REF_NAME"),
             "benchmark_sha": env("GITHUB_SHA"),
@@ -49,9 +49,7 @@ def main() -> int:
         text=True,
         check=True,
     )
-    benchmark_url = (
-        f"{env('GITHUB_SERVER_URL')}/{repository}/actions/workflows/pymupdf-source-stack-parsebench.yml"
-    )
+    benchmark_url = f"{env('GITHUB_SERVER_URL')}/{repository}/actions/workflows/pymupdf-source-stack-parsebench.yml"
     append_summary(
         [
             "## Benchmark launched",
@@ -60,7 +58,7 @@ def main() -> int:
             "",
             f"- PyMuPDF release label: **{markdown_cell(tag)}**",
             f"- Branch to build: **{markdown_cell(branch)}**",
-            f"- Test size: {markdown_cell(scope)}",
+            f"- Dataset: {markdown_cell(selection)}",
             f"- Document category: {markdown_cell(group)}",
             "",
             "The benchmark runs separately. Its conclusion and results appear in the linked workflow.",

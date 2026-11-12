@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .coverage import inspect_dataset
 from .evaluation_diagnostics import write_diagnostics_from_report
+from .model import V2_REPOSITORY, V2_SUBSETS
 from .util import required_env, write_json
 
 DATASET_MARKER = ".parsebench-dataset-revision.json"
@@ -33,13 +34,24 @@ def download() -> None:
     data_dir = Path(required_env("DATA_DIR"))
     repository = required_env("DATASET_REPOSITORY")
     revision = required_env("DATASET_SHA")
+    v2 = repository == V2_REPOSITORY
+    dataset_key = "parsebench-2" if v2 else "parsebench"
     marker_path = data_dir / DATASET_MARKER
     expected_marker = {"repository": repository, "resolved_sha": revision}
     try:
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         marker = None
-    if marker == expected_marker and is_dataset_ready(data_dir):
+    cached = isinstance(marker, dict) and all(marker.get(key) == value for key, value in expected_marker.items())
+    cached = cached and is_dataset_ready(data_dir, dataset_key)
+    manifest = None
+    if cached and v2:
+        try:
+            manifest = inspect_dataset(data_dir, v2=True)
+            cached = manifest["manifest_sha256"] == marker.get("manifest_sha256")
+        except (OSError, ValueError):
+            cached = False
+    if cached:
         print(f"Reusing cached immutable dataset snapshot: {repository}@{revision}")
     else:
         if data_dir.exists():
@@ -76,8 +88,11 @@ def download() -> None:
                     flush=True,
                 )
                 time.sleep(delay)
-        if not is_dataset_ready(data_dir):
+        if not is_dataset_ready(data_dir, dataset_key):
             raise SystemExit(f"Dataset snapshot {repository}@{revision} is incomplete at {data_dir}")
+        if v2:
+            manifest = inspect_dataset(data_dir, v2=True)
+            expected_marker["manifest_sha256"] = manifest["manifest_sha256"]
         write_json(marker_path, expected_marker)
 
     output_dir = os.environ.get("OUTPUT_DIR")
@@ -85,11 +100,34 @@ def download() -> None:
         dataset_path = Path(output_dir) / "_dataset.json"
         if dataset_path.is_file():
             dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
-            dataset["manifest"] = inspect_dataset(data_dir)
+            dataset["manifest"] = manifest if manifest is not None else inspect_dataset(data_dir)
             write_json(dataset_path, dataset)
 
 
+def selected_v2_subsets() -> tuple[str, ...]:
+    group = required_env("GROUP")
+    if group == "all":
+        return V2_SUBSETS
+    if group not in V2_SUBSETS:
+        raise ValueError(f"Unknown ParseBench 2 subset: {group}")
+    return (group,)
+
+
 def inference() -> None:
+    if os.environ.get("DATASET_REPOSITORY") == V2_REPOSITORY:
+        for subset in selected_v2_subsets():
+            parse_bench(
+                "inference",
+                "run",
+                required_env("PIPELINE"),
+                "--input_dir",
+                str(Path(required_env("DATA_DIR")) / subset),
+                "--output_dir",
+                str(Path(required_env("OUTPUT_DIR")) / "parsebench-2" / subset),
+                "--max_concurrent",
+                "1",
+            )
+        return
     arguments = [
         "inference",
         "run",
@@ -143,6 +181,20 @@ def evaluate_group(group: str, report_dir: Path) -> None:
 
 
 def evaluate() -> None:
+    if os.environ.get("DATASET_REPOSITORY") == V2_REPOSITORY:
+        parse_bench(
+            "run",
+            required_env("PIPELINE"),
+            "--dataset",
+            "parsebench-2",
+            "--input_dir",
+            required_env("DATA_DIR"),
+            "--output_dir",
+            required_env("OUTPUT_DIR"),
+            "--skip_inference=True",
+            "--open_report=False",
+        )
+        return
     pipeline_output_dir = Path(required_env("OUTPUT_DIR")) / required_env("PIPELINE")
     group = required_env("GROUP")
     if group != "all":
@@ -174,6 +226,13 @@ def report() -> None:
     output_dir = Path(required_env("OUTPUT_DIR"))
     pipeline = required_env("PIPELINE")
     pipeline_output_dir = output_dir / pipeline
+    if os.environ.get("DATASET_REPOSITORY") == V2_REPOSITORY:
+        for subset in selected_v2_subsets():
+            report_dir = output_dir / "parsebench-2" / subset / pipeline
+            write_diagnostics_from_report(
+                report_dir, test_cases_dir=Path(required_env("DATA_DIR")), dimension=subset, v2=True
+            )
+        return
     if required_env("GROUP") != "all":
         regenerate(pipeline_output_dir)
         return

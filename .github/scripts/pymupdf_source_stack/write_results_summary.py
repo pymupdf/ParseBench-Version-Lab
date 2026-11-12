@@ -5,19 +5,24 @@ import json
 from pathlib import Path
 
 from common import VERSION_LAB_SRC, append_summary, env, write_json  # noqa: F401
+from parsebench_version_lab.benchmark_index import LocalArtifactReader
 from parsebench_version_lab.coverage import execution_coverage
-from parsebench_version_lab.results import build_summary, load_scores
+from parsebench_version_lab.model import V2_REPOSITORY
+from parsebench_version_lab.results import run_summary, v2_pipeline_metadata
 
 
 def main() -> int:
     output_dir = Path(env("OUTPUT_DIR"))
     pipeline_output_dir = output_dir / env("PIPELINE")
     requested_group = env("GROUP")
-    scores = load_scores(pipeline_output_dir, requested_group)
-    markdown, data = build_summary(scores)
-    write_json(output_dir / "_benchmark_scores.json", data)
     dataset = json.loads((output_dir / "_dataset.json").read_text(encoding="utf-8"))
-    pipeline_metadata = json.loads((pipeline_output_dir / "_metadata.json").read_text(encoding="utf-8"))
+    repository = dataset["repository"]
+    markdown, data = run_summary(output_dir, env("PIPELINE"), requested_group, repository)
+    write_json(output_dir / "_benchmark_scores.json", data)
+    if repository == V2_REPOSITORY:
+        pipeline_metadata = v2_pipeline_metadata(env("PIPELINE"), LocalArtifactReader(output_dir).read_json)
+    else:
+        pipeline_metadata = json.loads((pipeline_output_dir / "_metadata.json").read_text(encoding="utf-8"))
     execution = execution_coverage(
         requested_scope=env("RUN_SCOPE"),
         requested_group=requested_group,
